@@ -5,7 +5,7 @@
 
 **Granularity:** fine (research/config.json)
 **Parallelization:** true — milestones and phases execute concurrently per explicit `Depends on:` DAG
-**Structural note:** GSD uses milestones → phases (this document). The **product** (`state`) uses Arc → Phase → Slice → Step, which is Thomas's product vocabulary and is built inside the phases themselves. One GSD milestone == one product Arc. GSD phases under a milestone == implementation slices that together ship that Arc.
+**Structural note:** GSD uses milestones → phases (this document). The **product** (`state`) uses Arc → Phase → Slice → Step, which is Thomas's product vocabulary and is built inside the phases themselves. One GSD milestone == one product Arc. A GSD phase DELIVERS capability into one or more product-runtime Slices — but is not itself a Slice object in `.state/`.
 
 ---
 
@@ -280,7 +280,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 ## M-A2 — Auth Coverage (5 Methods + Multi-Cred)
 
 **Version:** v0.1
-**Goal:** All five auth methods ship day one with chmod-0600 vault, filelock-guarded refresh, multi-cred round-robin, captured-header regression tests, and zero token leakage to logs — unblocking the Anthropic Pro/Max primary audience.
+**Goal:** (1) All five auth methods operational day one (Anthropic OAuth stealth, Gemini CLI, Antigravity, Copilot device-code, plain API-key). (2) Refresh safety + redaction + 0600 enforced (filelock-guarded concurrent refresh, structlog root-logger token redactor, chmod-0600 vault verified on every read). (3) Multi-cred fan-out (round-robin across per-provider credential arrays; rate-limit rotation). Unblocks the Anthropic Pro/Max primary audience.
 **Depends on:** (none — foundation; no runtime deps on A1 yet, auth.json is standalone)
 **Tier:** 1
 **Complexity:** L
@@ -301,7 +301,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **MCP tool surface delivered:** (none — shared library; auth commands exposed via `state` CLI)
 
-**Verifier:** Captured-header regression test (httpx transport mock) for every stealth request; P0 regression test suite (9 tests: P0-1..P0-8 + P0-13); 0600 verification on every read; refresh-lock double-check with concurrent-process harness.
+**Verifier:** (1) Captured-header regression (httpx transport mock) for all 5 auth methods' stealth requests. (2) P0 regression suite (9 tests: P0-1..P0-8 + P0-13) + chmod-0600 verification on every auth.json read + structlog redactor golden-file assertion. (3) Concurrent-refresh filelock double-check harness (two-process race).
 
 **Requirements covered:** AUTH-01, AUTH-02, AUTH-03, AUTH-04, AUTH-05, AUTH-06, AUTH-07, AUTH-08, AUTH-09, AUTH-10, AUTH-11, AUTH-12, AUTH-13
 
@@ -510,7 +510,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements covered:** WRK-01, WRK-02, WRK-03, WRK-04, WRK-05, WRK-06, WRK-07, WRK-08, WRK-09
 
 **Success criteria:**
-1. User can run 5 Slices concurrently and see 5 worktrees with deterministic branch names `slice/<arc>/<phase>/<slice-id>`
+1. User can run 5 Slices concurrently and see 5 worktrees with deterministic branch names `slice/<arc-id>/<product-phase-id>/<slice-id>`
 2. Aborting a Slice mid-bootstrap leaves the repo + `.state/` in the pre-bootstrap state (atomic transactional)
 3. User can `state snapshot revert <step-id>` and see Steps N..last reverted without touching earlier Steps in the same Slice
 4. A crashed Slice leaving a locked worktree gets cleaned up within 24 hours (nightly GC)
@@ -536,7 +536,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements:** WRK-02
 **Parallelizable:** yes with M-A4.P2
 
-#### Phase M-A4.P4 — Deterministic branch + worktree naming (`slice/<arc>/<phase>/<slice-id>`)
+#### Phase M-A4.P4 — Deterministic branch + worktree naming (`slice/<arc-id>/<product-phase-id>/<slice-id>`)
 **Goal:** Name generator with collision detection.
 **Depends on:** M-A4.P1
 **Requirements:** WRK-05
@@ -1205,7 +1205,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Depends on:** M-A11
 **Tier:** 2
 **Complexity:** M
-**P0 pitfalls owned:** P0-12 (MCP tool-name collision)
+**P0 pitfalls owned:** P0-12 (MCP tool-name collision) (shared with M-A13)
 
 **Opencode surface extended:**
 - `state-inputs/opencode/packages/opencode/src/mcp/index.ts` (client side)
@@ -1422,7 +1422,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements:** BLD-01
 **Parallelizable:** yes with P3
 
-#### Phase M-A14.P3 — Slice/Phase/Arc scoping containers (simpler FSMs)
+#### Phase M-A14.P3 — Product Slice/Phase/Arc scoping containers (simpler FSMs)
 **Goal:** `planned → in_progress → shipped | abandoned`.
 **Depends on:** M-A14.P1
 **Requirements:** BLD-01
@@ -1446,8 +1446,8 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements:** BLD-05
 **Parallelizable:** yes with P7..P9
 
-#### Phase M-A14.P7 — Arc rollup verifier
-**Goal:** Aggregate Phase rollups plus Arc acceptance criteria.
+#### Phase M-A14.P7 — Product-Arc rollup verifier
+**Goal:** Aggregate product-Phase rollups plus product-Arc acceptance criteria.
 **Depends on:** M-A14.P6
 **Requirements:** BLD-06
 **Parallelizable:** yes with P8, P9
@@ -1458,7 +1458,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements:** BLD-07
 **Parallelizable:** yes with P9
 
-#### Phase M-A14.P9 — Security verifier (SQLi, path traversal, secret leak, shell meta)
+#### Phase M-A14.P9 — Security verifier (part 1 — input guards: SQLi, path traversal, secret leak, shell meta)
 **Goal:** Per-Step; diff-based; uses regex + libs for known patterns.
 **Depends on:** M-A14.P4
 **Requirements:** BLD-08, SEC-01, SEC-02, SEC-03
@@ -1724,7 +1724,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 ### Phases
 
 #### Phase M-A17.P1 — Build dashboard route (`state.build.dashboard`)
-**Goal:** `route.register`; Arc/Phase/Slice/Step hierarchy; burndown + verify-pass rate.
+**Goal:** `route.register`; product Arc/Phase/Slice/Step hierarchy (product-tier vocabulary, not GSD Milestone/Phase); burndown + verify-pass rate.
 **Depends on:** M-A9.P1, M-A14.P3
 **Requirements:** B-TUI-01
 **Parallelizable:** yes
@@ -2008,8 +2008,8 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 ### Phases
 
-#### Phase M-A20.P1 — Mode runtime factoring decision + shared plumbing (M-A18 refinement)
-**Goal:** Resolve SUMMARY Q2 — shared selector/drop/Kolb/observation emission in M-A18 kernel; modes consume. (Per roadmapper judgment: shared-in-kernel.)
+#### Phase M-A20.P1 — Shared plumbing implementation (SUMMARY Q2 resolution — hosted in M-A18 kernel)
+**Goal:** Implement shared plumbing (selector + drop-to-simpler + Kolb + observation emission) hosted in M-A18 kernel; four modes (P2–P5) consume. SUMMARY Q2 decision already resolved in STATE.md line 92 — this phase is scaffolding, not discussion.
 **Depends on:** M-A18.P11
 **Requirements:** (infrastructure)
 **Parallelizable:** no
