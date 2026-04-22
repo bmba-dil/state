@@ -50,7 +50,7 @@
 
 - [ ] **M-A14 — Build Kernel: Step FSM + Verifiers** — Step state machine, goal-backward verifier, rollups
 - [ ] **M-A15 — Build Core Commands (plan/execute/verify/ship)** — The canonical Build-mode cycle
-- [ ] **M-A16 — Build GSD Command Ports** — All 30 ported/redesigned GSD commands
+- [ ] **M-A16 — Build GSD Command Ports + Net-New Product-Hierarchy Commands** — GSD ports + net-new product-hierarchy scaffolding commands (new-arc/new-phase/new-slice/insert-slice/add-phase/remove-phase/multi-arc)
 - [ ] **M-A17 — Build TUI Extensions** — Build dashboard, Step detail, commit browser, gray-area dialog
 
 ### Tier 3b — Teach Domain Kernel (parallel with Tier 3a)
@@ -1573,10 +1573,12 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 ---
 
-## M-A16 — Build GSD Command Ports
+## M-A16 — Build GSD Command Ports + Net-New Product-Hierarchy Commands
+
+> **Disambiguator (vocabulary):** Commands named `new-phase`, `add-phase`, `remove-phase` in this milestone operate on the **product-Phase tier** (Arc → Phase → Slice → Step per PROJECT.md / CLAUDE.md lines 48–49). They are NET-NEW scaffolding — GSD has no Arcs or Slices. They are not GSD-phase ports. See PROJECT.md cardinal rules for the vocabulary boundary.
 
 **Version:** v0.5
-**Goal:** Port or redesign the 30 GSD commands as state-native Step workflows — code-review, intel, map-codebase, debug, forensics, pause/resume-work, thread, workstreams, stats, audit-uat, audit-milestone, docs-update, backlog/todos/notes, undo, ui-phase/review, autonomous, onboard/help, explore, brainstorm, scan, cleanup, reapply-patches, new-arc/phase/slice, insert-slice, add/remove-phase, multi-arc, review, set-quality/profile/settings, health, manager.
+**Goal:** Port existing GSD commands as state-native Step workflows — code-review, intel, map-codebase, debug, forensics, pause/resume-work, thread, workstreams, stats, audit-uat, audit-milestone, docs-update, backlog/todos/notes, undo, ui-phase/review, autonomous, onboard/help, explore, brainstorm, scan, cleanup, reapply-patches, review, set-quality/profile/settings, health, manager. Plus net-new product-hierarchy commands (no GSD equivalents): new-arc, new-phase (product-Phase tier), new-slice, insert-slice, add-phase, remove-phase, multi-arc.
 **Depends on:** M-A15
 **Tier:** 3a
 **Complexity:** XL
@@ -1593,7 +1595,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **MCP tool surface delivered (full semantics):** `code_review`, `debug_session`, `forensics`, `intel_refresh`, `pause_work`, `resume_work` (from M-A12 skeleton); plus CLI `state:build:*` commands
 
-**Verifier:** Each ported command has a golden-file fixture that exercises its input/output contract; commands that spawn subagents assert task completion; multi-Arc batch-planner produces valid DAG.
+**Verifier:** Three assertion classes — (a) file-emitter commands (new-arc, new-phase, new-slice, insert-slice, add-phase, remove-phase, docs-update, backlog/todos/notes, stats, health, etc.): golden-file fixture per command exercises input/output contract; (b) subagent-spawning commands (code-review, intel, forensics, debug, map-codebase): task-completion assertion against synthetic Step fixture; (c) batch/DAG commands (multi-arc, insert-slice, add-phase, remove-phase): DAG-validity assertion on generated product-Slice/Phase graph.
 
 **Requirements covered:** PORT-01 through PORT-30 (all 30 GSD port requirements)
 
