@@ -2604,7 +2604,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 1. User runs `uvx state install` on macOS or Linux and plugin + both MCP servers register automatically
 2. User runs `state update` and gets prompt to upgrade when newer version on PyPI
 3. User runs `state skills add <url>` and community skill appears in opencode's skill list
-4. All 16 P0 pitfalls have regression tests (TST-08) — green
+4. All 16 P0 pitfalls have regression tests (TST-08) — green; see P0-test matrix at `.state/build/p0-test-matrix.md`.
 5. All v1 documentation (8 guides) published and linked from README
 
 ### Phases
@@ -2652,19 +2652,19 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Parallelizable:** yes
 
 #### Phase M-A27.P8 — Full test infrastructure + P0 regression suite (all 16 pitfalls)
-**Goal:** pytest + pytest-asyncio (strict_asyncio), Hypothesis property tests, E2E opencode fixture, provider parity matrix, captured-header regression, mode-isolation import-graph, P0 regression tests.
+**Goal:** pytest + pytest-asyncio (strict_asyncio), Hypothesis property tests, E2E opencode fixture, provider parity matrix, captured-header regression, mode-isolation import-graph, P0 regression tests. Artifact: `.state/build/p0-test-matrix.md` mapping each P0-ID (P0-1..P0-16) → upstream regression-test path + owning milestone/phase + release-time re-run site.
 **Depends on:** M-A1, M-A2, M-A3, M-A4, M-A5, M-A6, M-A7, M-A8, M-A9, M-A10, M-A11, M-A12, M-A13, M-A14, M-A15, M-A16, M-A17, M-A18, M-A19, M-A20, M-A21, M-A22, M-A23, M-A24, M-A25, M-A26 (hard — each milestone's verifier phase must ship before P0-regression matrix is green)
 **Requirements:** TST-01, TST-02, TST-03, TST-04, TST-05, TST-06, TST-07, TST-08
 **Parallelizable:** yes
 
 #### Phase M-A27.P9 — Observability finalization (structlog, redactor, event-log forensics, CLI `state logs tail`)
-**Goal:** Final wiring; `state logs tail [--level] [--component]` CLI; OpenTelemetry hooks present but opt-in (v2).
+**Goal:** Final wiring; `state logs tail [--level] [--component]` CLI; OpenTelemetry hooks present but opt-in (v2). P0-14 release-time redactor regression re-runs here as the hand-off from M-A2.P10 — asserts no `sk-ant-*` / `sk-*` / `ya29.*` tokens leak to structlog output when `debug=true`.
 **Depends on:** M-A2.P10, M-A6.P7
 **Requirements:** OBS-01, OBS-02, OBS-03, OBS-04
 **Parallelizable:** yes
 
 #### Phase M-A27.P10 — Security baseline (path-traversal, prompt-injection, shell-meta, regex-DoS, JSON-bomb, chmod-0600 verifiers)
-**Goal:** All guards attached to every surface; per-Step security verifier (refinement of M-A14.P9); regression tests.
+**Goal:** All guards attached to every surface; per-Step security verifier (refinement of M-A14.P9); regression tests including chmod-0600 verifier (re-runs the P0-13 regression harness from M-A2.P2 — asserts auth.json chmod is verified on every read under concurrent access).
 **Depends on:** M-A14.P9, M-A2.P2
 **Requirements:** SEC-01, SEC-02, SEC-03, SEC-04, SEC-05, SEC-06
 **Parallelizable:** yes
