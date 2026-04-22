@@ -2722,5 +2722,11 @@ All 221 v1 REQ-IDs are mapped to exactly one phase. See `REQUIREMENTS.md` Tracea
 
 ---
 
+## Revision History
+
+- **2026-04-22 (quick-task-3):** Applied REVIEW-ROADMAP.md findings. MAJORs resolved: cross-file phase-count drift (267→256 across STATE.md + ROADMAP.md); Tier-1 parallel-safe accuracy (STATE.md line 42 + ROADMAP W1/W1-prep split); M-A27 P0-14 co-ownership with M-A2; M-A27 / P7 / P8 enumerated hard+soft depends-on replacing vacuous "most of M-A1..M-A24"; M-A11 / M-A14 / M-A20 verifier expansions naming all goal-declared artifacts; M-A16 relabeled to "Build GSD Command Ports + Net-New Product-Hierarchy Commands" with disambiguator + 3-class verifier split. MINORs batched: §2a domain-vocab fixes (structural note line 8, branch-naming fan-out lines 510+536, M-A14.P3/P7 product-prefixes, M-A17.P1 inline gloss); M-A2 goal+verifier 3-clause split; M-A14.P9 "part 1 — input guards" rename signaling M-A27.P10 hand-off; M-A20.P1 reframing as scaffolding (SUMMARY Q2 resolved); "shares" wording standardized via M-A12 reciprocal. P0 threading: P0-14 hand-off in M-A27.P9; P0-13 regression threaded through M-A27.P10; P0-test matrix artifact (`.state/build/p0-test-matrix.md`) declared in M-A27.P8 + success-criterion #4. Deferred: NIT §5b/§5c phase-level edges (M-A11.P3/P4, M-A9.P5, M-A17) — one-line TODO near ROADMAP DAG block; REQUIREMENTS.md 221/229 off-by-one (§4 REVIEW MINOR) — out of scope for this pass. Traceability: `.planning/quick/3-revise-roadmap-md-to-apply-review-roadma/` (CONTEXT + RESEARCH + this PLAN + SUMMARY).
+
+---
+
 *Roadmap created: 2026-04-22*
-*Last updated: 2026-04-22 after initial creation*
+*Last updated: 2026-04-22 — REVIEW-ROADMAP.md applied (see Revision History above).*
