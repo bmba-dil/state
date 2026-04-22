@@ -2578,9 +2578,10 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **Version:** v1.0
 **Goal:** v1 release — `pyproject.toml` with `uv_build`, `uvx state install` one-command installer, wheel includes plugin TS source + bun build output, `state update` auto-check, remote skill registry, release-notes generator, all documentation, full test infrastructure, security baseline verification, observability finalization.
-**Depends on:** most of M-A1..M-A24 (soft); M-A26 (cross-host verification)
+**Depends on:** M-A1, M-A8, M-A11, M-A12, M-A13, M-A14, M-A26 (hard); all other M-A1..M-A24 (soft — feature completeness)
 **Tier:** 4
 **Complexity:** M
+**P0 pitfalls owned:** P0-14 (shared with M-A2 — release-time redactor regression in M-A27.P9)
 
 **Opencode surface extended:**
 - `cfg.skills.urls` (skill registry)
@@ -2644,13 +2645,13 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 #### Phase M-A27.P7 — Documentation — all 8 guides (architecture, user, command ref, build-author, teach-author, plugin-dev, auth setup, portability)
 **Goal:** Written throughout earlier milestones but finalized here; cross-linked; version-locked.
-**Depends on:** M-A1..M-A26 (soft across all)
+**Depends on:** M-A1, M-A27.P1 (hard — docs source-of-truth + structure scaffold); all other M-A1..M-A26 (soft — feature-complete docs coverage)
 **Requirements:** DOC-01, DOC-02, DOC-03, DOC-04, DOC-05, DOC-06, DOC-07, DOC-08
 **Parallelizable:** yes
 
 #### Phase M-A27.P8 — Full test infrastructure + P0 regression suite (all 16 pitfalls)
 **Goal:** pytest + pytest-asyncio (strict_asyncio), Hypothesis property tests, E2E opencode fixture, provider parity matrix, captured-header regression, mode-isolation import-graph, P0 regression tests.
-**Depends on:** all milestones (verifiers threaded in)
+**Depends on:** M-A1, M-A2, M-A3, M-A4, M-A5, M-A6, M-A7, M-A8, M-A9, M-A10, M-A11, M-A12, M-A13, M-A14, M-A15, M-A16, M-A17, M-A18, M-A19, M-A20, M-A21, M-A22, M-A23, M-A24, M-A25, M-A26 (hard — each milestone's verifier phase must ship before P0-regression matrix is green)
 **Requirements:** TST-01, TST-02, TST-03, TST-04, TST-05, TST-06, TST-07, TST-08
 **Parallelizable:** yes
 
