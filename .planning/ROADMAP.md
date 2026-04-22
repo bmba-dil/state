@@ -1128,7 +1128,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **MCP tool surface delivered:** (none directly — infrastructure)
 
-**Verifier:** Switch mode from build→teach → build MCP server stopped, teach started within 3s; attempted `state.concept.observed` write while mode=build rejected at daemon; `state.build` importing `state.teach` fails CI.
+**Verifier:** All 6 layers individually tested — disk (M-A11.P2: `.state/build/` vs `.state/teach/` directory-presence assertion), MCP registration (M-A11.P3: build→teach switch stops build MCP server, starts teach within the <3s SLO at success-criterion #2 line 1134), plugin hooks (M-A11.P4: `command.execute.before` rejects cross-mode `/state:*`; `tool.execute.before` rejects cross-mode `mcp__state-*__` invocation), command dispatch (M-A11.P4: same layer), daemon HTTP middleware canonical gate (M-A11.P5: attempted `state.concept.observed` write while mode=build rejected with 403), Python import-graph lint (M-A11.P6: `state.build` importing `state.teach` fails CI). M-A11.P9 P0-11 regression suite is the integrating cross-mode-leakage test.
 
 **Requirements covered:** MODE-01, MODE-02, MODE-03, MODE-04, MODE-05, MODE-06, MODE-07
 
@@ -1397,7 +1397,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **MCP tool surface delivered (full semantics):** `verify_step`, `advance_step` (internally)
 
-**Verifier:** 10 golden-fixture Steps with known goal + committed code → assert verifier pass/fail matches expected; Slice rollup fails if any Step fails; cross-tier verifier catches regression when Arc A interacts with Arc B.
+**Verifier:** 10 golden-fixture Steps with known goal + committed code assert verifier pass/fail per Step FSM (M-A14.P2); goal-backward verifier (M-A14.P4) rejects mismatched must-haves; Slice rollup (M-A14.P5) fails if any child Step fails; product-Phase rollup (M-A14.P6) and product-Arc rollup (M-A14.P7) aggregate upward; cross-tier integration verifier (M-A14.P8) catches regression when product-Arc A interacts with product-Arc B (synthetic Arc-A/B fixture required); security verifier part-1 (M-A14.P9 — input guards) rejects SQLi/path-traversal/secret-leak/shell-meta inputs. M-A14.P11 10-Step golden-fixture suite is the integrating test.
 
 **Requirements covered:** BLD-01, BLD-02, BLD-03, BLD-04, BLD-05, BLD-06, BLD-07, BLD-08, BLD-09
 
@@ -1993,7 +1993,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 
 **MCP tool surface delivered (full semantics):** `mode_select` (surfaced via `concept_teach`)
 
-**Verifier:** Each mode runs a full concept teach via its own state machine; selector picks correct mode at each mastery boundary; manual override sticks; drop-to-simpler triggered by frustration signal (M-A18.P9).
+**Verifier:** Each mode FSM runs a full concept teach via its own state machine (PRIMM, Scaffolded, Socratic, Constructivist — M-A20.P2–P5); mastery-based selector picks correct mode at each boundary (<30% → PRIMM, 30–50% → Scaffolded, 50–70% → Socratic, 70–80% → Constructivist); manual override sticks until explicitly cleared (M-A20.P7); drop-to-simpler triggered by frustration signal from M-A18.P9 (M-A20.P8); per-mode temperature injection into `chat.params` (M-A20.P9); per-mode system-prompt templates applied (M-A20.P10). M-A20.P11 four-mode golden-fixture test is the integrating assertion.
 
 **Requirements covered:** MODE-P-01, MODE-S-01, MODE-SO-01, MODE-C-01, MODE-SEL-01, MODE-SEL-02, MODE-SEL-03
 
