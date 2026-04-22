@@ -74,12 +74,12 @@
 ## Milestone DAG (Dependencies)
 
 ```
-Tier 1 (all independent; no edges between them):
+Tier 1 (parallel-safe starts; M-A3 soft-after M-A2 for auth; M-A5 reacts to M-A1 events):
   M-A1 ─┐
   M-A2 ─┤
   M-A3 ─┤ (soft-after M-A2 for auth headers)
   M-A4 ─┤
-  M-A5 ─┘
+  M-A5 ─┘ (reactive to M-A1 events)
 
 Tier 2:
   M-A1, M-A2           ──► M-A6 ──► M-A7 ──┬─► M-A8 ──┐
@@ -103,6 +103,8 @@ Tier 4:
   most-of-M-A1..M-A24  ──► M-A27
 ```
 
+<!-- TODO: tighten phase-level depends-on edges (M-A11.P3/P4 → M-A8 phase specificity; M-A9.P5 → M-A6/M-A7 split; M-A17 → M-A14.P10 soft-dep) before M-A5 wave planning. See REVIEW-ROADMAP.md §5b/§5c. -->
+
 ### Critical Path
 
 **A1 → A6 → A7 → A8 → A11 → A12 → A14 → A15 → A16 → A27** (Build critical path)
@@ -113,7 +115,8 @@ Tier 4:
 
 | Wave | Parallel-safe group |
 |------|---------------------|
-| W1 | M-A1, M-A2, M-A3, M-A4, M-A5 |
+| W1 | M-A1, M-A2, M-A4 |
+| W1-prep | M-A3 (after M-A2 creds), M-A5 (after M-A1 events) |
 | W2 | M-A6 (after A1+A2) |
 | W3 | M-A7 (after A6) |
 | W4 | M-A8, M-A9 (after A7) |

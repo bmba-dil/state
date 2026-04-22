@@ -39,7 +39,7 @@
 - M-A4 — Worktree + Snapshot Service
 - M-A5 — DAG Scheduler
 
-All five Tier 1 milestones have zero predecessors and can run concurrently.
+All five Tier 1 milestones can START concurrently; M-A3 soft-depends on M-A2 (auth creds for provider tests — scaffolding parallel-safe) and M-A5 hard-depends on M-A1 (reactive to event-store stream). See ROADMAP.md lines 396 (M-A3) and 579 (M-A5).
 
 ### Critical path preview
 
