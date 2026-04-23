@@ -3,8 +3,8 @@
 **Milestone:** v1
 **Phase range:** 001–010
 **Status:** Active
-**Phases complete:** 2 / 10
-**Last activity:** 2026-04-23 — Phase 002 complete (Pydantic event schema: 29 data models, 29 typed events, discriminated unions, factory, 103 tests)
+**Phases complete:** 3 / 10
+**Last activity:** 2026-04-23 — Phase 003 complete (SQLite schema + numbered migrations: database.py, migrations.py, 8 tables + 6 indexes, 19 new tests, 126 total)
 
 ---
 
@@ -14,7 +14,7 @@
 |-------|------|--------|
 | 001 | project-scaffolding-pyproject-state-core | **Complete** |
 | 002 | pydantic-event-schema-all-28 | **Complete** |
-| 003 | sqlite-schema-numbered-migrations | Not started |
+| 003 | sqlite-schema-numbered-migrations | **Complete** |
 | 004 | writer-task | Not started |
 | 005 | syncevent-mirror-emitter | Not started |
 | 006 | startup-reconciliation | Not started |
