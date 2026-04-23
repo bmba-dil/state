@@ -7,6 +7,7 @@ deterministic JSON serialization, mode storage, single-transaction commit.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any, Protocol
@@ -16,6 +17,7 @@ from ulid import ULID
 
 from src.state_core.database import get_connection
 from src.state_core.schema import Mode
+from src.state_core.sync_mirror import SyncEventMirror
 
 
 class EventStore(Protocol):
@@ -31,6 +33,7 @@ class EventStore(Protocol):
         mode: Mode = "kernel",
         ts: str | None = None,
         id_: str | None = None,
+        mirror: SyncEventMirror | None = None,
     ) -> str: ...
 
     async def read_stream(
@@ -51,6 +54,7 @@ class SqliteEventStore:
         mode: Mode = "kernel",
         ts: str | None = None,
         id_: str | None = None,
+        mirror: SyncEventMirror | None = None,
     ) -> str:
         """Append an event row with ULID generation and seq enforcement.
 
@@ -58,6 +62,9 @@ class SqliteEventStore:
         reads and increments the per-aggregate sequence number, serializes
         *data* deterministically (sort_keys, compact separators), and commits
         atomically within a single transaction.
+
+        If *mirror* is provided, a fire-and-forget task is scheduled after
+        commit to POST the event to opencode's SyncEvent endpoint.
 
         Args:
             aggregate_type: Aggregate discriminator (e.g. 'step', 'arc').
@@ -69,6 +76,8 @@ class SqliteEventStore:
                 determinism during testing. Production callers should pass
                 an explicit timestamp.
             id_: ULID for the event. If None, auto-generated from system time.
+            mirror: Optional SyncEventMirror for fire-and-forget HTTP emission
+                to opencode.
 
         Returns:
             The ULID string of the newly-inserted event.
@@ -111,6 +120,18 @@ class SqliteEventStore:
             )
 
             await db.commit()
+
+        if mirror is not None:
+            event_row: dict[str, Any] = {
+                "id": id_,
+                "seq": seq,
+                "aggregate_id": aggregate_id,
+                "type": event_type,
+                "data": data,
+                "ts": ts,
+                "mode": mode,
+            }
+            asyncio.ensure_future(mirror.emit(event_row))
 
         return id_
 
