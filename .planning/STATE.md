@@ -1,6 +1,6 @@
 # STATE: state
 
-**Last updated:** 2026-04-23 — Phase 001 complete (project scaffolding + pyproject + package skeletons)
+**Last updated:** 2026-04-23 — Phase 002 complete (Pydantic event schema: 29 data models, 29 typed events, discriminated unions, factory, 103 tests)
 
 ---
 
@@ -22,8 +22,9 @@
 **Current tier:** Tier 1 (Foundation)
 **Current milestone:** v1 (Event Store Foundation) — Active
 **Current phase:** 001 (project-scaffolding-pyproject-state-core) — Complete
+**Previous phase:** 002 (pydantic-event-schema-all-28) — Complete
 
-**Phases complete:** 1 / 256
+**Phases complete:** 2 / 256
 **Milestones complete:** 0 / 27
 **v1 requirements satisfied:** 0 / 221
 
@@ -126,6 +127,7 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 | Phase | Description | Date | Plans |
 |-------|-------------|------|-------|
 | 001 | Project scaffolding + pyproject + state_core package skeleton | 2026-04-23 | [001-A](milestones/v1/phases/001-project-scaffolding-pyproject-state-core/001-A-pyproject-workspace-and-tooling.md), [001-B](milestones/v1/phases/001-project-scaffolding-pyproject-state-core/001-B-package-skeleton-and-directory-layout.md) |
+| 002 | Pydantic event schema for all 28+ event types | 2026-04-23 | [002-A](milestones/v1/phases/002-pydantic-event-schema-all-28/002-A-base-envelope-and-types.md), [002-B](milestones/v1/phases/002-pydantic-event-schema-all-28/002-B-per-aggregate-models.md), [002-C](milestones/v1/phases/002-pydantic-event-schema-all-28/002-C-tests-and-factories.md) |
 
 ### Quick Tasks Completed
 
@@ -135,8 +137,8 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:plan-phase 002`** (Pydantic event schema for all 28+ event types) — next v1 phase, parallelizable with 003.
-2. **Run `/gsd:plan-phase 003`** (SQLite schema + numbered migrations) — runs in parallel with 002.
+1. **Run `/gsd:plan-phase 003`** (SQLite schema + numbered migrations) — parallel-ready after 002, dependencies satisfied.
+2. **Run `/gsd:plan-phase 004`** (Writer task) — depends on 002 + 003.
 3. **Run `/gsd:plan-phase 011`** (AuthMethod protocol + Credential container) — parallel v2 start.
 4. As Tier 1 ships: unblock Tier 2 milestones in dependency order per ROADMAP.md DAG.
 

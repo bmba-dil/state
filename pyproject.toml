@@ -13,6 +13,7 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "filelock>=3.20.3",
     "pluggy>=1.6.0",
+    "python-ulid>=3.0",
     "pygit2>=1.19.2",
     "google-auth>=2.35",
     "google-auth-oauthlib>=1.2",
@@ -64,6 +65,7 @@ strict = true
 warn_unused_ignores = true
 explicit_package_bases = true
 namespace_packages = true
+
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
