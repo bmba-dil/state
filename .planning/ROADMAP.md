@@ -233,7 +233,7 @@ Tier 4 ends at M-A27 shipped — this is v1 release.
 **Requirements:** EVT-01, EVT-02
 **Parallelizable:** yes with M-A1.P2
 
-#### Phase M-A1.P4 — Writer task (single-writer aiosqlite + commit-then-emit)
+#### Phase M-A1.P4 — Writer task (single-writer aiosqlite + commit-then-emit) ✅
 **Goal:** Implement `EventStore.append()` with per-aggregate seq enforcement, monotonic guarantee, deterministic clock injection.
 **Depends on:** M-A1.P2, M-A1.P3
 **Requirements:** EVT-01, EVT-02, EVT-03, EVT-06

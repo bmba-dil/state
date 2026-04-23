@@ -1,6 +1,6 @@
 # STATE: state
 
-**Last updated:** 2026-04-23 — Phase 002 complete (Pydantic event schema: 29 data models, 29 typed events, discriminated unions, factory, 103 tests)
+**Last updated:** 2026-04-23 — Phase 004 complete (Writer task: SqliteEventStore.append() with per-aggregate seq enforcement, deterministic JSON, 28 new tests, 153 total, 0 lint)
 
 ---
 
@@ -21,12 +21,12 @@
 
 **Current tier:** Tier 1 (Foundation)
 **Current milestone:** v1 (Event Store Foundation) — Active
-**Current phase:** 001 (project-scaffolding-pyproject-state-core) — Complete
-**Previous phase:** 002 (pydantic-event-schema-all-28) — Complete
+**Current phase:** 004 (writer-task) — Complete
+**Previous phase:** 003 (sqlite-schema-numbered-migrations) — Complete
 
-**Phases complete:** 2 / 256
+**Phases complete:** 4 / 256
 **Milestones complete:** 0 / 27
-**v1 requirements satisfied:** 0 / 221
+**v1 requirements satisfied:** 6 / 221
 
 ```
 [#...........................................................] 0%
@@ -128,6 +128,8 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 |-------|-------------|------|-------|
 | 001 | Project scaffolding + pyproject + state_core package skeleton | 2026-04-23 | [001-A](milestones/v1/phases/001-project-scaffolding-pyproject-state-core/001-A-pyproject-workspace-and-tooling.md), [001-B](milestones/v1/phases/001-project-scaffolding-pyproject-state-core/001-B-package-skeleton-and-directory-layout.md) |
 | 002 | Pydantic event schema for all 28+ event types | 2026-04-23 | [002-A](milestones/v1/phases/002-pydantic-event-schema-all-28/002-A-base-envelope-and-types.md), [002-B](milestones/v1/phases/002-pydantic-event-schema-all-28/002-B-per-aggregate-models.md), [002-C](milestones/v1/phases/002-pydantic-event-schema-all-28/002-C-tests-and-factories.md) |
+| 003 | SQLite schema + numbered migrations | 2026-04-23 | [003-A](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-A-database-connection-and-event-migrations.md), [003-B](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-B-cache-tables-migration.md), [003-C](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-C-tests-for-database-and-migrations.md) |
+| 004 | Writer task (single-writer aiosqlite + commit-then-emit) | 2026-04-23 | [004-A](milestones/v1/phases/004-writer-task/004-A-writer-core-and-seq-enforcement.md), [004-B](milestones/v1/phases/004-writer-task/004-B-writer-tests.md) |
 
 ### Quick Tasks Completed
 
@@ -137,8 +139,8 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:plan-phase 003`** (SQLite schema + numbered migrations) — parallel-ready after 002, dependencies satisfied.
-2. **Run `/gsd:plan-phase 004`** (Writer task) — depends on 002 + 003.
+1. **Run `/gsd:plan-phase 005`** (SyncEvent mirror emitter) — depends on 004, parallel with 006.
+2. **Run `/gsd:plan-phase 006`** (Startup reconciliation) — depends on 004, parallel with 005.
 3. **Run `/gsd:plan-phase 011`** (AuthMethod protocol + Credential container) — parallel v2 start.
 4. As Tier 1 ships: unblock Tier 2 milestones in dependency order per ROADMAP.md DAG.
 
