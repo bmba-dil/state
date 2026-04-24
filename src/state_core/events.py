@@ -88,6 +88,7 @@ class SqliteEventStore:
             ts = "2026-01-01T00:00:00Z"
 
         async with get_connection() as db:
+            await db.execute("PRAGMA synchronous=FULL;")
             await db.execute("BEGIN IMMEDIATE")
 
             cursor = await db.execute(
@@ -160,7 +161,7 @@ class SqliteEventStore:
                 yield d
 
     async def get_unsynced_events(self) -> list[dict[str, Any]]:
-        """Return all events not yet synced to opencode, ordered by seq ASC.
+        """Return all events not yet synced to opencode, ordered by id (ULID = time-ordered).
 
         Loaded entirely into memory. At ~2KB per row, 10k events consume
         ~20MB. If memory proves problematic, add pagination (LIMIT/OFFSET).
@@ -175,7 +176,7 @@ class SqliteEventStore:
                 "SELECT id, aggregate_id, seq, type, data, mode, ts "
                 "FROM events "
                 "WHERE synced_to_opencode = 0 "
-                "ORDER BY seq ASC"
+                "ORDER BY id ASC"
             )
             rows = await cursor.fetchall()
             result: list[dict[str, Any]] = []
@@ -185,6 +186,63 @@ class SqliteEventStore:
                     d["data"] = json.loads(d["data"])
                 result.append(d)
             return result
+
+    async def repair_aggregate_seqs(self) -> list[dict[str, Any]]:
+        """Detect and repair gaps/duplicates in the *aggregate_seq* table.
+
+        Scans ``events`` for the max seq per aggregate and updates
+        ``aggregate_seq`` when a mismatch is found. This is the post-crash
+        recovery routine for P0-9 — after a crash with WAL corruption, the
+        ``aggregate_seq`` table may trail behind (or race ahead of) the
+        committed events.
+
+        Safe to call at any time (idempotent — no-op when already
+        consistent). The daemon should invoke this on startup, before
+        any consumer reads seq values.
+
+        Returns:
+            A list of repair dicts (``aggregate_id``, ``old_seq``,
+            ``new_seq``), one per repaired aggregate. Empty list when
+            already consistent.
+        """
+        async with get_connection() as db:
+            await db.execute("PRAGMA synchronous=FULL;")
+            await db.execute("BEGIN IMMEDIATE")
+
+            cursor = await db.execute(
+                "SELECT aggregate_id, MAX(seq) AS max_seq "
+                "FROM events GROUP BY aggregate_id"
+            )
+            event_max = await cursor.fetchall()
+
+            repairs: list[dict[str, Any]] = []
+            for row in event_max:
+                agg_id: str = row["aggregate_id"]
+                max_seq: int = row["max_seq"]
+
+                cursor = await db.execute(
+                    "SELECT seq FROM aggregate_seq WHERE aggregate_id = ?",
+                    (agg_id,),
+                )
+                seq_row = await cursor.fetchone()
+                current_seq: int = seq_row[0] if seq_row else 0
+
+                if current_seq != max_seq:
+                    await db.execute(
+                        "INSERT OR REPLACE INTO aggregate_seq "
+                        "(aggregate_id, seq, updated_at) "
+                        "VALUES (?, ?, ?)",
+                        (agg_id, max_seq, "2026-01-01T00:00:00Z"),
+                    )
+                    repairs.append({
+                        "aggregate_id": agg_id,
+                        "old_seq": current_seq,
+                        "new_seq": max_seq,
+                    })
+
+            await db.commit()
+
+        return repairs
 
     async def count_unsynced_events(self) -> int:
         """Return the count of events where synced_to_opencode = 0.

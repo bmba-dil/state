@@ -1,9 +1,16 @@
-"""Async SQLite connection factory with WAL mode, synchronous=NORMAL, path resolution.
+"""Async SQLite connection factory with WAL mode, synchronous=FULL, path resolution.
 
 Every daemon connection goes through this module to enforce:
 - WAL journal mode (PRAGMA journal_mode=WAL)
-- synchronous = NORMAL (balance safety vs throughput)
+- synchronous = FULL (fsync on every commit — crash-safe default)
 - Configurable path via STATE_DB_PATH env var, defaulting to .state/events.sqlite
+
+Belt-and-suspenders pattern
+----------------------------
+The connection default is synchronous=FULL. Critical writer methods in
+``events.py`` (``append()``, ``repair_aggregate_seqs()``) also set
+``PRAGMA synchronous=FULL`` inline as defense-in-depth, so even if the
+default ever changes, those hot paths remain fsync-safe.
 """
 
 from __future__ import annotations
@@ -31,20 +38,20 @@ def _resolve_db_path() -> Path:
 
 @asynccontextmanager
 async def get_connection() -> AsyncIterator[aiosqlite.Connection]:
-    """Open a connection to the event store with WAL + synchronous=NORMAL.
+    """Open a connection to the event store with WAL + synchronous=FULL.
 
     Ensures the parent directory exists, then opens the database
     and applies the required pragmas on every connection open.
 
     Yields:
-        An aiosqlite.Connection with WAL mode and synchronous=NORMAL.
+        An aiosqlite.Connection with WAL mode and synchronous=FULL.
     """
     db_path = _resolve_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(str(db_path)) as db:
         db.row_factory = aiosqlite.Row
         await db.execute("PRAGMA journal_mode=WAL;")
-        await db.execute("PRAGMA synchronous=NORMAL;")
+        await db.execute("PRAGMA synchronous=FULL;")
         yield db
 
 
