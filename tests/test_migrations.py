@@ -202,6 +202,7 @@ async def test_all_indexes_exist() -> None:
         "idx_events_agg",
         "idx_events_ts",
         "idx_events_unsynced",
+        "idx_events_agg_seq",
         "idx_steps_slice",
         "idx_steps_state",
         "idx_concepts_learner",
