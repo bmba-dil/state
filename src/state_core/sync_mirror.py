@@ -46,15 +46,20 @@ class SyncEventMirror:
         self._directory = directory or Path.cwd()
         self._client = httpx.AsyncClient()
 
-    async def emit(self, event_row: dict[str, Any]) -> None:
+    async def emit(self, event_row: dict[str, Any]) -> bool:
         """POST a single event to opencode's ``/sync/replay`` endpoint.
 
         This method is designed to be called from within an ``asyncio.create_task``.
         It catches all exceptions internally — never propagates to the caller.
+        Instead, it returns a bool indicating whether delivery succeeded.
 
         Args:
             event_row: A dict with keys matching ``events`` table columns:
                 ``id``, ``aggregate_id``, ``seq``, ``type``, ``data``.
+
+        Returns:
+            ``True`` if the event was successfully delivered and marked synced;
+            ``False`` if all retry attempts failed.
         """
         url = resolve_opencode_url()
         replay_url = f"{url}{SYNC_REPLAY_PATH}"
@@ -84,7 +89,7 @@ class SyncEventMirror:
                     await self._mark_synced(event_row["id"])
                     log.debug("sync ok", event_id=event_row["id"],
                               attempt=attempt)
-                    return
+                    return True
 
                 log.warning("sync failed (non-2xx)", event_id=event_row["id"],
                             status=response.status_code, attempt=attempt)
@@ -102,6 +107,7 @@ class SyncEventMirror:
         log.warning("sync permanently failed", event_id=event_row["id"],
                     url=replay_url)
         # synced_to_opencode stays 0 — Phase 006 will retry
+        return False
 
     async def _mark_synced(self, event_id: str) -> None:
         """Update the event row to mark it as successfully synced.

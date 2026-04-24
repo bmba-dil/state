@@ -158,3 +158,43 @@ class SqliteEventStore:
                 if isinstance(d.get("data"), str):
                     d["data"] = json.loads(d["data"])
                 yield d
+
+    async def get_unsynced_events(self) -> list[dict[str, Any]]:
+        """Return all events not yet synced to opencode, ordered by seq ASC.
+
+        Loaded entirely into memory. At ~2KB per row, 10k events consume
+        ~20MB. If memory proves problematic, add pagination (LIMIT/OFFSET).
+
+        Returns:
+            List of event row dicts with keys: id, aggregate_id, seq,
+            type, data (deserialized from JSON), mode, ts.
+        """
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(
+                "SELECT id, aggregate_id, seq, type, data, mode, ts "
+                "FROM events "
+                "WHERE synced_to_opencode = 0 "
+                "ORDER BY seq ASC"
+            )
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                if isinstance(d.get("data"), str):
+                    d["data"] = json.loads(d["data"])
+                result.append(d)
+            return result
+
+    async def count_unsynced_events(self) -> int:
+        """Return the count of events where synced_to_opencode = 0.
+
+        Used as an idle suppression guard: if this returns 0, the sweep
+        loop skips its work cycle entirely.
+        """
+        async with get_connection() as db:
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM events WHERE synced_to_opencode = 0"
+            )
+            row = await cursor.fetchone()
+            return row[0] if row else 0
