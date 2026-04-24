@@ -15,9 +15,13 @@ from typing import Any, Protocol
 import aiosqlite
 from ulid import ULID
 
+import structlog
+
 from src.state_core.database import get_connection
 from src.state_core.schema import Mode
 from src.state_core.sync_mirror import SyncEventMirror
+
+log = structlog.get_logger(__name__)
 
 
 class EventStore(Protocol):
@@ -42,7 +46,55 @@ class EventStore(Protocol):
 
 
 class SqliteEventStore:
-    """Concrete EventStore backed by events.sqlite via database.py."""
+    """Concrete EventStore backed by events.sqlite via database.py.
+
+    Startup ordering: repair() -> migrate() -> reconciler(). Repair must
+    run BEFORE migration 0004 to clean duplicate seq values, otherwise
+    UNIQUE index creation will fail. This is enforced by daemon startup
+    calling run_repair_now() before migrate().
+    """
+
+    def __init__(self, run_repair: bool = False) -> None:
+        """Initialize the event store.
+
+        Args:
+            run_repair: Reserved for future use. Currently, repair runs
+                lazily on first append()/read_stream() or immediately
+                when run_repair_now() is called. Defaults to False.
+        """
+        self._repair_done = False
+
+    async def _maybe_repair(self, source: str = "unknown") -> None:
+        """Run repair once per session if not yet done.
+
+        Safe to call multiple times — the _repair_done flag ensures
+        repair_aggregate_seqs() is called at most once.
+
+        Args:
+            source: Description of what triggered the repair (e.g.
+                'append', 'read_stream', 'run_repair_now').
+        """
+        if not self._repair_done:
+            log.info("repair_triggered", source=source)
+            repairs = await self.repair_aggregate_seqs()
+            self._repair_done = True
+            if repairs:
+                log.info("repair_completed", count=len(repairs))
+
+    async def run_repair_now(self) -> list[dict[str, Any]]:
+        """Force repair immediately, regardless of _repair_done state.
+
+        Called by daemon startup BEFORE migrate() to ensure seq values
+        are consistent before migration 0004 creates the UNIQUE index.
+
+        Returns:
+            List of repair dicts from repair_aggregate_seqs().
+        """
+        log.info("repair_forced")
+        repairs = await self.repair_aggregate_seqs()
+        self._repair_done = True
+        log.info("repair_forced_complete", count=len(repairs))
+        return repairs
 
     async def append(
         self,
@@ -82,6 +134,8 @@ class SqliteEventStore:
         Returns:
             The ULID string of the newly-inserted event.
         """
+        await self._maybe_repair(source="append")
+
         if id_ is None:
             id_ = str(ULID())
         if ts is None:
@@ -144,6 +198,8 @@ class SqliteEventStore:
         Deserializes the *data* column from JSON text to a Python dict.
         Yields event rows as dicts.
         """
+        await self._maybe_repair(source="read_stream")
+
         async with get_connection() as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
