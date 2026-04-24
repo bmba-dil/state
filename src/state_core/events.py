@@ -52,6 +52,11 @@ class SqliteEventStore:
     run BEFORE migration 0004 to clean duplicate seq values, otherwise
     UNIQUE index creation will fail. This is enforced by daemon startup
     calling run_repair_now() before migrate().
+
+    **Phase 006 integration:** The StartupReconciler MUST NOT read seq
+    values until repair completes. This is enforced by daemon startup
+    calling run_repair_now() before migrate(), which runs before the
+    reconciler's first sweep.
     """
 
     def __init__(self, run_repair: bool = False) -> None:
