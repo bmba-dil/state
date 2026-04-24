@@ -284,6 +284,14 @@ class SqliteEventStore:
                 current_seq: int = seq_row[0] if seq_row else 0
 
                 if current_seq != max_seq:
+                    direction = "stale" if current_seq < max_seq else "future"
+                    log.info(
+                        "repair_seq_correction",
+                        aggregate_id=agg_id,
+                        old_seq=current_seq,
+                        new_seq=max_seq,
+                        direction=direction,
+                    )
                     await db.execute(
                         "INSERT OR REPLACE INTO aggregate_seq "
                         "(aggregate_id, seq, updated_at) "
@@ -295,6 +303,11 @@ class SqliteEventStore:
                         "old_seq": current_seq,
                         "new_seq": max_seq,
                     })
+
+            if not repairs:
+                log.info("repair_noop")
+            else:
+                log.info("repair_summary", count=len(repairs))
 
             await db.commit()
 
