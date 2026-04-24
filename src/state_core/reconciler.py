@@ -88,7 +88,14 @@ class StartupReconciler:
         return count
 
     async def _sweep_loop(self) -> None:
-        """Periodic sweep loop with idle suppression and exponential backoff."""
+        """Periodic sweep loop with idle suppression and exponential backoff.
+
+        Uses ``_reconcile_once()``'s return value (events emitted) rather than
+        a post-reconcile ``count_unsynced_events()`` to decide whether to
+        increment the backoff counter. This prevents inflation when Phase 005
+        adds new events during reconciliation — a zero-emit pass while unsent
+        events remain is the only signal that opencode is unreachable.
+        """
         while True:
             remaining = await self._db.count_unsynced_events()
             if remaining == 0:
@@ -96,10 +103,9 @@ class StartupReconciler:
                 await asyncio.sleep(self._sweep_interval)
                 continue
 
-            await self._reconcile_once()
+            emitted = await self._reconcile_once()
 
-            remaining_after = await self._db.count_unsynced_events()
-            if remaining_after == 0:
+            if emitted > 0:
                 self._consecutive_failures = 0
                 await asyncio.sleep(self._sweep_interval)
                 continue

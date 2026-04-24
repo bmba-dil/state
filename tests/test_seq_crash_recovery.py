@@ -732,8 +732,8 @@ class TestRepairLogging:
             structlog.reset_defaults()
 
         output = cap.getvalue()
-        assert "repair_aggregate_seqs" in output
-        assert "aggregates_repaired=1" in output or "aggregates_repaired': 1" in output
+        assert "repair_summary" in output
+        assert "count=1" in output
 
     async def test_repair_does_not_log_when_no_repairs(
         self, store: SqliteEventStore,
@@ -756,4 +756,4 @@ class TestRepairLogging:
 
         output = cap.getvalue()
         # Should NOT contain repair log line
-        assert "repair_aggregate_seqs" not in output
+        assert "repair_summary" not in output

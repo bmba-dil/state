@@ -42,8 +42,8 @@ async def test_connection_wal_mode(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_connection_synchronous_normal(tmp_path: Path) -> None:
-    """Connection has synchronous=NORMAL."""
+async def test_connection_synchronous_full(tmp_path: Path) -> None:
+    """Connection has synchronous=FULL."""
     db_path = tmp_path / ".state" / "events.sqlite"
     os.environ["STATE_DB_PATH"] = str(db_path)
     try:
@@ -53,7 +53,7 @@ async def test_connection_synchronous_normal(tmp_path: Path) -> None:
             assert row is not None
             sync_val = int(row[0])
             # 1 = NORMAL, 2 = FULL
-            assert sync_val == 1, f"Expected NORMAL (1), got {sync_val}"
+            assert sync_val == 2, f"Expected FULL (2), got {sync_val}"
     finally:
         os.environ.pop("STATE_DB_PATH", None)
 

@@ -1,6 +1,15 @@
+---
+gsd_state_version: 1.0
+milestone: v0.1
+milestone_name: milestone
+current_phase: 007
+status: unknown
+last_updated: "2026-04-24T15:53:53.053Z"
+---
+
 # STATE: state
 
-**Last updated:** 2026-04-23 — Phase 004 complete (Writer task: SqliteEventStore.append() with per-aggregate seq enforcement, deterministic JSON, 28 new tests, 153 total, 0 lint)
+**Last updated:** 2026-04-24 — Phase 007 complete (Monotonic seq crash-recovery: migration 0004 applied, UNIQUE(aggregate_id,seq) index, SqliteEventStore.run_repair flag, structlog logging, crash-mid-append Hypothesis simulation. 28 new tests, 240 total, 0 lint)
 
 ---
 
@@ -19,14 +28,16 @@
 
 ## Current Position
 
+Phase: 007 (monotonic-seq-crash-recovery) — COMPLETE
+Plan: 4 of 4
 **Current tier:** Tier 1 (Foundation)
 **Current milestone:** v1 (Event Store Foundation) — Active
-**Current phase:** 004 (writer-task) — Complete
-**Previous phase:** 003 (sqlite-schema-numbered-migrations) — Complete
+**Current phase:** 007
+**Previous phase:** 006 (startup-reconciliation) — Complete
 
-**Phases complete:** 4 / 256
+**Phases complete:** 7 / 256
 **Milestones complete:** 0 / 27
-**v1 requirements satisfied:** 6 / 221
+**v1 requirements satisfied:** 7 / 221
 
 ```
 [#...........................................................] 0%
@@ -63,7 +74,7 @@ v2 carries 9 of the 16 P0 pitfalls (Anthropic OAuth stealth flow); start early i
 | P0 pitfalls identified | 16 |
 | P0 pitfall regression tests committed | 0 / 16 |
 | Milestones shipped | 0 / 27 |
-| Total v1 phases shipped | 0 / 256 |
+| Total v1 phases shipped | 6 / 256 |
 | Total elapsed days since init | 0 |
 
 ---
@@ -130,6 +141,9 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 | 002 | Pydantic event schema for all 28+ event types | 2026-04-23 | [002-A](milestones/v1/phases/002-pydantic-event-schema-all-28/002-A-base-envelope-and-types.md), [002-B](milestones/v1/phases/002-pydantic-event-schema-all-28/002-B-per-aggregate-models.md), [002-C](milestones/v1/phases/002-pydantic-event-schema-all-28/002-C-tests-and-factories.md) |
 | 003 | SQLite schema + numbered migrations | 2026-04-23 | [003-A](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-A-database-connection-and-event-migrations.md), [003-B](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-B-cache-tables-migration.md), [003-C](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-C-tests-for-database-and-migrations.md) |
 | 004 | Writer task (single-writer aiosqlite + commit-then-emit) | 2026-04-23 | [004-A](milestones/v1/phases/004-writer-task/004-A-writer-core-and-seq-enforcement.md), [004-B](milestones/v1/phases/004-writer-task/004-B-writer-tests.md) |
+| 005 | SyncEvent mirror emitter | 2026-04-23 | (direct implementation, no plan files) |
+| 006 | Startup reconciliation | 2026-04-23 | [006-A](milestones/v1/phases/006-startup-reconciliation/006-A-startup-reconciler.md) |
+| 007 | Monotonic seq crash-recovery | 2026-04-24 | [007-A](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-RESEARCH.md), [007-B](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-VALIDATION.md), [007-C](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-PATTERNS.md) |
 
 ### Quick Tasks Completed
 
@@ -139,14 +153,15 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:plan-phase 005`** (SyncEvent mirror emitter) — depends on 004, parallel with 006.
-2. **Run `/gsd:plan-phase 006`** (Startup reconciliation) — depends on 004, parallel with 005.
-3. **Run `/gsd:plan-phase 011`** (AuthMethod protocol + Credential container) — parallel v2 start.
+1. **Run `/gsd:plan-phase 008`** (EventStore.read_stream with projection) — depends on 007, reads event projection.
+2. **Run `/gsd:plan-phase 011`** (AuthMethod protocol + Credential container) — parallel v2 start.
+3. **Run `/gsd:plan-phase 009`** (EventStore pagination or indexing optimization) — depends on 007.
 4. As Tier 1 ships: unblock Tier 2 milestones in dependency order per ROADMAP.md DAG.
 
 ### Plan-phase consumer guidance
 
 `/gsd:plan-phase <milestone>.<phase>` reads:
+
 - Phase goal + Requirements + Depends on from ROADMAP.md
 - Success criteria from the parent milestone
 - Opencode surface + source influence + artifacts written + verifier — informs must_haves

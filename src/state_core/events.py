@@ -1,8 +1,11 @@
 """Event store: SQLite writer + SyncEvent mirror for dual-write architecture.
 
-Uses database.py for connection factory (WAL mode, synchronous=NORMAL).
+Uses database.py for connection factory (WAL mode, synchronous=FULL).
 Phase 004: full append() with ULID generation, per-aggregate seq enforcement,
 deterministic JSON serialization, mode storage, single-transaction commit.
+Phase 007: fsync discipline (synchronous=FULL default + belt-and-suspenders),
+run_repair flag with lazy _maybe_repair on all read/write/count methods,
+UNIQUE(aggregate_id, seq) index migration 0004.
 """
 
 from __future__ import annotations
@@ -231,6 +234,8 @@ class SqliteEventStore:
             List of event row dicts with keys: id, aggregate_id, seq,
             type, data (deserialized from JSON), mode, ts.
         """
+        await self._maybe_repair(source="get_unsynced_events")
+
         async with get_connection() as db:
             db.row_factory = aiosqlite.Row
             cursor = await db.execute(
@@ -324,6 +329,8 @@ class SqliteEventStore:
         Used as an idle suppression guard: if this returns 0, the sweep
         loop skips its work cycle entirely.
         """
+        await self._maybe_repair(source="count_unsynced_events")
+
         async with get_connection() as db:
             cursor = await db.execute(
                 "SELECT COUNT(*) FROM events WHERE synced_to_opencode = 0"

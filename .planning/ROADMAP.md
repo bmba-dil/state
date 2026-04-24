@@ -239,17 +239,19 @@ Tier 4 ends at v27 shipped — this is v1 release.
 **Requirements:** EVT-01, EVT-02, EVT-03, EVT-06
 **Parallelizable:** no
 
-#### Phase 005 — SyncEvent mirror emitter
+#### Phase 005 — SyncEvent mirror emitter  ✓ Complete
 **Goal:** Implement post-commit SyncEvent emission over opencode HTTP (when reachable), marking `synced_to_opencode=1` per row.
 **Depends on:** 004
 **Requirements:** EVT-01
 **Parallelizable:** yes with v1.P6
+**Status:** Complete
 
-#### Phase 006 — Startup reconciliation (unsent-event replay to opencode)
+#### Phase 006 — Startup reconciliation (unsent-event replay to opencode)  ✓ Complete
 **Goal:** On daemon start, find rows with `synced_to_opencode=0` and emit; handle opencode-unreachable with exponential backoff.
 **Depends on:** 004
 **Requirements:** EVT-04
 **Parallelizable:** yes with v1.P5
+**Status:** Complete
 
 #### Phase 007 — Monotonic seq crash-recovery (P0-9 regression test harness)
 **Goal:** Add `fsync` discipline + recovery routine that detects and repairs gaps/duplicates in `aggregate_seq`; Hypothesis property-test that ANY crash offset + replay → monotonic sequence.
