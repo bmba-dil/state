@@ -471,3 +471,425 @@ class TestConceptProjection:
         assert row["id"] == "concept-01"
         # After drilled: mastery=0.8, then reviewed: 0.8 + 0.05 = 0.85
         assert row["mastery_probability"] == pytest.approx(0.85)
+
+
+# ── Full rebuild integration tests ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestFullRebuild:
+    """rebuild_all() integration — empty log, multi-aggregate, event count."""
+
+    async def test_rebuild_empty_log(self, store: SqliteEventStore) -> None:
+        """Zero events → all cache tables empty."""
+        projector = Projector(store)
+        count = await projector.rebuild_all()
+        assert count == 0
+        assert await _read_table("steps") == []
+        assert await _read_table("slices") == []
+        assert await _read_table("concepts") == []
+
+    async def test_rebuild_multi_aggregate(self, store: SqliteEventStore) -> None:
+        """Append events for 2 steps, 1 slice, 1 concept → rebuild → all rows correct."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "First"}),
+            ("step", "step-02", "state.step.planned", {"goal": "Second"}),
+            ("slice", "slice-01", "state.slice.planned", {"slice_number": 1, "title": "Core"}),
+            ("concept", "concept-01", "state.concept.introduced", {"name": "Abstraction"}),
+        ])
+
+        projector = Projector(store)
+        count = await projector.rebuild_all()
+        assert count == 4
+
+        steps = await _read_table("steps")
+        assert len(steps) == 2
+        step_ids = {s["id"] for s in steps}
+        assert "step-01" in step_ids
+        assert "step-02" in step_ids
+        states = {s["id"]: s["state"] for s in steps}
+        assert states["step-01"] == "discussing"
+        assert states["step-02"] == "planning"
+
+        slices = await _read_table("slices")
+        assert len(slices) == 1
+        assert slices[0]["state"] == "planned"
+
+        concepts = await _read_table("concepts")
+        assert len(concepts) == 1
+
+    async def test_rebuild_event_count(self, store: SqliteEventStore) -> None:
+        """N events → rebuild returns N."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.executed", {"changes_summary": str(i)})
+            for i in range(5)
+        ])
+        projector = Projector(store)
+        count = await projector.rebuild_all()
+        assert count == 5
+
+    async def test_rebuild_multi_event_per_aggregate(self, store: SqliteEventStore) -> None:
+        """3 events for same step → final state in cache reflects last event."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Start"}),
+            ("step", "step-01", "state.step.planned", {"goal": "Middle"}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "End"}),
+        ])
+        projector = Projector(store)
+        count = await projector.rebuild_all()
+        assert count == 3
+
+        rows = await _read_table("steps")
+        assert len(rows) == 1
+        assert rows[0]["state"] == "executing"
+
+
+# ── Rebuild idempotency ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestRebuildIdempotency:
+    """rebuild_all is deterministic and repeatable."""
+
+    async def test_rebuild_idempotent(self, store: SqliteEventStore) -> None:
+        """Two rebuilds produce identical cache tables."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Idempotent"}),
+            ("slice", "slice-01", "state.slice.planned", {"slice_number": 1, "title": "S1"}),
+            ("concept", "concept-01", "state.concept.introduced", {"name": "Idempotency"}),
+        ])
+
+        projector = Projector(store)
+
+        # First rebuild
+        await projector.rebuild_all()
+        checksum_1 = await _table_checksums()
+
+        # Second rebuild
+        await projector.rebuild_all()
+        checksum_2 = await _table_checksums()
+
+        assert checksum_1 == checksum_2
+
+    async def test_rebuild_deterministic(self, store: SqliteEventStore, tmp_path: Path) -> None:
+        """Same events → same projections in a fresh DB."""
+        import os
+        import uuid
+
+        # Append events in DB-A (the fixture DB)
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Det"}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "Work"}),
+        ])
+        projector = Projector(store)
+        await projector.rebuild_all()
+        checksum_a = await _table_checksums()
+
+        # Create DB-B with same events
+        unique = tmp_path / uuid.uuid4().hex
+        unique.mkdir(parents=True)
+        db_path_b = unique / ".state" / "events.sqlite"
+        os.environ["STATE_DB_PATH_B"] = str(db_path_b)
+        old_path = os.environ.get("STATE_DB_PATH", "")
+        os.environ["STATE_DB_PATH"] = str(db_path_b)
+
+        migrations_src = Path.cwd() / ".state" / "migrations"
+        migrations_dst = unique / ".state" / "migrations"
+        if migrations_src.exists():
+            shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+        await migrate()
+        store_b = SqliteEventStore()
+        await _append_events(store_b, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Det"}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "Work"}),
+        ])
+        projector_b = Projector(store_b)
+        await projector_b.rebuild_all()
+        checksum_b = await _table_checksums()
+
+        # Restore original STATE_DB_PATH
+        os.environ["STATE_DB_PATH"] = old_path
+        del os.environ["STATE_DB_PATH_B"]
+
+        assert checksum_a == checksum_b
+
+
+async def _table_checksums() -> dict[str, str]:
+    """Return a dict of {table_name: json_dumps_of_sorted_rows} for all cache tables."""
+    result: dict[str, str] = {}
+    for table in ("steps", "slices", "concepts"):
+        rows = await _read_table(table)
+        # Convert to JSON-serializable form (frontmatter is already parsed)
+        serializable = []
+        for row in rows:
+            r = dict(row)
+            if isinstance(r.get("frontmatter"), dict):
+                r["frontmatter"] = json.dumps(r["frontmatter"], sort_keys=True, separators=(",", ":"))
+            serializable.append(r)
+        result[table] = json.dumps(serializable, sort_keys=True)
+    return result
+
+
+# ── Crash atomicity ────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestCrashAtomicity:
+    """Transaction rollback on failure preserves pre-rebuild state."""
+
+    async def test_rebuild_atomicity_rollback(
+        self, store: SqliteEventStore, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """If a handler crashes mid-rebuild, cache tables preserve prior state."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Atomicity"}),
+        ])
+
+        # Pre-populate cache via rebuild
+        projector = Projector(store)
+        await projector.rebuild_all()
+        rows_before = await _read_table("steps")
+        assert len(rows_before) == 1
+        assert rows_before[0]["state"] == "discussing"
+
+        # Cause a crash during rebuild by making the discussed handler throw
+        original_handler = HANDLERS["state.step.discussed"]
+        monkeypatch.setitem(
+            HANDLERS, "state.step.discussed",
+            lambda current, data: (_ for _ in ()).throw(RuntimeError("simulated-crash")),
+        )
+
+        with pytest.raises(RuntimeError, match="simulated-crash"):
+            await projector.rebuild_all()
+
+        # Cache should be preserved (transaction rolled back)
+        rows_after = await _read_table("steps")
+        assert len(rows_after) == 1
+        assert rows_after[0]["state"] == "discussing"
+
+
+# ── Live update tests ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestLiveUpdate:
+    """apply_event() live mode — single and multi-event accumulation."""
+
+    async def test_live_single_event(self, store: SqliteEventStore) -> None:
+        """apply_event after append updates cache with one row."""
+        await store.append("step", "step-01", "state.step.executed", {"changes_summary": "Live test"})
+        projector = Projector(store)
+        events = [e async for e in store.read_stream("step-01")]
+        await projector.apply_event(events[0])
+
+        rows = await _read_table("steps")
+        assert len(rows) == 1
+        assert rows[0]["id"] == "step-01"
+        assert rows[0]["state"] == "executing"
+
+    async def test_live_event_accumulation(self, store: SqliteEventStore) -> None:
+        """Multiple apply_event calls build up state correctly."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Accum start"}),
+            ("step", "step-01", "state.step.planned", {"goal": "Accum middle"}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "Accum end"}),
+        ])
+
+        projector = Projector(store)
+        events = [e async for e in store.read_stream("step-01")]
+        for event in events:
+            await projector.apply_event(event)
+
+        rows = await _read_table("steps")
+        assert len(rows) == 1
+        assert rows[0]["id"] == "step-01"
+        assert rows[0]["state"] == "executing"
+        assert rows[0]["frontmatter"]["approach_summary"] == "Accum start"
+        assert rows[0]["frontmatter"]["goal"] == "Accum middle"
+        assert rows[0]["frontmatter"]["changes_summary"] == "Accum end"
+
+
+# ── Edge cases ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestEdgeCases:
+    """Boundary and edge-case behavior."""
+
+    async def test_unknown_event_type_ignored(self, store: SqliteEventStore) -> None:
+        """Event type not in HANDLERS does not crash or create cache rows."""
+        await store.append("step", "step-01", "state.step.nonexistent", {"data": "x"})
+        projector = Projector(store)
+        events = [e async for e in store.read_stream("step-01")]
+        await projector.apply_event(events[0])
+
+        assert await _read_table("steps") == []
+        assert await _read_table("slices") == []
+        assert await _read_table("concepts") == []
+
+    async def test_non_cache_aggregate_ignored(self, store: SqliteEventStore) -> None:
+        """Decision/arc/mode/auth events don't touch cache tables."""
+        await store.append("decision", "decision-01", "state.decision.asked", {"question": "Q?"})
+        projector = Projector(store)
+        events = [e async for e in store.read_stream("decision-01")]
+        await projector.apply_event(events[0])
+
+        assert await _read_table("steps") == []
+        assert await _read_table("slices") == []
+        assert await _read_table("concepts") == []
+
+    async def test_events_table_unchanged_after_rebuild(self, store: SqliteEventStore) -> None:
+        """Full rebuild does not modify or delete events."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.executed", {"changes_summary": str(i)})
+            for i in range(5)
+        ])
+
+        async with get_connection() as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM events")
+            before = (await cursor.fetchone())[0]
+        assert before == 5
+
+        projector = Projector(store)
+        await projector.rebuild_all()
+
+        async with get_connection() as db:
+            cursor = await db.execute("SELECT COUNT(*) FROM events")
+            after = (await cursor.fetchone())[0]
+
+        assert before == after
+
+    async def test_multi_mode_events_separate_aggregates(self, store: SqliteEventStore) -> None:
+        """Events for different aggregates don't interfere when interleaved."""
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "S1"}),
+            ("step", "step-02", "state.step.planned", {"goal": "S2"}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "S1 done"}),
+            ("step", "step-02", "state.step.executed", {"changes_summary": "S2 done"}),
+        ])
+
+        projector = Projector(store)
+
+        # Apply events for both aggregates
+        for agg_id in ("step-01", "step-02"):
+            events = [e async for e in store.read_stream(agg_id)]
+            for event in events:
+                await projector.apply_event(event)
+
+        rows = await _read_table("steps")
+        rows_dict = {r["id"]: r for r in rows}
+        assert rows_dict["step-01"]["state"] == "executing"
+        assert rows_dict["step-02"]["state"] == "executing"
+
+        # Verify independent frontmatter
+        assert rows_dict["step-01"]["frontmatter"]["approach_summary"] == "S1"
+        assert rows_dict["step-02"]["frontmatter"]["goal"] == "S2"
+
+
+# ── Hypothesis property test ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    n_events=st.integers(min_value=0, max_value=10),
+)
+async def test_property_rebuild_no_side_effects(
+    tmp_path: Path,
+    n_events: int,
+) -> None:
+    """Hypothesis property: rebuild never modifies events table."""
+    import os
+    import uuid
+
+    unique = tmp_path / uuid.uuid4().hex
+    unique.mkdir(parents=True)
+    db_path = unique / ".state" / "events.sqlite"
+    os.environ["STATE_DB_PATH"] = str(db_path)
+    migrations_src = Path.cwd() / ".state" / "migrations"
+    migrations_dst = unique / ".state" / "migrations"
+    if migrations_src.exists():
+        shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+    await migrate()
+    store = SqliteEventStore()
+
+    # Append n_events deterministically
+    for i in range(n_events):
+        await store.append(
+            "step", "step-01", "state.step.executed",
+            {"changes_summary": f"event-{i}"},
+        )
+
+    # Count events before
+    async with get_connection() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM events")
+        before = (await cursor.fetchone())[0]
+
+    # Rebuild
+    projector = Projector(db=store)
+    count = await projector.rebuild_all()
+
+    # Count events after
+    async with get_connection() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM events")
+        after = (await cursor.fetchone())[0]
+
+    assert before == after
+    assert count == n_events
+
+
+# ── Handler registry completeness ─────────────────────────────────────────
+
+
+class TestHandlerRegistry:
+    """Registry completeness: all expected handlers registered."""
+
+    def test_handler_registry_has_19_handlers(self) -> None:
+        """Registry has exactly 19 handlers."""
+        assert len(HANDLERS) == 19
+
+    def test_handler_registry_keys_are_valid_event_types(self) -> None:
+        """All keys start with 'state.'."""
+        assert all(k.startswith("state.") for k in HANDLERS)
+
+    def test_all_step_events_registered(self) -> None:
+        """All 10 state.step.* event types are registered."""
+        step_events = {
+            "state.step.discussed",
+            "state.step.planned",
+            "state.step.executed",
+            "state.step.verify_started",
+            "state.step.verify_passed",
+            "state.step.verify_failed",
+            "state.step.advanced",
+            "state.step.blocked",
+            "state.step.snapshotted",
+            "state.step.reverted",
+        }
+        registered_step = {k for k in HANDLERS if k.startswith("state.step.")}
+        assert registered_step == step_events
+
+    def test_all_slice_events_registered(self) -> None:
+        """All 4 state.slice.* event types are registered."""
+        slice_events = {
+            "state.slice.planned",
+            "state.slice.worktree_ready",
+            "state.slice.shipped",
+            "state.slice.reverted",
+        }
+        registered_slice = {k for k in HANDLERS if k.startswith("state.slice.")}
+        assert registered_slice == slice_events
+
+    def test_all_concept_events_registered(self) -> None:
+        """All 5 state.concept.* event types are registered."""
+        concept_events = {
+            "state.concept.introduced",
+            "state.concept.observed",
+            "state.concept.drilled",
+            "state.concept.mastered",
+            "state.concept.reviewed",
+        }
+        registered_concept = {k for k in HANDLERS if k.startswith("state.concept.")}
+        assert registered_concept == concept_events
