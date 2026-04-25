@@ -67,3 +67,23 @@ def fixture_copy(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
 
     return dest
+
+
+class TestGoldenFixtureIntegrity:
+    """Verify the golden fixture file integrity via SHA-256 checksum."""
+
+    def test_db_checksum_matches(self, checksums: dict[str, str]) -> None:
+        """Golden fixture DB SHA-256 must match recorded checksum."""
+        db_bytes = FIXTURE_DB.read_bytes()
+        actual = hashlib.sha256(db_bytes).hexdigest()
+        expected = checksums["db_sha256"]
+        assert actual == expected, (
+            f"Golden fixture DB checksum mismatch!\n"
+            f"  Expected: {expected}\n"
+            f"  Actual:   {actual}\n"
+            f"  The golden fixture has been modified or corrupted. "
+            f"Run `.state/fixtures/regenerate_fixture.py` to regenerate."
+        )
+
+    # Note: this test is synchronous — no DB connection needed.
+    # pytest.mark.asyncio is NOT required.
