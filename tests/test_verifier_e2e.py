@@ -179,3 +179,33 @@ class TestCrashRecoveryOnGolden:
         r2 = await store.repair_aggregate_seqs()
         assert r1 == [], f"First repair should be no-op, got {r1}"
         assert r2 == [], f"Second repair should be no-op, got {r2}"
+
+
+class TestModeFiltering:
+    """Mode-filtered event counts sum to the total on the golden fixture."""
+
+    async def test_mode_counts_sum_to_total(
+        self, fixture_copy: Path,
+    ) -> None:
+        """count_events("build") + count_events("teach") + count_events("kernel") == count_events()."""
+        store = SqliteEventStore()
+        total = await store.count_events()
+        assert total == 10000, f"Expected 10000 events, got {total}"
+
+        build = await store.count_events(mode="build")
+        teach = await store.count_events(mode="teach")
+        kernel = await store.count_events(mode="kernel")
+
+        assert build + teach + kernel == total, (
+            f"Mode counts don't sum to total: "
+            f"{build} + {teach} + {kernel} = {build + teach + kernel} != {total}"
+        )
+
+    async def test_each_mode_has_events(
+        self, fixture_copy: Path,
+    ) -> None:
+        """All three modes have at least one event."""
+        store = SqliteEventStore()
+        for mode in ("build", "teach", "kernel"):
+            count = await store.count_events(mode=mode)
+            assert count > 0, f"Mode '{mode}' has zero events in the golden fixture"
