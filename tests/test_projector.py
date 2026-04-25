@@ -21,6 +21,7 @@ from src.state_core.database import get_connection
 from src.state_core.events import SqliteEventStore
 from src.state_core.migrations import migrate
 from src.state_core.projector import HANDLERS, Projector
+from tests.test_events import AGGREGATE_FOR_EVENT
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -77,6 +78,58 @@ async def _read_table(table: str) -> list[dict[str, Any]]:
                 d["frontmatter"] = json.loads(d["frontmatter"])
             result.append(d)
         return result
+
+
+# ── Projector event data strategies ────────────────────────────────────────
+# Maps each of 34 event types to a Hypothesis strategy producing valid data
+# dicts. Non-projection event types (arc, phase, drill, decision, auth, mode)
+# are included to verify they don't cause crashes during rebuild.
+
+PROJECTOR_EVENT_DATA: dict[str, st.SearchStrategy[dict]] = {
+    # Step events (10 — handled by the projector)
+    "state.step.discussed": st.fixed_dictionaries({"approach_summary": st.just("Approach")}),
+    "state.step.planned": st.fixed_dictionaries({"goal": st.just("Goal"), "verify_contract": st.just([{"check": "x"}])}),
+    "state.step.executed": st.fixed_dictionaries({"changes_summary": st.just("Changes")}),
+    "state.step.verify_started": st.fixed_dictionaries({"contract": st.just([{"check": "x"}])}),
+    "state.step.verify_passed": st.fixed_dictionaries({"duration_ms": st.just(100)}),
+    "state.step.verify_failed": st.fixed_dictionaries({"reason": st.just("Bug"), "details": st.just("Details")}),
+    "state.step.advanced": st.fixed_dictionaries({"new_state": st.just("reviewing")}),
+    "state.step.blocked": st.fixed_dictionaries({"reason": st.just("Blocked")}),
+    "state.step.snapshotted": st.fixed_dictionaries({"snapshot_hash": st.just("abc"), "tier": st.just("1")}),
+    "state.step.reverted": st.fixed_dictionaries({"snapshot_hash": st.just("abc"), "reason": st.just("Revert")}),
+    # Slice events (4 — handled by the projector)
+    "state.slice.planned": st.fixed_dictionaries({"slice_number": st.just(1), "title": st.just("S"), "goal": st.just("G")}),
+    "state.slice.worktree_ready": st.fixed_dictionaries({"worktree_name": st.just("wt"), "branch": st.just("main"), "dir": st.just("/tmp")}),
+    "state.slice.shipped": st.fixed_dictionaries({"snapshot_hash": st.just("abc")}),
+    "state.slice.reverted": st.fixed_dictionaries({"reason": st.just("Bug")}),
+    # Concept events (5 — handled by the projector)
+    "state.concept.introduced": st.fixed_dictionaries({"concept_id": st.just("c01"), "name": st.just("C"), "prerequisites": st.just([])}),
+    "state.concept.observed": st.fixed_dictionaries({"observation": st.just("O"), "classification": st.just("correct")}),
+    "state.concept.drilled": st.fixed_dictionaries({"score": st.just(4.0), "items_attempted": st.just(5)}),
+    "state.concept.mastered": st.fixed_dictionaries({"mastery_probability": st.just(0.95)}),
+    "state.concept.reviewed": st.fixed_dictionaries({"mastery_delta": st.just(0.05)}),
+    # Arc events (3 — NOT handled by the projector)
+    "state.arc.created": st.fixed_dictionaries({"title": st.just("A"), "goal": st.just("G")}),
+    "state.arc.retired": st.fixed_dictionaries({"reason": st.just("Done")}),
+    "state.arc.updated": st.fixed_dictionaries({"changed_fields": st.just(["title"])}),
+    # Phase events (4 — NOT handled by the projector)
+    "state.phase.planned": st.fixed_dictionaries({"phase_number": st.just(1), "title": st.just("P"), "goal": st.just("G")}),
+    "state.phase.started": st.fixed_dictionaries({}),
+    "state.phase.verified": st.fixed_dictionaries({"passed": st.just(True), "summary": st.just("OK")}),
+    "state.phase.completed": st.fixed_dictionaries({"passed": st.just(True)}),
+    # Drill events (3 — NOT handled by the projector)
+    "state.drill.prepared": st.fixed_dictionaries({"question_count": st.just(5)}),
+    "state.drill.submitted": st.fixed_dictionaries({"answers": st.just([{"q": 1}])}),
+    "state.drill.graded": st.fixed_dictionaries({"score": st.just(8.0), "max_score": st.just(10.0)}),
+    # Mode events (1 — NOT handled by the projector)
+    "state.mode.activated": st.fixed_dictionaries({"mode_value": st.just("build")}),
+    # Decision events (2 — NOT handled by the projector)
+    "state.decision.asked": st.fixed_dictionaries({"question": st.just("Q"), "options": st.just([{"opt": "A"}])}),
+    "state.decision.made": st.fixed_dictionaries({"answer": st.just("A"), "reason": st.just("Best")}),
+    # Auth events (2 — NOT handled by the projector)
+    "state.auth.refreshed": st.fixed_dictionaries({"provider": st.just("anthropic"), "outcome": st.just("ok")}),
+    "state.auth.rotated": st.fixed_dictionaries({"provider": st.just("anthropic"), "index": st.just(1)}),
+}
 
 
 # ── Per-event-type projection tests ───────────────────────────────────────
@@ -838,6 +891,75 @@ async def test_property_rebuild_no_side_effects(
 
     assert before == after
     assert count == n_events
+
+
+@pytest.mark.asyncio
+@settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture], deadline=None)
+@given(
+    event_sequence=st.lists(
+        st.sampled_from(sorted(PROJECTOR_EVENT_DATA.keys())),
+        min_size=0, max_size=20,
+    ),
+    data=st.data(),
+)
+async def test_property_all_aggregates_rebuild_determinism(
+    tmp_path: Path,
+    event_sequence: list[str],
+    data: st.DataObject,
+) -> None:
+    """Hypothesis property: any event sequence → rebuild is deterministic.
+
+    For any sequence of event types (including non-projection types like
+    arc, phase, drill), running rebuild_all() twice produces identical
+    cache tables and the events table is never modified.
+    """
+    import os
+    import uuid
+
+    unique = tmp_path / uuid.uuid4().hex
+    unique.mkdir(parents=True)
+    db_path = unique / ".state" / "events.sqlite"
+    os.environ["STATE_DB_PATH"] = str(db_path)
+    migrations_src = Path.cwd() / ".state" / "migrations"
+    migrations_dst = unique / ".state" / "migrations"
+    if migrations_src.exists():
+        shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+    await migrate()
+    store = SqliteEventStore()
+
+    # Build a deterministic mapping from event_type to aggregate_type
+    event_to_agg = {et: AGGREGATE_FOR_EVENT[et] for et in PROJECTOR_EVENT_DATA if et in AGGREGATE_FOR_EVENT}
+
+    # Append the event sequence (each to its own aggregate instance)
+    for i, event_type in enumerate(event_sequence):
+        agg_type = event_to_agg.get(event_type, "step")
+        agg_id = f"{agg_type}-{i}"
+        event_data = data.draw(PROJECTOR_EVENT_DATA[event_type])
+        await store.append(agg_type, agg_id, event_type, event_data)
+
+    # Count events before rebuild (must match after rebuild — rebuild does not mutate events)
+    async with get_connection() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM events")
+        before = (await cursor.fetchone())[0]
+
+    # Run rebuild_all() twice
+    projector = Projector(db=store)
+    count1 = await projector.rebuild_all()
+    checksum_1 = await _table_checksums()
+
+    count2 = await projector.rebuild_all()
+    checksum_2 = await _table_checksums()
+
+    # Assertions
+    assert count1 == len(event_sequence)
+    assert count1 == count2  # Same number of events processed each time
+    assert checksum_1 == checksum_2, "Rebuild must be deterministic"
+
+    # Events table unchanged
+    async with get_connection() as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM events")
+        after = (await cursor.fetchone())[0]
+    assert before == after
 
 
 # ── Handler registry completeness ─────────────────────────────────────────
