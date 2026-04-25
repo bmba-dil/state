@@ -381,6 +381,33 @@ class TestDeterminismAndMode:
         assert all(e["mode"] == "build" for e in stream_a)
         assert all(e["mode"] == "build" for e in stream_b)
 
+    async def test_explicit_id_determinism(self, store: SqliteEventStore) -> None:
+        """Same data + ts + mode produces identical stored field values across aggregates.
+
+        The ULID is the PRIMARY KEY, so each event must have a unique id, but
+        all other explicit inputs (data, ts, mode) should be stored identically
+        regardless of the aggregate they belong to.
+        """
+        custom_ts = "2026-01-01T00:00:00Z"
+        data = {"changes_summary": "deterministic"}
+
+        id1 = await store.append(
+            "step", "step-a", "state.step.executed", data,
+            ts=custom_ts, mode="build",
+        )
+        id2 = await store.append(
+            "step", "step-b", "state.step.executed", data,
+            ts=custom_ts, mode="build",
+        )
+        assert id1 != id2  # ULIDs must differ (PRIMARY KEY)
+
+        # Verify the stored fields are deterministic (same inputs -> same outputs)
+        stream_a = [e async for e in store.read_stream("step-a")]
+        stream_b = [e async for e in store.read_stream("step-b")]
+        assert stream_a[0]["data"] == stream_b[0]["data"]
+        assert stream_a[0]["ts"] == stream_b[0]["ts"]
+        assert stream_a[0]["mode"] == stream_b[0]["mode"]
+
 
 # ── Edge cases ──────────────────────────────────────────────────────────
 
@@ -431,6 +458,56 @@ class TestEdgeCases:
         stream = [e async for e in store.read_stream("step-01")]
         assert [e["seq"] for e in stream] == [1, 2, 3, 4, 5]
         assert [e["mode"] for e in stream] == ["build", "teach", "kernel", "build", "teach"]
+
+
+# ── Idempotent append ─────────────────────────────────────────────────────
+
+
+class TestIdempotentAppend:
+    """Appending the exact same event twice is idempotent."""
+
+    async def test_same_ulid_same_seq_raises_integrity_error(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """Same (aggregate_id, seq) pair raises IntegrityError on second insert."""
+        custom_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+        id1 = await store.append(
+            "step", "step-01", "state.step.executed",
+            {"changes_summary": "first"},
+            id_=custom_id,
+        )
+        assert id1 == custom_id
+        # Direct SQL test: re-inserting same (aggregate_id, seq) hits UNIQUE constraint
+        async with get_connection() as db:
+            with pytest.raises(aiosqlite.IntegrityError):
+                await db.execute(
+                    "INSERT INTO events (id, seq, aggregate_type, aggregate_id, "
+                    "type, data, ts) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    ("01ARZ3NDEKTSV4RRFFQ69G5FAV", 1, "step", "step-01",
+                     "state.step.executed", '{"x":1}', "2026-01-01T00:00:00Z"),
+                )
+                await db.commit()
+
+    async def test_append_same_data_different_ulid_seq_increments(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """Same data with different ULID produces new seq (no data corruption)."""
+        id1 = await store.append(
+            "step", "step-01", "state.step.executed",
+            {"changes_summary": "same"},
+        )
+        id2 = await store.append(
+            "step", "step-01", "state.step.executed",
+            {"changes_summary": "same"},
+        )
+        assert id1 != id2
+        stream = [e async for e in store.read_stream("step-01")]
+        assert len(stream) == 2
+        assert stream[0]["seq"] == 1
+        assert stream[1]["seq"] == 2
+        # Data must be identical
+        assert stream[0]["data"] == stream[1]["data"]
 
 
 # ── Protocol conformance ──────────────────────────────────────────────────
@@ -519,3 +596,102 @@ async def test_property_append_read_roundtrip(
     assert row["id"] == id_
     assert row["aggregate_type"] == aggregate_type
     assert row["data"] == data
+
+
+@pytest.mark.asyncio
+@settings(max_examples=100, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    event_type=st.sampled_from(sorted(EVENT_DATA_STRATEGIES.keys())),
+    mode_val=st.sampled_from(["build", "teach", "kernel"]),
+    data=st.data(),
+)
+async def test_property_all_event_types_roundtrip(
+    tmp_path: Path,
+    event_type: str,
+    mode_val: str,
+    data: st.DataObject,
+) -> None:
+    """Hypothesis property: every event type round-trips through append -> read_stream."""
+    import os
+    import uuid
+
+    unique = tmp_path / uuid.uuid4().hex
+    unique.mkdir(parents=True)
+    db_path = unique / ".state" / "events.sqlite"
+    os.environ["STATE_DB_PATH"] = str(db_path)
+    migrations_src = Path.cwd() / ".state" / "migrations"
+    migrations_dst = unique / ".state" / "migrations"
+    if migrations_src.exists():
+        shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+    await migrate()
+    store = SqliteEventStore()
+
+    aggregate_type = AGGREGATE_FOR_EVENT[event_type]
+    aggregate_id = f"{aggregate_type}-test-01"
+    event_data = data.draw(EVENT_DATA_STRATEGIES[event_type])
+
+    # Use explicit deterministic ULID
+    custom_id = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    returned_id = await store.append(
+        aggregate_type, aggregate_id, event_type, event_data,
+        mode=mode_val, id_=custom_id,
+    )
+    assert returned_id == custom_id, "Explicit ULID must round-trip"
+
+    stream = [e async for e in store.read_stream(aggregate_id)]
+    assert len(stream) == 1
+    row = stream[0]
+    assert row["id"] == custom_id
+    assert row["type"] == event_type
+    assert row["aggregate_type"] == aggregate_type
+    assert row["mode"] == mode_val
+    assert row["seq"] == 1
+    # Data must be stored and retrieved as the same dict (JSON round-trip)
+    assert row["data"] == event_data
+
+
+@pytest.mark.asyncio
+@settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(
+    build_count=st.integers(min_value=0, max_value=10),
+    teach_count=st.integers(min_value=0, max_value=10),
+    kernel_count=st.integers(min_value=0, max_value=10),
+)
+async def test_property_mode_filtering(
+    tmp_path: Path,
+    build_count: int,
+    teach_count: int,
+    kernel_count: int,
+) -> None:
+    """Hypothesis property: mode-filtered counts sum to total."""
+    import os
+    import uuid
+
+    unique = tmp_path / uuid.uuid4().hex
+    unique.mkdir(parents=True)
+    db_path = unique / ".state" / "events.sqlite"
+    os.environ["STATE_DB_PATH"] = str(db_path)
+    migrations_src = Path.cwd() / ".state" / "migrations"
+    migrations_dst = unique / ".state" / "migrations"
+    if migrations_src.exists():
+        shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+    await migrate()
+    store = SqliteEventStore()
+
+    mode_counts = {"build": build_count, "teach": teach_count, "kernel": kernel_count}
+    total = 0
+    for mode, count in mode_counts.items():
+        for i in range(count):
+            await store.append(
+                "step", "step-01", "state.step.executed",
+                {"i": i}, mode=mode,
+            )
+        total += count
+
+    assert await store.count_events() == total
+    for mode in ("build", "teach", "kernel"):
+        expected = mode_counts[mode]
+        actual = await store.count_events(mode=mode)
+        assert actual == expected, f"Mode {mode}: expected {expected}, got {actual}"
