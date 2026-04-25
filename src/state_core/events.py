@@ -447,3 +447,69 @@ class SqliteEventStore:
                 if isinstance(d.get("data"), str):
                     d["data"] = json.loads(d["data"])
                 yield d
+
+    async def count_events(self, *, mode: str | None = None) -> int:
+        """Count events with optional mode filter.
+
+        Args:
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+
+        Returns:
+            Total event count (optionally filtered by mode).
+        """
+        await self._maybe_repair(source="count_events")
+
+        if mode is not None:
+            sql = "SELECT COUNT(*) FROM events WHERE mode = ?"
+            params: list[Any] = [mode]
+        else:
+            sql = "SELECT COUNT(*) FROM events"
+            params = []
+
+        async with get_connection() as db:
+            cursor = await db.execute(sql, params)
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+    async def get_last_events(
+        self, count: int = 10, *, mode: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the last N events ordered by id DESC, then reversed to ASC.
+
+        Args:
+            count: Number of events to return. Defaults to 10.
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+
+        Returns:
+            List of up to *count* event dicts in id ASC order (oldest first
+            within the window), with keys: id, seq, aggregate_type,
+            aggregate_id, type, data (deserialized), ts, mode.
+        """
+        await self._maybe_repair(source="get_last_events")
+
+        clauses: list[str] = [
+            "SELECT id, seq, aggregate_type, aggregate_id, type, data, ts, mode "
+            "FROM events WHERE 1=1"
+        ]
+        params: list[Any] = []
+
+        if mode is not None:
+            clauses.append("AND mode = ?")
+            params.append(mode)
+
+        clauses.append("ORDER BY id DESC LIMIT ?")
+        params.append(count)
+
+        sql = " ".join(clauses)
+
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, params)
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in reversed(rows):  # reverse to chronological order
+                d = dict(row)
+                if isinstance(d.get("data"), str):
+                    d["data"] = json.loads(d["data"])
+                result.append(d)
+            return result
