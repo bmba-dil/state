@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import typer
 
@@ -140,3 +141,52 @@ async def _do_replay(
 
     for ev in events:
         _print_event_line(ev)
+
+
+@events_app.command(name="export")
+def export(
+    from_id: str = typer.Option(None, "--from", help="ULID offset to start from"),
+    to_id: str = typer.Option(None, "--to", help="ULID offset to stop at"),
+    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    output_format: str = typer.Option("jsonl", "--format", help="Export format (jsonl only)"),
+    output: str = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
+) -> None:
+    """Export events in JSONL format."""
+    if output_format != "jsonl":
+        raise typer.BadParameter("Only --format=jsonl is supported in this version")
+    try:
+        asyncio.run(_do_export(
+            from_id=from_id, to_id=to_id, mode=mode, output=output, _output_format=output_format,
+        ))
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+async def _do_export(
+    from_id: str | None = None,
+    to_id: str | None = None,
+    mode: str | None = None,
+    output: str | None = None,
+    _output_format: str = "jsonl",
+) -> None:
+    """Export events in JSONL format."""
+    import sys
+
+    from src.state_core.events import SqliteEventStore
+
+    store = SqliteEventStore()
+    count = 0
+
+    if output is not None:
+        with open(output, "w") as fh:
+            async for ev in store.read_events_iter(from_id=from_id, to_id=to_id, mode=mode):
+                line = json.dumps(ev, sort_keys=True, separators=(",", ":"))
+                fh.write(line + "\n")
+                count += 1
+        typer.echo(f"Exported {count} events to {output}")
+    else:
+        async for ev in store.read_events_iter(from_id=from_id, to_id=to_id, mode=mode):
+            line = json.dumps(ev, sort_keys=True, separators=(",", ":"))
+            sys.stdout.write(line + "\n")
+            count += 1
