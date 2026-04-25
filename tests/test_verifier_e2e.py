@@ -22,7 +22,6 @@ import pytest
 
 from src.state_core.events import SqliteEventStore
 from src.state_core.projector import Projector
-from src.state_core.migrations import migrate
 
 # ── Paths ────────────────────────────────────────────────────────────────
 
@@ -120,32 +119,25 @@ class TestTripleChecksumAssertion:
         self, fixture_copy: Path, checksums: dict[str, str],
     ) -> None:
         """Rebuild projections, snapshot cache tables, SHA-256 match recorded value."""
-        import aiosqlite
-
         store = SqliteEventStore()
         projector = Projector(db=store)
         count = await projector.rebuild_all()
         assert count == 10000, f"Expected 10000 events, got {count}"
 
-        # Dump all three cache tables as sorted JSON
+        # Dump all three cache tables as sorted JSON.
+        # Must match the generator's exact approach: row_factory=None,
+        # frontmatter left as JSON string (not parsed to dict).
         snapshot: dict[str, list[dict]] = {}
         from src.state_core.database import get_connection
 
         for table in ("steps", "slices", "concepts"):
             async with get_connection() as db:
-                db.row_factory = aiosqlite.Row
                 cursor = await db.execute(f"SELECT * FROM {table} ORDER BY id")
+                columns = [desc[0] for desc in cursor.description]
                 rows = await cursor.fetchall()
-                rows_list: list[dict] = []
-                for row in rows:
-                    d = dict(row)
-                    # Re-serialize frontmatter deterministically for comparison
-                    if isinstance(d.get("frontmatter"), str):
-                        d["frontmatter"] = json.loads(d["frontmatter"])
-                    rows_list.append(d)
-                snapshot[table] = rows_list
+                snapshot[table] = [dict(zip(columns, row)) for row in rows]
 
-        snapshot_json = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+        snapshot_json = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), default=str)
         actual = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
         expected = checksums["projection_snapshot_sha256"]
         assert actual == expected, (
