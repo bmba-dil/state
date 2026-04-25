@@ -10,20 +10,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import shutil
 from pathlib import Path
 from typing import Any
 
-import structlog
 import pytest
 from typer.testing import CliRunner
-
-# Suppress structlog info messages during CLI tests — repair logs
-# are emitted to stdout via ConsoleRenderer and pollute CliRunner output.
-structlog.configure(
-    wrapper_class=structlog.make_filtering_bound_logger(logging.CRITICAL),
-)
 
 from src.state_cli.main import app
 from src.state_core.events import SqliteEventStore
@@ -141,3 +133,74 @@ class TestTail:
         # by checking that --no-follow shows in help
         result = runner.invoke(app, ["events", "tail", "--help"])
         assert "--no-follow" in result.stdout
+
+
+# ── Replay command tests ──────────────────────────────────────────────────
+
+
+class TestReplay:
+    """state events replay command."""
+
+    def test_replay_help(self) -> None:
+        """--help shows replay options."""
+        result = runner.invoke(app, ["events", "replay", "--help"])
+        assert result.exit_code == 0
+        assert "Replay events" in result.stdout
+        assert "--from" in result.stdout
+        assert "--limit" in result.stdout or "-n" in result.stdout
+        assert "--mode" in result.stdout
+
+    def test_replay_from_required(self) -> None:
+        """--from is required for replay."""
+        result = runner.invoke(app, ["events", "replay"])
+        # Without --from, Typer should exit with error code 2
+        assert result.exit_code == 2
+        # Typer writes usage errors to stderr, not stdout
+        assert "Error" in result.output or "Missing option" in result.output or "--from" in result.output
+
+    def test_replay_from_offset(self, store: SqliteEventStore) -> None:
+        """replay --from <ulid> shows events after that offset."""
+        ids = _populate_events(store, count=5)
+        offset_id = ids[2]
+        result = runner.invoke(app, ["events", "replay", "--from", offset_id])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2  # Events at index 3 and 4
+
+    def test_replay_with_limit(self, store: SqliteEventStore) -> None:
+        """replay --from --limit limits output."""
+        ids = _populate_events(store, count=5)
+        offset_id = ids[1]
+        result = runner.invoke(app, ["events", "replay", "--from", offset_id, "--limit", "2"])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2
+
+    def test_replay_mode_filter(self, store: SqliteEventStore) -> None:
+        """replay --mode build shows only build events."""
+        _populate_events(store, count=2, mode="build")
+        teach_ids = _populate_events(store, count=2, mode="teach")
+        # Replay from first teach event's ID, filtering for build
+        result = runner.invoke(app, ["events", "replay", "--from", teach_ids[0], "--mode", "build"])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        # Should show no events (all events after teach_ids[0] are teach mode)
+        assert len(lines) == 0
+
+    def test_replay_to_upper_bound(self, store: SqliteEventStore) -> None:
+        """replay --from --to with exclusive upper bound."""
+        ids = _populate_events(store, count=5)
+        result = runner.invoke(app, ["events", "replay", "--from", ids[0], "--to", ids[3]])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        # Events at index 1 and 2 (exclusive of both bounds)
+        assert len(lines) == 2
+
+    def test_replay_empty_store(self, _isolate_db: None) -> None:
+        """replay on empty store shows nothing."""
+        asyncio.run(migrate())
+        result = runner.invoke(
+            app, ["events", "replay", "--from", "01ARZ3NDEKTSV4RRFFQ69G5FAV"]
+        )
+        assert result.exit_code == 0
+        assert result.stdout.strip() == ""
