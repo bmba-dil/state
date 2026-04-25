@@ -87,3 +87,70 @@ class TestGoldenFixtureIntegrity:
 
     # Note: this test is synchronous — no DB connection needed.
     # pytest.mark.asyncio is NOT required.
+
+
+class TestTripleChecksumAssertion:
+    """Triple verification: DB SHA-256 = export JSONL SHA-256 = projection snapshot SHA-256.
+
+    Loads the golden fixture, exports to JSONL, runs rebuild_all(),
+    and checksums all three independently.
+    """
+
+    async def test_export_jsonl_checksum(
+        self, fixture_copy: Path, checksums: dict[str, str],
+    ) -> None:
+        """Export all events as JSONL, compute SHA-256, match recorded value."""
+        store = SqliteEventStore()
+        lines: list[str] = []
+        async for ev in store.read_events_iter():
+            line = json.dumps(ev, sort_keys=True, separators=(",", ":"))
+            lines.append(line)
+        jsonl_bytes = ("\n".join(lines) + "\n").encode("utf-8")
+        actual = hashlib.sha256(jsonl_bytes).hexdigest()
+        expected = checksums["export_jsonl_sha256"]
+        assert actual == expected, (
+            f"Export JSONL checksum mismatch!\n"
+            f"  Expected: {expected}\n"
+            f"  Actual:   {actual}\n"
+            f"  Event export is non-deterministic. Check for datetime.now(), "
+            f"ULID auto-generation, or non-deterministic JSON serialization."
+        )
+
+    async def test_projection_snapshot_checksum(
+        self, fixture_copy: Path, checksums: dict[str, str],
+    ) -> None:
+        """Rebuild projections, snapshot cache tables, SHA-256 match recorded value."""
+        import aiosqlite
+
+        store = SqliteEventStore()
+        projector = Projector(db=store)
+        count = await projector.rebuild_all()
+        assert count == 10000, f"Expected 10000 events, got {count}"
+
+        # Dump all three cache tables as sorted JSON
+        snapshot: dict[str, list[dict]] = {}
+        from src.state_core.database import get_connection
+
+        for table in ("steps", "slices", "concepts"):
+            async with get_connection() as db:
+                db.row_factory = aiosqlite.Row
+                cursor = await db.execute(f"SELECT * FROM {table} ORDER BY id")
+                rows = await cursor.fetchall()
+                rows_list: list[dict] = []
+                for row in rows:
+                    d = dict(row)
+                    # Re-serialize frontmatter deterministically for comparison
+                    if isinstance(d.get("frontmatter"), str):
+                        d["frontmatter"] = json.loads(d["frontmatter"])
+                    rows_list.append(d)
+                snapshot[table] = rows_list
+
+        snapshot_json = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+        actual = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+        expected = checksums["projection_snapshot_sha256"]
+        assert actual == expected, (
+            f"Projection snapshot checksum mismatch!\n"
+            f"  Expected: {expected}\n"
+            f"  Actual:   {actual}\n"
+            f"  Projections are non-deterministic. Check handler purity."
+        )
