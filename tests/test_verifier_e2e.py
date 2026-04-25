@@ -209,3 +209,58 @@ class TestModeFiltering:
         for mode in ("build", "teach", "kernel"):
             count = await store.count_events(mode=mode)
             assert count > 0, f"Mode '{mode}' has zero events in the golden fixture"
+
+
+class TestDeterministicReplay:
+    """Replaying the golden fixture twice produces identical output."""
+
+    async def test_replay_deterministic(
+        self, fixture_copy: Path,
+    ) -> None:
+        """Two independent replays of the same fixture produce identical event lists."""
+        store = SqliteEventStore()
+
+        # First replay: read all events in order
+        events_1 = await store.read_events()
+
+        # Second replay: read via iterator
+        events_2: list[dict] = []
+        async for ev in store.read_events_iter():
+            events_2.append(ev)
+
+        # Both must be identical (same number, same data)
+        assert len(events_1) == len(events_2) == 10000
+
+        # Compare first and last events as a quick check
+        for key in ("id", "seq", "type", "mode", "aggregate_id"):
+            assert events_1[0][key] == events_2[0][key], (
+                f"First event mismatch on {key}: "
+                f"{events_1[0][key]} != {events_2[0][key]}"
+            )
+            assert events_1[-1][key] == events_2[-1][key], (
+                f"Last event mismatch on {key}: "
+                f"{events_1[-1][key]} != {events_2[-1][key]}"
+            )
+
+        # Full data comparison (10000 events × dict comparison)
+        # This is expensive but necessary for bit-identical proof
+        assert events_1 == events_2, "Full event list mismatch on second replay"
+
+    async def test_replay_with_mode_filter(
+        self, fixture_copy: Path,
+    ) -> None:
+        """Replay with --mode filter produces subset that sums to total."""
+        store = SqliteEventStore()
+        all_events = await store.read_events()
+        build_events = await store.read_events(mode="build")
+        teach_events = await store.read_events(mode="teach")
+        kernel_events = await store.read_events(mode="kernel")
+
+        assert len(build_events) + len(teach_events) + len(kernel_events) == len(all_events)
+        # Mode-filtered sets are disjoint
+        build_ids = {e["id"] for e in build_events}
+        teach_ids = {e["id"] for e in teach_events}
+        kernel_ids = {e["id"] for e in kernel_events}
+        assert build_ids.isdisjoint(teach_ids)
+        assert build_ids.isdisjoint(kernel_ids)
+        assert teach_ids.isdisjoint(kernel_ids)
