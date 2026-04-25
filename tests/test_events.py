@@ -10,10 +10,12 @@ import json
 import shutil
 from pathlib import Path
 
+import aiosqlite
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from src.state_core.database import get_connection
 from src.state_core.events import SqliteEventStore
 from src.state_core.migrations import migrate
 
@@ -45,6 +47,192 @@ async def store() -> SqliteEventStore:
 def _sorted_json(data: dict) -> str:
     """Serialize with same deterministic settings used by append()."""
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+
+# ── Event-type data strategies ────────────────────────────────────────────
+# Maps each of 34 event types to its aggregate type and a Hypothesis strategy
+# that produces valid data dicts matching the corresponding Pydantic model.
+# These are used by Hypothesis property tests to verify round-trip behavior
+# across all event types.
+
+AGGREGATE_FOR_EVENT: dict[str, str] = {
+    # Arc (3)
+    "state.arc.created": "arc",
+    "state.arc.retired": "arc",
+    "state.arc.updated": "arc",
+    # Phase (4)
+    "state.phase.planned": "phase",
+    "state.phase.started": "phase",
+    "state.phase.verified": "phase",
+    "state.phase.completed": "phase",
+    # Slice (4)
+    "state.slice.planned": "slice",
+    "state.slice.worktree_ready": "slice",
+    "state.slice.shipped": "slice",
+    "state.slice.reverted": "slice",
+    # Step (10)
+    "state.step.discussed": "step",
+    "state.step.planned": "step",
+    "state.step.executed": "step",
+    "state.step.verify_started": "step",
+    "state.step.verify_passed": "step",
+    "state.step.verify_failed": "step",
+    "state.step.advanced": "step",
+    "state.step.blocked": "step",
+    "state.step.snapshotted": "step",
+    "state.step.reverted": "step",
+    # Concept (5)
+    "state.concept.introduced": "concept",
+    "state.concept.observed": "concept",
+    "state.concept.drilled": "concept",
+    "state.concept.mastered": "concept",
+    "state.concept.reviewed": "concept",
+    # Drill (3)
+    "state.drill.prepared": "drill",
+    "state.drill.submitted": "drill",
+    "state.drill.graded": "drill",
+    # Mode (1)
+    "state.mode.activated": "mode",
+    # Decision (2)
+    "state.decision.asked": "decision",
+    "state.decision.made": "decision",
+    # Auth (2)
+    "state.auth.refreshed": "auth",
+    "state.auth.rotated": "auth",
+}
+
+EVENT_DATA_STRATEGIES: dict[str, st.SearchStrategy[dict]] = {
+    # ── Arc ────────────────────────────────────────────────────────────────
+    "state.arc.created": st.fixed_dictionaries({
+        "title": st.just("Arc Title"),
+        "goal": st.just("Build the thing"),
+    }),
+    "state.arc.retired": st.fixed_dictionaries({
+        "reason": st.just("Completed"),
+    }),
+    "state.arc.updated": st.fixed_dictionaries({
+        "changed_fields": st.just(["title"]),
+    }),
+    # ── Phase ──────────────────────────────────────────────────────────────
+    "state.phase.planned": st.fixed_dictionaries({
+        "phase_number": st.integers(min_value=1, max_value=100),
+        "title": st.just("Phase Title"),
+        "goal": st.just("Achieve the goal"),
+    }),
+    "state.phase.started": st.fixed_dictionaries({}),
+    "state.phase.verified": st.fixed_dictionaries({
+        "passed": st.just(True),
+        "summary": st.just("All criteria met"),
+    }),
+    "state.phase.completed": st.fixed_dictionaries({
+        "passed": st.just(True),
+    }),
+    # ── Slice ──────────────────────────────────────────────────────────────
+    "state.slice.planned": st.fixed_dictionaries({
+        "slice_number": st.integers(min_value=1, max_value=50),
+        "title": st.just("Slice Title"),
+        "goal": st.just("Slice goal"),
+    }),
+    "state.slice.worktree_ready": st.fixed_dictionaries({
+        "worktree_name": st.just("feature-branch"),
+        "branch": st.just("main"),
+        "dir": st.just("/tmp/worktree"),
+    }),
+    "state.slice.shipped": st.fixed_dictionaries({
+        "snapshot_hash": st.just("abc123def456"),
+    }),
+    "state.slice.reverted": st.fixed_dictionaries({
+        "reason": st.just("Issues found"),
+    }),
+    # ── Step ───────────────────────────────────────────────────────────────
+    "state.step.discussed": st.fixed_dictionaries({
+        "approach_summary": st.just("Use TDD approach"),
+    }),
+    "state.step.planned": st.fixed_dictionaries({
+        "goal": st.just("Implement feature"),
+        "verify_contract": st.just([{"check": "unit tests pass"}]),
+    }),
+    "state.step.executed": st.fixed_dictionaries({
+        "changes_summary": st.just("Wrote implementation"),
+    }),
+    "state.step.verify_started": st.fixed_dictionaries({
+        "contract": st.just([{"check": "all tests pass"}]),
+    }),
+    "state.step.verify_passed": st.fixed_dictionaries({
+        "duration_ms": st.integers(min_value=0, max_value=60000),
+    }),
+    "state.step.verify_failed": st.fixed_dictionaries({
+        "reason": st.just("Assertion failed"),
+        "details": st.just("Expected True, got False"),
+    }),
+    "state.step.advanced": st.fixed_dictionaries({
+        "new_state": st.just("completed"),
+    }),
+    "state.step.blocked": st.fixed_dictionaries({
+        "reason": st.just("Waiting for review"),
+    }),
+    "state.step.snapshotted": st.fixed_dictionaries({
+        "snapshot_hash": st.just("abc123def456"),
+        "tier": st.just("step"),
+    }),
+    "state.step.reverted": st.fixed_dictionaries({
+        "snapshot_hash": st.just("abc123def456"),
+        "reason": st.just("Found regression"),
+    }),
+    # ── Concept ────────────────────────────────────────────────────────────
+    "state.concept.introduced": st.fixed_dictionaries({
+        "concept_id": st.just("conc-01"),
+        "name": st.just("Factory Pattern"),
+        "prerequisites": st.just([]),
+    }),
+    "state.concept.observed": st.fixed_dictionaries({
+        "observation": st.just("Learner understood abstraction"),
+        "classification": st.just("positive"),
+    }),
+    "state.concept.drilled": st.fixed_dictionaries({
+        "score": st.floats(min_value=0.0, max_value=10.0),
+        "items_attempted": st.integers(min_value=1, max_value=20),
+    }),
+    "state.concept.mastered": st.fixed_dictionaries({
+        "mastery_probability": st.floats(min_value=0.0, max_value=1.0),
+    }),
+    "state.concept.reviewed": st.fixed_dictionaries({
+        "mastery_delta": st.floats(min_value=-1.0, max_value=1.0),
+    }),
+    # ── Drill ──────────────────────────────────────────────────────────────
+    "state.drill.prepared": st.fixed_dictionaries({
+        "question_count": st.integers(min_value=1, max_value=20),
+    }),
+    "state.drill.submitted": st.fixed_dictionaries({
+        "answers": st.just([{"q": 1, "a": "answer"}]),
+    }),
+    "state.drill.graded": st.fixed_dictionaries({
+        "score": st.floats(min_value=0.0, max_value=100.0),
+        "max_score": st.floats(min_value=1.0, max_value=100.0),
+    }),
+    # ── Mode ───────────────────────────────────────────────────────────────
+    "state.mode.activated": st.fixed_dictionaries({
+        "mode_value": st.just("build"),
+    }),
+    # ── Decision ───────────────────────────────────────────────────────────
+    "state.decision.asked": st.fixed_dictionaries({
+        "question": st.just("What approach?"),
+        "options": st.just([{"option": "A"}]),
+    }),
+    "state.decision.made": st.fixed_dictionaries({
+        "answer": st.just("Option A"),
+        "reason": st.just("Best trade-off"),
+    }),
+    # ── Auth ───────────────────────────────────────────────────────────────
+    "state.auth.refreshed": st.fixed_dictionaries({
+        "provider": st.just("anthropic"),
+        "outcome": st.just("success"),
+    }),
+    "state.auth.rotated": st.fixed_dictionaries({
+        "provider": st.just("anthropic"),
+        "index": st.integers(min_value=0, max_value=5),
+    }),
+}
 
 
 # ── Basic round-trip ──────────────────────────────────────────────────────
