@@ -109,3 +109,34 @@ async def _do_tail(
     except asyncio.CancelledError:
         # Clean shutdown on Ctrl+C
         pass
+
+
+@events_app.command(name="replay")
+def replay(
+    from_id: str = typer.Option(..., "--from", help="ULID offset to start from (required)"),
+    to_id: str = typer.Option(None, "--to", help="ULID offset to stop at"),
+    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    limit: int = typer.Option(0, "--limit", "-n", help="Max events to replay (0 = unlimited)"),
+) -> None:
+    """Replay events from a ULID offset."""
+    try:
+        asyncio.run(_do_replay(from_id=from_id, to_id=to_id, mode=mode, limit=limit))
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+async def _do_replay(
+    from_id: str,
+    to_id: str | None = None,
+    mode: str | None = None,
+    limit: int = 0,
+) -> None:
+    """Replay events from a ULID offset."""
+    from src.state_core.events import SqliteEventStore
+
+    store = SqliteEventStore()
+    events = await store.read_events(from_id=from_id, to_id=to_id, mode=mode, limit=limit)
+
+    for ev in events:
+        _print_event_line(ev)
