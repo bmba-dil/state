@@ -667,6 +667,75 @@ class TestRebuildIdempotency:
 
         assert checksum_a == checksum_b
 
+    async def test_property_frontmatter_determinism(
+        self, store: SqliteEventStore, tmp_path: Path,
+    ) -> None:
+        """Same event sequence → identical frontmatter JSON in cache tables.
+
+        The projector's _merge_frontmatter uses sort_keys=True with compact
+        separators. Two rebuilds must produce bit-identical frontmatter values.
+        Also verifies cross-DB identity: same events in a fresh DB produce
+        identical frontmatter.
+        """
+        import os
+        import uuid
+
+        await _append_events(store, [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Study"}),
+            ("step", "step-01", "state.step.planned", {"goal": "Build X", "verify_contract": [{"check": "works"}]}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "Done"}),
+            ("slice", "slice-01", "state.slice.planned", {"slice_number": 1, "title": "Core", "goal": "Build core"}),
+            ("slice", "slice-01", "state.slice.worktree_ready", {"worktree_name": "feat", "branch": "main", "dir": "/tmp"}),
+            ("concept", "concept-01", "state.concept.introduced", {"concept_id": "c01", "name": "Poly", "prerequisites": ["OOP"]}),
+            ("concept", "concept-01", "state.concept.drilled", {"score": 4.0, "items_attempted": 5}),
+        ])
+
+        projector = Projector(db=store)
+
+        # Rebuild twice on the same DB
+        await projector.rebuild_all()
+        fm_1 = await _read_table_frontmatter()
+        await projector.rebuild_all()
+        fm_2 = await _read_table_frontmatter()
+
+        # Frontmatter must be identical across rebuilds
+        assert fm_1 == fm_2, "Frontmatter must be identical after two rebuilds on the same DB"
+
+        # Cross-DB identity: same events in a fresh DB → identical frontmatter
+        unique = tmp_path / uuid.uuid4().hex
+        unique.mkdir(parents=True)
+        db_path_b = unique / ".state" / "events.sqlite"
+        os.environ["STATE_DB_PATH_B"] = str(db_path_b)
+        old_path = os.environ.get("STATE_DB_PATH", "")
+        os.environ["STATE_DB_PATH"] = str(db_path_b)
+        migrations_src = Path.cwd() / ".state" / "migrations"
+        migrations_dst = unique / ".state" / "migrations"
+        if migrations_src.exists():
+            shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+        await migrate()
+        store_b = SqliteEventStore()
+        for agg_type, agg_id, ev_type, data in [
+            ("step", "step-01", "state.step.discussed", {"approach_summary": "Study"}),
+            ("step", "step-01", "state.step.planned", {"goal": "Build X", "verify_contract": [{"check": "works"}]}),
+            ("step", "step-01", "state.step.executed", {"changes_summary": "Done"}),
+            ("slice", "slice-01", "state.slice.planned", {"slice_number": 1, "title": "Core", "goal": "Build core"}),
+            ("slice", "slice-01", "state.slice.worktree_ready", {"worktree_name": "feat", "branch": "main", "dir": "/tmp"}),
+            ("concept", "concept-01", "state.concept.introduced", {"concept_id": "c01", "name": "Poly", "prerequisites": ["OOP"]}),
+            ("concept", "concept-01", "state.concept.drilled", {"score": 4.0, "items_attempted": 5}),
+        ]:
+            await store_b.append(agg_type, agg_id, ev_type, data)
+        projector_b = Projector(db=store_b)
+        await projector_b.rebuild_all()
+        fm_3 = await _read_table_frontmatter()
+
+        # Restore original STATE_DB_PATH
+        os.environ["STATE_DB_PATH"] = old_path
+        del os.environ["STATE_DB_PATH_B"]
+
+        # Same events in different DB → identical frontmatter
+        assert fm_1 == fm_3, "Frontmatter must be identical across independent DBs with the same events"
+
 
 async def _table_checksums() -> dict[str, str]:
     """Return a dict of {table_name: json_dumps_of_sorted_rows} for all cache tables."""
@@ -681,6 +750,26 @@ async def _table_checksums() -> dict[str, str]:
                 r["frontmatter"] = json.dumps(r["frontmatter"], sort_keys=True, separators=(",", ":"))
             serializable.append(r)
         result[table] = json.dumps(serializable, sort_keys=True)
+    return result
+
+
+async def _read_table_frontmatter() -> dict[str, str]:
+    """Return {table_name: json_dumps_of_frontmatter_column} for all cache tables."""
+    result: dict[str, str] = {}
+    for table in ("steps", "slices", "concepts"):
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(f"SELECT id, frontmatter FROM {table} ORDER BY id")
+            rows = await cursor.fetchall()
+            frontmatters: list[dict] = []
+            for row in rows:
+                d = dict(row)
+                raw = d.get("frontmatter", "{}")
+                if isinstance(raw, str):
+                    frontmatters.append(json.loads(raw))
+                else:
+                    frontmatters.append(raw)
+            result[table] = json.dumps(frontmatters, sort_keys=True)
     return result
 
 
