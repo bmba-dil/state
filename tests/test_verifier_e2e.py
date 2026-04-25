@@ -154,3 +154,28 @@ class TestTripleChecksumAssertion:
             f"  Actual:   {actual}\n"
             f"  Projections are non-deterministic. Check handler purity."
         )
+
+
+class TestCrashRecoveryOnGolden:
+    """Crash-recovery repair is a no-op on the consistent golden fixture."""
+
+    async def test_repair_is_noop_on_golden_fixture(
+        self, fixture_copy: Path,
+    ) -> None:
+        """Running repair_aggregate_seqs() on the consistent golden fixture does nothing."""
+        store = SqliteEventStore()
+        repairs = await store.repair_aggregate_seqs()
+        assert repairs == [], (
+            f"Repair should be a no-op on the golden fixture, "
+            f"but found {len(repairs)} repairs: {repairs}"
+        )
+
+    async def test_repair_twice_idempotent(
+        self, fixture_copy: Path,
+    ) -> None:
+        """Two repair calls are both no-ops on the golden fixture."""
+        store = SqliteEventStore()
+        r1 = await store.repair_aggregate_seqs()
+        r2 = await store.repair_aggregate_seqs()
+        assert r1 == [], f"First repair should be no-op, got {r1}"
+        assert r2 == [], f"Second repair should be no-op, got {r2}"
