@@ -204,3 +204,80 @@ class TestReplay:
         )
         assert result.exit_code == 0
         assert result.stdout.strip() == ""
+
+
+# ── Export command tests ──────────────────────────────────────────────────
+
+
+class TestExport:
+    """state events export command."""
+
+    def test_export_help(self) -> None:
+        """--help shows export options."""
+        result = runner.invoke(app, ["events", "export", "--help"])
+        assert result.exit_code == 0
+        assert "Export events" in result.stdout
+        assert "--format" in result.stdout
+        assert "--output" in result.stdout or "-o" in result.stdout
+        assert "--mode" in result.stdout
+
+    def test_export_jsonl_to_stdout(self, store: SqliteEventStore) -> None:
+        """export --format jsonl writes valid JSONL to stdout."""
+        _populate_events(store, count=3)
+        result = runner.invoke(app, ["events", "export"])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 3
+        # Each line must be valid JSON
+        for line in lines:
+            obj = json.loads(line)
+            assert "id" in obj
+            assert "type" in obj
+            assert "mode" in obj
+            assert "data" in obj
+            assert obj["mode"] == "build"
+
+    def test_export_mode_filter(self, store: SqliteEventStore) -> None:
+        """export --mode teach exports only teach events."""
+        _populate_events(store, count=2, mode="build")
+        _populate_events(store, count=3, mode="teach")
+
+        result = runner.invoke(app, ["events", "export", "--mode", "teach"])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 3
+        for line in lines:
+            obj = json.loads(line)
+            assert obj["mode"] == "teach"
+
+    def test_export_to_file(self, store: SqliteEventStore, tmp_path: Path) -> None:
+        """export --output writes to file and reports count."""
+        _populate_events(store, count=4)
+        out_file = tmp_path / "events.jsonl"
+
+        result = runner.invoke(app, ["events", "export", "--output", str(out_file)])
+        assert result.exit_code == 0
+        assert "Exported 4 events" in result.stdout
+        assert out_file.exists()
+
+        # Verify file contents
+        content = out_file.read_text()
+        lines = content.strip().splitlines()
+        assert len(lines) == 4
+        for line in lines:
+            assert json.loads(line)  # valid JSON
+
+    def test_export_from_offset(self, store: SqliteEventStore) -> None:
+        """export --from <ulid> exports events after offset."""
+        ids = _populate_events(store, count=5)
+        result = runner.invoke(app, ["events", "export", "--from", ids[2]])
+        assert result.exit_code == 0
+        lines = result.stdout.strip().splitlines()
+        assert len(lines) == 2  # Events at index 3 and 4
+
+    def test_export_empty_store(self, _isolate_db: None) -> None:
+        """export on empty store produces no output."""
+        asyncio.run(migrate())
+        result = runner.invoke(app, ["events", "export"])
+        assert result.exit_code == 0
+        assert result.stdout.strip() == ""
