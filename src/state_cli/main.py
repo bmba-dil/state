@@ -44,3 +44,68 @@ async def _do_rebuild_projections() -> None:
     projector = _Projector(db=store)
     count = await projector.rebuild_all()
     typer.echo(f"Projections rebuilt: {count} events processed.")
+
+
+def _print_event_line(ev: dict) -> None:
+    """Print a single event as a compact single-line summary."""
+    typer.echo(
+        f"{ev['id'][-13:]}  {ev['type']:<40s} {ev['aggregate_id'][:20]:<20s} "
+        f"{ev['mode']:<8s} {ev['ts']}"
+    )
+
+
+@events_app.command(name="tail")
+def tail(
+    from_id: str = typer.Option(None, "--from", help="ULID offset to start from"),
+    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    count: int = typer.Option(10, "--count", "-n", help="Number of past events to show"),
+    follow: bool = typer.Option(True, "--follow/--no-follow", "-f", help="Follow mode (poll for new events)"),
+) -> None:
+    """Tail events from the event store (polling-based)."""
+    try:
+        asyncio.run(_do_tail(from_id=from_id, mode=mode, count=count, follow=follow))
+    except asyncio.CancelledError:
+        pass  # clean exit on Ctrl+C
+    except Exception as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+async def _do_tail(
+    from_id: str | None = None,
+    mode: str | None = None,
+    count: int = 10,
+    follow: bool = True,
+) -> None:
+    """Tail events with polling loop."""
+    from src.state_core.events import SqliteEventStore
+
+    store = SqliteEventStore()
+    last_id = from_id
+
+    # If no explicit --from, show last N events first
+    if last_id is None:
+        recent = await store.get_last_events(count, mode=mode)
+        for ev in recent:
+            _print_event_line(ev)
+            last_id = ev["id"]
+    elif count > 0:
+        events = await store.read_events(from_id=last_id, mode=mode, limit=count)
+        for ev in events:
+            _print_event_line(ev)
+            last_id = ev["id"]
+
+    if not follow:
+        return
+
+    # Polling loop
+    try:
+        while True:
+            events = await store.read_events(from_id=last_id, mode=mode)
+            for ev in events:
+                _print_event_line(ev)
+                last_id = ev["id"]
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        # Clean shutdown on Ctrl+C
+        pass
