@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import typing
 
 import typer
 
@@ -47,6 +48,18 @@ async def _do_rebuild_projections() -> None:
     typer.echo(f"Projections rebuilt: {count} events processed.")
 
 
+VALID_MODES: typing.Final[set[str]] = {"build", "teach", "kernel"}
+
+
+def _validate_mode(value: str | None) -> str | None:
+    """Validate --mode argument against allowed values."""
+    if value is not None and value not in VALID_MODES:
+        raise typer.BadParameter(
+            f"Invalid mode '{value}'. Must be one of: {', '.join(sorted(VALID_MODES))}"
+        )
+    return value
+
+
 def _print_event_line(ev: dict) -> None:
     """Print a single event as a compact single-line summary."""
     typer.echo(
@@ -58,7 +71,7 @@ def _print_event_line(ev: dict) -> None:
 @events_app.command(name="tail")
 def tail(
     from_id: str = typer.Option(None, "--from", help="ULID offset to start from"),
-    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    mode: str | None = typer.Option(None, "--mode", callback=_validate_mode, help="Filter by mode (build, teach, kernel)"),
     count: int = typer.Option(10, "--count", "-n", help="Number of past events to show"),
     follow: bool = typer.Option(True, "--follow/--no-follow", "-f", help="Follow mode (poll for new events)"),
 ) -> None:
@@ -116,7 +129,7 @@ async def _do_tail(
 def replay(
     from_id: str = typer.Option(..., "--from", help="ULID offset to start from (required)"),
     to_id: str = typer.Option(None, "--to", help="ULID offset to stop at"),
-    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    mode: str | None = typer.Option(None, "--mode", callback=_validate_mode, help="Filter by mode (build, teach, kernel)"),
     limit: int = typer.Option(0, "--limit", "-n", help="Max events to replay (0 = unlimited)"),
 ) -> None:
     """Replay events from a ULID offset."""
@@ -147,7 +160,7 @@ async def _do_replay(
 def export(
     from_id: str = typer.Option(None, "--from", help="ULID offset to start from"),
     to_id: str = typer.Option(None, "--to", help="ULID offset to stop at"),
-    mode: str = typer.Option(None, "--mode", help="Filter by mode (build|teach|kernel)"),
+    mode: str | None = typer.Option(None, "--mode", callback=_validate_mode, help="Filter by mode (build, teach, kernel)"),
     output_format: str = typer.Option("jsonl", "--format", help="Export format (jsonl only)"),
     output: str = typer.Option(None, "--output", "-o", help="Output file path (default: stdout)"),
 ) -> None:
