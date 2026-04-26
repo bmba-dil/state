@@ -46,6 +46,40 @@ class EventStore(Protocol):
         self, aggregate_id: str, after_seq: int = 0
     ) -> AsyncIterator[dict[str, Any]]: ...
 
+    async def read_events(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    async def read_events_iter(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        ...
+
+    async def count_events(
+        self,
+        *,
+        mode: str | None = None,
+    ) -> int:
+        ...
+
+    async def get_last_events(
+        self,
+        count: int = 10,
+        *,
+        mode: str | None = None,
+    ) -> list[dict[str, Any]]:
+        ...
+
 
 class SqliteEventStore:
     """Concrete EventStore backed by events.sqlite via database.py.
