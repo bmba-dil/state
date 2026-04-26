@@ -14,8 +14,18 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import logging
+
 import pytest
+import structlog
 from typer.testing import CliRunner
+
+# Suppress structlog info/debug during CLI tests — operational logs from
+# SqliteEventStore._maybe_repair() emit to stdout via ConsoleRenderer and
+# would pollute CliRunner-captured output, breaking line-count assertions.
+structlog.configure(
+    wrapper_class=structlog.make_filtering_bound_logger(logging.CRITICAL),
+)
 
 from src.state_cli.main import app
 from src.state_core.events import SqliteEventStore

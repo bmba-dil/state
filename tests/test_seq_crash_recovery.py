@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import shutil
 from pathlib import Path
 
@@ -724,6 +725,7 @@ class TestRepairLogging:
         structlog.configure(
             processors=[structlog.dev.ConsoleRenderer(colors=False)],
             logger_factory=structlog.PrintLoggerFactory(cap),
+            wrapper_class=structlog.make_filtering_bound_logger(logging.DEBUG),
         )
         try:
             repairs = await store.repair_aggregate_seqs()
