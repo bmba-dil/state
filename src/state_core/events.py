@@ -16,9 +16,8 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 import aiosqlite
-from ulid import ULID
-
 import structlog
+from ulid import ULID
 
 from src.state_core.database import get_connection
 from src.state_core.schema import Mode
@@ -46,6 +45,40 @@ class EventStore(Protocol):
     async def read_stream(
         self, aggregate_id: str, after_seq: int = 0
     ) -> AsyncIterator[dict[str, Any]]: ...
+
+    async def read_events(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        ...
+
+    async def read_events_iter(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        ...
+
+    async def count_events(
+        self,
+        *,
+        mode: str | None = None,
+    ) -> int:
+        ...
+
+    async def get_last_events(
+        self,
+        count: int = 10,
+        *,
+        mode: str | None = None,
+    ) -> list[dict[str, Any]]:
+        ...
 
 
 class SqliteEventStore:
@@ -337,3 +370,180 @@ class SqliteEventStore:
             )
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def read_events(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Read events with optional ULID offset, mode filter, and limit.
+
+        Ordered by id ASC (lexicographic = chronological for ULIDs).
+        Deserializes the *data* column from JSON text to a Python dict.
+
+        Args:
+            from_id: ULID offset (exclusive lower bound). Events with id > from_id.
+            to_id: ULID offset (exclusive upper bound). Events with id < to_id.
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+            limit: Max rows. 0 = no limit.
+
+        Returns:
+            List of event row dicts with keys: id, seq, aggregate_type,
+            aggregate_id, type, data (deserialized), ts, mode.
+        """
+        await self._maybe_repair(source="read_events")
+
+        clauses: list[str] = [
+            "SELECT id, seq, aggregate_type, aggregate_id, type, data, ts, mode "
+            "FROM events WHERE 1=1"
+        ]
+        params: list[Any] = []
+
+        if from_id is not None:
+            clauses.append("AND id > ?")
+            params.append(from_id)
+        if to_id is not None:
+            clauses.append("AND id < ?")
+            params.append(to_id)
+        if mode is not None:
+            clauses.append("AND mode = ?")
+            params.append(mode)
+
+        clauses.append("ORDER BY id ASC")
+
+        if limit > 0:
+            clauses.append("LIMIT ?")
+            params.append(limit)
+
+        sql = " ".join(clauses)
+
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, params)
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in rows:
+                d = dict(row)
+                if isinstance(d.get("data"), str):
+                    d["data"] = json.loads(d["data"])
+                result.append(d)
+            return result
+
+    async def read_events_iter(
+        self,
+        *,
+        from_id: str | None = None,
+        to_id: str | None = None,
+        mode: str | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Read events as an async generator — memory-safe for large volumes.
+
+        Ordered by id ASC (lexicographic = chronological for ULIDs).
+        Deserializes *data* from JSON text to a Python dict per row.
+
+        Args:
+            from_id: ULID offset (exclusive lower bound).
+            to_id: ULID offset (exclusive upper bound).
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+        """
+        await self._maybe_repair(source="read_events_iter")
+
+        clauses: list[str] = [
+            "SELECT id, seq, aggregate_type, aggregate_id, type, data, ts, mode "
+            "FROM events WHERE 1=1"
+        ]
+        params: list[Any] = []
+
+        if from_id is not None:
+            clauses.append("AND id > ?")
+            params.append(from_id)
+        if to_id is not None:
+            clauses.append("AND id < ?")
+            params.append(to_id)
+        if mode is not None:
+            clauses.append("AND mode = ?")
+            params.append(mode)
+
+        clauses.append("ORDER BY id ASC")
+        sql = " ".join(clauses)
+
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, params)
+            while True:
+                row = await cursor.fetchone()
+                if row is None:
+                    break
+                d = dict(row)
+                if isinstance(d.get("data"), str):
+                    d["data"] = json.loads(d["data"])
+                yield d
+
+    async def count_events(self, *, mode: str | None = None) -> int:
+        """Count events with optional mode filter.
+
+        Args:
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+
+        Returns:
+            Total event count (optionally filtered by mode).
+        """
+        await self._maybe_repair(source="count_events")
+
+        if mode is not None:
+            sql = "SELECT COUNT(*) FROM events WHERE mode = ?"
+            params: list[Any] = [mode]
+        else:
+            sql = "SELECT COUNT(*) FROM events"
+            params = []
+
+        async with get_connection() as db:
+            cursor = await db.execute(sql, params)
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+    async def get_last_events(
+        self, count: int = 10, *, mode: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return the last N events ordered by id DESC, then reversed to ASC.
+
+        Args:
+            count: Number of events to return. Defaults to 10.
+            mode: Filter by mode ('build', 'teach', 'kernel'). None = all modes.
+
+        Returns:
+            List of up to *count* event dicts in id ASC order (oldest first
+            within the window), with keys: id, seq, aggregate_type,
+            aggregate_id, type, data (deserialized), ts, mode.
+        """
+        await self._maybe_repair(source="get_last_events")
+
+        clauses: list[str] = [
+            "SELECT id, seq, aggregate_type, aggregate_id, type, data, ts, mode "
+            "FROM events WHERE 1=1"
+        ]
+        params: list[Any] = []
+
+        if mode is not None:
+            clauses.append("AND mode = ?")
+            params.append(mode)
+
+        clauses.append("ORDER BY id DESC LIMIT ?")
+        params.append(count)
+
+        sql = " ".join(clauses)
+
+        async with get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, params)
+            rows = await cursor.fetchall()
+            result: list[dict[str, Any]] = []
+            for row in reversed(rows):  # reverse to chronological order
+                d = dict(row)
+                if isinstance(d.get("data"), str):
+                    d["data"] = json.loads(d["data"])
+                result.append(d)
+            return result

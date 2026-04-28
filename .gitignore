@@ -33,4 +33,8 @@ htmlcov/
 .ruff_cache/
 
 # Project
-.state/
+.state/*
+
+# Allow fixtures directory under .state (golden verification DB)
+!.state/fixtures/
+!.state/fixtures/**
