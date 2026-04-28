@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.1
-milestone_name: milestone
-current_phase: 007
-status: unknown
-last_updated: "2026-04-24T15:53:53.053Z"
+milestone: v1
+milestone_name: Event Store Foundation
+current_phase: complete
+status: v1 shipped — Tier 1 (v2..v5) ready to start in parallel
+last_updated: "2026-04-28T03:14:44.283Z"
 ---
 
 # STATE: state
 
-**Last updated:** 2026-04-24 — Phase 007 complete (Monotonic seq crash-recovery: migration 0004 applied, UNIQUE(aggregate_id,seq) index, SqliteEventStore.run_repair flag, structlog logging, crash-mid-append Hypothesis simulation. 28 new tests, 240 total, 0 lint)
+**Last updated:** 2026-04-28 — v1 (Event Store Foundation) **shipped and merged to `main`**. All 10 phases + 010.1 gap-closure complete. 67 commits, ~2,779 LoC Python, 321 tests passing, 0 regressions.
 
 ---
 
@@ -28,37 +28,34 @@ last_updated: "2026-04-24T15:53:53.053Z"
 
 ## Current Position
 
-Phase: 007 (monotonic-seq-crash-recovery) — COMPLETE
-Plan: 4 of 4
 **Current tier:** Tier 1 (Foundation)
-**Current milestone:** v1 (Event Store Foundation) — Active
-**Current phase:** 007
-**Previous phase:** 006 (startup-reconciliation) — Complete
+**Active milestone:** none (v1 shipped 2026-04-26, merged to main 2026-04-28)
+**Next recommended:** v2 — Auth Coverage (carries 9 of 16 P0 pitfalls)
+**Previous milestone:** v1 — Event Store Foundation — Complete
 
-**Phases complete:** 7 / 256
-**Milestones complete:** 0 / 27
-**v1 requirements satisfied:** 7 / 221
+**Phases complete:** 11 / 256 (v1.001 .. v1.010 + v1.010.1)
+**Milestones complete:** 1 / 27
+**v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 
 ```
-[#...........................................................] 0%
+[##..........................................................] 4%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
 
-- v1 — Event Store Foundation
-- v2 — Auth Coverage (5 methods)
-- v3 — Provider Routing + Model Profiles (soft-depends on v2 for cred testing; scaffolding can start now)
-- v4 — Worktree + Snapshot Service
-- v5 — DAG Scheduler
+- v2 — Auth Coverage (5 methods) — **recommended next** (9× P0 pitfalls)
+- v3 — Provider Routing + Model Profiles — soft-depends on v2 for cred testing; scaffolding parallel-safe
+- v4 — Worktree + Snapshot Service — independent
+- v5 — DAG Scheduler — was hard-blocked on v1 (reactive to event stream); **now unblocked**
 
-All five Tier 1 milestones can START concurrently; v3 soft-depends on v2 (auth creds for provider tests — scaffolding parallel-safe) and v5 hard-depends on v1 (reactive to event-store stream). See ROADMAP.md lines 396 (v3) and 579 (v5).
+All four can start concurrently.
 
 ### Critical path preview
 
 Build critical path: A1 → A6 → A7 → A8 → A11 → A12 → A14 → A15 → A16 → A27
 Teach critical path: A1 → A6 → A7 → A8 → A11 → A13 → A18 → A20 → A22 → A27
 
-v2 carries 9 of the 16 P0 pitfalls (Anthropic OAuth stealth flow); start early in parallel.
+A1 (= v1) is now complete.
 
 ---
 
@@ -67,15 +64,20 @@ v2 carries 9 of the 16 P0 pitfalls (Anthropic OAuth stealth flow); start early i
 | Metric | Value |
 |---|---|
 | Roadmap created | 2026-04-22 |
+| v1 shipped | 2026-04-26 (merged to main 2026-04-28) |
 | Phases defined | 256 |
 | Milestones defined | 27 |
 | v1 requirements captured | 221 |
 | Coverage | 100% |
 | P0 pitfalls identified | 16 |
-| P0 pitfall regression tests committed | 0 / 16 |
-| Milestones shipped | 0 / 27 |
-| Total v1 phases shipped | 6 / 256 |
-| Total elapsed days since init | 0 |
+| P0 pitfall regression tests committed | 1 / 16 (P0-9 in v1.007-D) |
+| Milestones shipped | 1 / 27 |
+| Total v1-milestone phases shipped | 11 / 11 |
+| Total project phases shipped | 11 / 256 |
+| v1 commits | 67 |
+| v1 LoC (Python) | ~2,779 |
+| v1 tests passing | 321 |
+| v1 timeline | 4 days |
 
 ---
 
@@ -91,7 +93,7 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 4. **Four-tier Arc → Phase → Slice → Step product hierarchy** — distinct from GSD's milestone/phase
 5. **Dependency DAG over linear ordering** — `depends_on` typed edges with scheduler
 6. **Hybrid daemon (always-on + per-session worker)** — dashboards + hot state
-7. **Dual-write events (SyncEvent + SQLite)** — SQLite is authoritative truth
+7. **Dual-write events (SyncEvent + SQLite)** — SQLite is authoritative truth ✓ delivered in v1
 8. **`.state/auth.json` portable, chmod 0600** — cross-host reusable
 9. **Two MCP servers: state-build + state-teach** — enforces exclusive modes physically
 10. **Pure-Python DAG scheduler (~300 LOC)** — zero new deps
@@ -124,14 +126,14 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Todos (project-level; not phase-scoped)
 
-- [ ] First Tier 1 milestone kickoff — pick among v1..v5 (suggested start: v1 + v2 in parallel since they have zero predecessors and carry the heaviest risk)
+- [ ] First Tier 2 milestone kickoff after v2..v5 ship — pick among v6..v13 in dep order
 - [ ] Create per-milestone ARC.md files under `.state/build/arcs/` once Tier 1 produces the directory structure (after 103 init)
-- [ ] Commit `.planning/ROADMAP.md`, `.planning/STATE.md`, updated `.planning/REQUIREMENTS.md` in initial roadmap commit
 - [ ] After 014 completes, re-capture claude-cli headers for version-lock doc (P2-1 defence)
+- [ ] Cleanup: delete merged `gsd/phase-{008..010.1*}` branches when convenient
 
 ### Blockers
 
-(none — foundation is unblocked)
+(none — v1 shipped; Tier 1 siblings unblocked)
 
 ### Phases Completed
 
@@ -141,11 +143,17 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 | 002 | Pydantic event schema for all 28+ event types | 2026-04-23 | [002-A](milestones/v1/phases/002-pydantic-event-schema-all-28/002-A-base-envelope-and-types.md), [002-B](milestones/v1/phases/002-pydantic-event-schema-all-28/002-B-per-aggregate-models.md), [002-C](milestones/v1/phases/002-pydantic-event-schema-all-28/002-C-tests-and-factories.md) |
 | 003 | SQLite schema + numbered migrations | 2026-04-23 | [003-A](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-A-database-connection-and-event-migrations.md), [003-B](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-B-cache-tables-migration.md), [003-C](milestones/v1/phases/003-sqlite-schema-numbered-migrations/003-C-tests-for-database-and-migrations.md) |
 | 004 | Writer task (single-writer aiosqlite + commit-then-emit) | 2026-04-23 | [004-A](milestones/v1/phases/004-writer-task/004-A-writer-core-and-seq-enforcement.md), [004-B](milestones/v1/phases/004-writer-task/004-B-writer-tests.md) |
-| 005 | SyncEvent mirror emitter | 2026-04-23 | (direct implementation, no plan files) |
+| 005 | SyncEvent mirror emitter | 2026-04-23 | [005-A](milestones/v1/phases/005-syncevent-mirror-emitter/005-A-mirror-core-and-integration.md), [005-B](milestones/v1/phases/005-syncevent-mirror-emitter/005-B-mirror-tests.md) |
 | 006 | Startup reconciliation | 2026-04-23 | [006-A](milestones/v1/phases/006-startup-reconciliation/006-A-startup-reconciler.md) |
-| 007 | Monotonic seq crash-recovery | 2026-04-24 | [007-A](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-RESEARCH.md), [007-B](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-VALIDATION.md), [007-C](milestones/v1/phases/007-monotonic-seq-crash-recovery/007-PATTERNS.md) |
+| 007 | Monotonic seq crash-recovery (P0-9 regression harness) | 2026-04-24 | 007-A, 007-B, 007-C, 007-D — see `milestones/v1/phases/007-monotonic-seq-crash-recovery/` |
+| 008 | Projector (steps/slices/concepts cache rebuild) | 2026-04-24 | 008-A (Core), 008-B (CLI Integration), 008-C (Test Suite) |
+| 009 | CLI: `state events tail \| replay \| export` | 2026-04-25 | 009-A (Queries), 009-B (Commands), 009-C (Tests) |
+| 010 | Event-store verifier + 10K replay golden fixture | 2026-04-25 | 010-A (Generator), 010-B (Hypothesis), 010-C (Projector props), 010-D (Verifier) |
+| 010.1 | Gap closure: CLI mode validation + Protocol update + daemon orchestrator + EVT-05 | 2026-04-26 | 010.1-A (Mode), 010.1-B (Protocol), 010.1-C (Orchestrator) |
 
 ### Quick Tasks Completed
+
+(none recorded)
 
 ---
 
@@ -153,10 +161,10 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:plan-phase 008`** (EventStore.read_stream with projection) — depends on 007, reads event projection.
-2. **Run `/gsd:plan-phase 011`** (AuthMethod protocol + Credential container) — parallel v2 start.
-3. **Run `/gsd:plan-phase 009`** (EventStore pagination or indexing optimization) — depends on 007.
-4. As Tier 1 ships: unblock Tier 2 milestones in dependency order per ROADMAP.md DAG.
+1. **Run `/gsd:plan-phase v2.011`** — start v2 (Auth Coverage). v2 owns 9 of 16 P0 pitfalls; highest-priority Tier 1 sibling.
+2. **In parallel:** scaffold v3 (Provider Routing) and v4 (Worktree + Snapshot) — both are independent of v2's runtime, only soft-depend on auth creds for tests.
+3. **v5 (DAG Scheduler)** — now unblocked since v1 ships event stream; can start concurrently.
+4. (Optional) Delete merged `gsd/phase-{008..010.1*}` branches at convenience.
 
 ### Plan-phase consumer guidance
 
@@ -170,20 +178,24 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 ### Project state file set
 
 - `/Users/tmac/Projects/state/.planning/PROJECT.md` — cardinal rules, constraints, key decisions
-- `/Users/tmac/Projects/state/.planning/REQUIREMENTS.md` — 221 v1 REQ-IDs + traceability
 - `/Users/tmac/Projects/state/.planning/ROADMAP.md` — 27 milestones, 256 phases, DAG
 - `/Users/tmac/Projects/state/.planning/STATE.md` — this file (live project memory)
+- `/Users/tmac/Projects/state/.planning/MILESTONES.md` — shipped-milestone log (v1 entry: 2026-04-26)
+- `/Users/tmac/Projects/state/.planning/DEBT.md` — tech-debt register (empty post-010.1)
+- `/Users/tmac/Projects/state/.planning/milestones/v1/REQUIREMENTS.md` — 221 v1 REQ-IDs (EVT-01..08 ✓)
+- `/Users/tmac/Projects/state/.planning/milestones/v1/STATE.md` — v1 milestone state (Complete)
+- `/Users/tmac/Projects/state/.planning/milestones/v1/v1-MILESTONE-AUDIT.md` — 2026-04-25 audit
 - `/Users/tmac/Projects/state/.planning/research/` — SUMMARY, ARCHITECTURE, FEATURES, PITFALLS, STACK
-- `/Users/tmac/Projects/state/.planning/config.json` — mode=yolo, granularity=fine, parallelization=true, verifier=true, plan_check=true, nyquist_validation=true, auto_advance=true
+- `/Users/tmac/Projects/state/.planning/config.json` — mode=yolo, granularity=fine, parallelization=true
 - `/Users/tmac/Projects/state/state-inputs/` — gitignored reference material (opencode source, GSD source, AOL workflows, claude-oauth.md, gsd2-auth-analysis.md)
 
 ### Tier boundary gates
 
-- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete).
+- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ — 4 left (v2, v3, v4, v5).**
 - **Tier 2 → Tier 3:** all of v6..v13 ship (kernel + plumbing complete).
 - **Tier 3 → Tier 4:** all of v14..v24 ship (build + teach kernels complete).
-- **Tier 4 → v1:** v27 ships (release ready).
+- **Tier 4 → v1 release:** v27 ships (release ready).
 
 ---
 
-*State initialized: 2026-04-22*
+*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v1 merged to main: 2026-04-28*

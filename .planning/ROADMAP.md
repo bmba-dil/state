@@ -29,7 +29,7 @@
 
 ### Tier 1 — Foundation (parallel — no internal deps after scaffolding)
 
-- [ ] **v1 — Event Store Foundation** — Dual-write SQLite + SyncEvent event store with deterministic replay
+- [x] **v1 — Event Store Foundation** — Dual-write SQLite + SyncEvent event store with deterministic replay ✓ Shipped 2026-04-26
 - [ ] **v2 — Auth Coverage (5 methods)** — All five auth methods with filelock-guarded refresh and token redaction
 - [ ] **v3 — Provider Routing + Model Profiles** — litellm default + Anthropic SDK escape hatch with OAuth bypass
 - [ ] **v4 — Worktree + Snapshot Service** — Per-Slice worktrees with Step/Slice snapshots and GC
@@ -177,14 +177,16 @@ Tier 4 ends at v27 shipped — this is v1 release.
 
 ---
 
-## v1 — Event Store Foundation
+## v1 — Event Store Foundation ✓ SHIPPED
+
+**Status:** Shipped 2026-04-26 — merged to `main` 2026-04-28. All 10 phases + 010.1 gap-closure complete. 67 commits, ~2,779 LoC Python, 321 tests passing, 0 regressions. P0-9 regression harness in 007-D. See `.planning/MILESTONES.md` and `.planning/milestones/v1/STATE.md` for details.
 
 **Version:** v0.1
 **Goal:** Dual-write event store where `.state/events.sqlite` is authoritative truth and opencode SyncEvent is a derived mirror; replay is bit-identical across restarts and survives opencode being offline.
 **Depends on:** (none — foundation)
 **Tier:** 1
 **Complexity:** L
-**P0 pitfalls owned:** P0-9 (SQLite event-sequence non-monotonic after crash)
+**P0 pitfalls owned:** P0-9 (SQLite event-sequence non-monotonic after crash) ✓ regression test in 007-D
 
 **Opencode surface extended:**
 - `state-inputs/opencode/packages/opencode/src/sync/index.ts`
@@ -215,67 +217,71 @@ Tier 4 ends at v27 shipped — this is v1 release.
 
 ### Phases
 
-#### Phase 001 — Project scaffolding + pyproject + `state_core` package skeleton
+#### Phase 001 — Project scaffolding + pyproject + `state_core` package skeleton ✓ Complete (2026-04-23)
 **Goal:** Create the `state_core` package, `pyproject.toml` (pinning per STACK.md), `uv` workspace, base directory layout.
 **Depends on:** (none)
 **Requirements:** (foundational; no REQ-IDs directly — prerequisite)
 **Parallelizable:** no (first phase)
 
-#### Phase 002 — Pydantic event schema for all 28+ event types (`state_core.schema`)
+#### Phase 002 — Pydantic event schema for all 28+ event types (`state_core.schema`) ✓ Complete (2026-04-23)
 **Goal:** Define `EventEnvelope` and every `state.*` event with `extra = "forbid"`, including aggregate discriminator, ULID IDs, per-aggregate seq.
 **Depends on:** 001
 **Requirements:** EVT-05, EVT-08
 **Parallelizable:** yes with v1.P3
 
-#### Phase 003 — SQLite schema + numbered migrations (0001_init.sql)
+#### Phase 003 — SQLite schema + numbered migrations (0001_init.sql) ✓ Complete (2026-04-23)
 **Goal:** Author `events`, `aggregate_seq`, `steps`, `slices`, `concepts`, `decisions`, `tool_calls`, `auth_rotations` tables per ARCHITECTURE §11.3; WAL mode, synchronous=NORMAL, full index set.
 **Depends on:** 001
 **Requirements:** EVT-01, EVT-02
 **Parallelizable:** yes with v1.P2
 
-#### Phase 004 — Writer task (single-writer aiosqlite + commit-then-emit) ✅
+#### Phase 004 — Writer task (single-writer aiosqlite + commit-then-emit) ✓ Complete (2026-04-23)
 **Goal:** Implement `EventStore.append()` with per-aggregate seq enforcement, monotonic guarantee, deterministic clock injection.
 **Depends on:** 002, 003
 **Requirements:** EVT-01, EVT-02, EVT-03, EVT-06
 **Parallelizable:** no
 
-#### Phase 005 — SyncEvent mirror emitter  ✓ Complete
+#### Phase 005 — SyncEvent mirror emitter ✓ Complete (2026-04-23)
 **Goal:** Implement post-commit SyncEvent emission over opencode HTTP (when reachable), marking `synced_to_opencode=1` per row.
 **Depends on:** 004
 **Requirements:** EVT-01
 **Parallelizable:** yes with v1.P6
-**Status:** Complete
 
-#### Phase 006 — Startup reconciliation (unsent-event replay to opencode)  ✓ Complete
+#### Phase 006 — Startup reconciliation (unsent-event replay to opencode) ✓ Complete (2026-04-23)
 **Goal:** On daemon start, find rows with `synced_to_opencode=0` and emit; handle opencode-unreachable with exponential backoff.
 **Depends on:** 004
 **Requirements:** EVT-04
 **Parallelizable:** yes with v1.P5
-**Status:** Complete
 
-#### Phase 007 — Monotonic seq crash-recovery (P0-9 regression test harness)
+#### Phase 007 — Monotonic seq crash-recovery (P0-9 regression test harness) ✓ Complete (2026-04-24)
 **Goal:** Add `fsync` discipline + recovery routine that detects and repairs gaps/duplicates in `aggregate_seq`; Hypothesis property-test that ANY crash offset + replay → monotonic sequence.
 **Depends on:** 004
 **Requirements:** EVT-03
 **Parallelizable:** no
 
-#### Phase 008 — Projector (steps/slices/concepts cache rebuild from events)
+#### Phase 008 — Projector (steps/slices/concepts cache rebuild from events) ✓ Complete (2026-04-24)
 **Goal:** Rebuildable projections written through the single writer; `state events rebuild-projections` CLI.
 **Depends on:** 004
 **Requirements:** EVT-02
 **Parallelizable:** yes with v1.P9
 
-#### Phase 009 — CLI: `state events tail | replay | export`
+#### Phase 009 — CLI: `state events tail | replay | export` ✓ Complete (2026-04-25)
 **Goal:** Typer-based commands with SSE tailing, `--from <ulid>` replay, `--format jsonl` export, `--mode build|teach|kernel` filter.
 **Depends on:** 004
 **Requirements:** EVT-07, EVT-08
 **Parallelizable:** yes with v1.P8
 
-#### Phase 010 — Event-store verifier + 10,000-event replay golden fixture
+#### Phase 010 — Event-store verifier + 10,000-event replay golden fixture ✓ Complete (2026-04-25)
 **Goal:** Hypothesis property tests: idempotence + determinism; golden-fixture replay assertion.
 **Depends on:** 005, 007, 008
 **Requirements:** EVT-06 (verifier)
 **Parallelizable:** no (final)
+
+#### Phase 010.1 — Gap closure: CLI mode validation + Protocol update + daemon orchestrator + EVT-05 ✓ Complete (2026-04-26)
+**Goal:** Address tech-debt items from `v1-MILESTONE-AUDIT.md` (2026-04-25): (A) Typer callback validates `--mode` against `Mode` literal on tail/replay/export; (B) `EventStore` Protocol declares `read_events`, `read_events_iter`, `count_events`, `get_last_events` matching the SqliteEventStore implementation; (C) daemon startup orchestrator sequences `repair → migrate → reconciler`; (D) flip EVT-05 checkbox in REQUIREMENTS.md.
+**Depends on:** 009, 010
+**Requirements:** EVT-04, EVT-05, EVT-07, EVT-08
+**Parallelizable:** no (gap closure)
 
 ---
 
