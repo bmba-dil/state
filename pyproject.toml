@@ -73,6 +73,8 @@ testpaths = ["tests"]
 markers = [
     "e2e: marks tests as end-to-end (deselect with '-m \"not e2e\"')",
     "provider_parity: tests that run against live providers",
+    "integration: multi-process or cross-process tests (deselect with '-m \"not integration\"')",
+    "slow: tests that intentionally wait for timeouts (deselect with '-m \"not slow\"')",
 ]
 
 [tool.coverage.run]
