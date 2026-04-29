@@ -33,8 +33,8 @@ Cardinal rules (CLAUDE.md / Phase 011 Pattern 3 / 014-CONTEXT.md):
      structlog + state_core.auth.base + state_core.auth.refresh +
      state_core.auth.oauth_common.pkce. NO state.build.* / state.teach.*.
 
-  4. No filelock — Phase 013's refresh_credential wraps refresh() in a
-     10s-budgeted AsyncFileLock. Acquiring a second lock here deadlocks
+  4. No own lock — Phase 013's refresh_credential wraps refresh() in a
+     10s-budgeted async lock. Acquiring a second lock here deadlocks
      (refresh.py rule 9). Provider's refresh() is pure HTTP exchange.
 
   5. Per-call AsyncClient — `async with httpx.AsyncClient(...)` inside
@@ -556,18 +556,107 @@ class AnthropicAuth:
         return cred
 
     async def refresh(self, cred: Credential) -> Credential:
-        """Exchange refresh_token for new tokens. Plan 03 implements.
+        """Exchange refresh_token for new tokens. Returns a new OAuthCredential.
 
-        Plan 03 contract:
-          - POST _TOKEN_URL with {grant_type: refresh_token, refresh_token,
-                                  client_id} — NO extras.
-          - Per-call AsyncClient with Timeout(10.0, connect=5.0).
-          - NO filelock (Phase 013's refresh_credential already wraps us).
-          - Return cred.model_copy(update={access, refresh, expires}).
+        Phase 013's refresh_credential wraps this call in a 10s-budgeted
+        async file lock; this method MUST NOT acquire its own lock (deadlock —
+        refresh.py rule 9). Per-call httpx.AsyncClient with the same
+        Timeout(10.0, connect=5.0) as login().
+
+        Args:
+            cred: The expired (or near-expired per 5-min buffer) credential.
+                  Must be an OAuthCredential — refresh of ApiKeyCredential
+                  is a programming error (Phase 013 short-circuits api keys
+                  before reaching here).
+
+        Returns:
+            New OAuthCredential via cred.model_copy(update={access, refresh,
+            expires}). Frozen Pydantic model — input is never mutated.
+
+        Raises:
+            TypeError: if cred is not an OAuthCredential.
+            StealthRejected: 401/403 with stealth-shape signal.
+            AuthRefreshError: invalid_grant, network error, non-stealth 4xx/5xx,
+                              response shape invalid.
         """
-        raise NotImplementedError(
-            "AnthropicAuth.refresh() — Plan 014-03 implements (Wave 2)."
+        if not isinstance(cred, OAuthCredential):
+            raise TypeError(
+                f"AnthropicAuth.refresh() requires OAuthCredential, "
+                f"got {type(cred).__name__} — Phase 013 should short-circuit "
+                f"non-OAuth credentials before reaching this method."
+            )
+
+        body = {
+            "grant_type": "refresh_token",
+            "refresh_token": cred.refresh,
+            "client_id": _CLIENT_ID,
+        }
+        log.info(
+            "anthropic.refresh.exchange",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
         )
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                follow_redirects=False,
+            ) as client:
+                resp = await client.post(
+                    _TOKEN_URL,
+                    json=body,
+                    headers={"accept": "application/json"},
+                )
+        except httpx.HTTPError as exc:
+            raise AuthRefreshError(f"refresh transport error: {exc}") from exc
+
+        if resp.status_code >= 400:
+            body_text = resp.text[:500]
+            body_json: dict = {}
+            try:
+                body_json = resp.json()
+            except Exception:
+                pass
+            # PRECEDENCE: invalid_grant ALWAYS wins — refresh-token expiry is
+            # unambiguous. Must run BEFORE stealth heuristic to satisfy the
+            # must_haves contract `truth: "On 401 invalid_grant → AuthRefreshError"`.
+            # A naive heuristic that scans description for "Claude Code" would
+            # misclassify "Refresh token expired for Claude Code session" as
+            # StealthRejected — see Wave 0 row 014-01-17 regression test.
+            if body_json.get("error") == "invalid_grant":
+                desc = body_json.get("error_description") or "invalid_grant"
+                raise AuthRefreshError(
+                    f"Refresh token rejected: {desc}"
+                )
+            # Stealth detection only AFTER invalid_grant ruled out.
+            if _is_stealth_rejection(body_json):
+                raise StealthRejected(
+                    f"refresh rejected (status {resp.status_code}) — "
+                    f"stealth headers may have drifted. Body: {body_text!r}"
+                )
+            raise AuthRefreshError(
+                f"refresh http {resp.status_code}: {body_text!r}"
+            )
+
+        try:
+            parsed = AnthropicTokenResponse.model_validate_json(resp.content)
+        except ValidationError as exc:
+            raise AuthRefreshError(f"refresh response shape: {exc}") from exc
+
+        now = time.time()
+        new_cred = cred.model_copy(
+            update={
+                "access": parsed.access_token,
+                "refresh": parsed.refresh_token,
+                "expires": now + float(parsed.expires_in),
+            }
+        )
+        log.info(
+            "anthropic.refresh.success",
+            provider_id=new_cred.provider_id,
+            account_id=new_cred.account_id,
+            expires_in_seconds=parsed.expires_in,
+        )
+        return new_cred
 
 
 # ── Module exports ───────────────────────────────────────────────────────
@@ -599,3 +688,49 @@ __all__ = [
     # Class
     "AnthropicAuth",
 ]
+
+
+# ── Module entry point — `python -m state_core.auth.providers.anthropic login` ──
+#
+# Smoke-test surface for the pre-merge mitmproxy capture gate. Polished
+# `state auth login` Typer CLI lands in Phase 022; this argparse stub is
+# deliberately minimal so it can be removed cleanly when 022 ships.
+
+
+def _main() -> int:  # pragma: no cover — covered by integration smoke, not unit
+    import argparse
+    import asyncio
+
+    parser = argparse.ArgumentParser(
+        prog="python -m state_core.auth.providers.anthropic",
+        description="Anthropic OAuth stealth login — Phase 014 smoke surface.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser(
+        "login",
+        help="Run the interactive Anthropic OAuth stealth login flow.",
+    )
+    args = parser.parse_args()
+
+    if args.cmd == "login":
+        try:
+            cred = asyncio.run(AnthropicAuth().login())
+        except KeyboardInterrupt:
+            print("\nLogin cancelled.", file=sys.stderr)
+            return 130   # POSIX SIGINT exit code
+        except (AuthLoginError, StealthRejected) as exc:
+            print(f"Login failed: {exc}", file=sys.stderr)
+            return 1
+        label = (
+            cred.extras.get("email_address")
+            or cred.account_id
+            or "<unknown account>"
+        )
+        print(f"Logged in as {label}")
+        return 0
+
+    return 2  # unknown subcommand
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(_main())
