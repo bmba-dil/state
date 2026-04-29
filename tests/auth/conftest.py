@@ -3,10 +3,34 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
+import structlog
 
 from state_core.auth.base import ApiKeyCredential, OAuthCredential
+
+
+@pytest.fixture(autouse=True)
+def _isolate_structlog_for_auth_tests() -> Any:
+    """Isolate structlog config for auth tests; restore after.
+
+    ``tests/test_cli.py`` configures structlog with a CRITICAL-level
+    filtering wrapper at module-import time (operational-log suppression
+    from v1 010.1 gap closure). That filter drops events before
+    ``capture_logs`` can intercept them, breaking REFRESH-29
+    (``test_emits_acquisition_logs``) when the full suite runs in any
+    order that loads test_cli.py first.
+
+    We snapshot the global config, reset to defaults for the auth test,
+    then restore — so auth tests get clean ``capture_logs`` semantics
+    AND test_cli tests still see their CRITICAL-filtered config when
+    they run after auth tests in the alphabetical order.
+    """
+    saved = structlog.get_config()
+    structlog.reset_defaults()
+    yield
+    structlog.configure(**saved)
 
 
 @pytest.fixture
