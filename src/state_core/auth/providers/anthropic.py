@@ -53,6 +53,7 @@ from __future__ import annotations
 import base64
 import getpass  # noqa: F401 — exposed at module scope so tests can monkeypatch
 import sys
+import time
 
 # Expose `print` in the module's namespace so Plan 03 tests can
 # monkeypatch `state_core.auth.providers.anthropic.print` to capture
@@ -296,6 +297,133 @@ def _to_credential(resp: AnthropicTokenResponse, now: float) -> OAuthCredential:
     )
 
 
+def _build_authorize_url(verifier: str, challenge: str) -> str:
+    """Construct the authorize URL with state == verifier (P0-8).
+
+    Args:
+        verifier: PKCE verifier from generate_verifier(). Reused as the
+                  OAuth `state=` parameter — the server round-trips state
+                  and we accept that as proof of possession.
+        challenge: PKCE S256 challenge from build_challenge(verifier).
+
+    Returns:
+        Full URL ready for the user to open in their browser. Default
+        urllib.parse.urlencode uses quote_plus → spaces become '+';
+        Anthropic accepts both '+' and '%20' (RESEARCH §Open Q3).
+    """
+    qs = urlencode(
+        {
+            "client_id": _CLIENT_ID,
+            "response_type": "code",
+            "redirect_uri": _REDIRECT_URI,
+            "scope": _SCOPES,
+            "state": verifier,                  # state == verifier (P0-8)
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+        }
+    )
+    return f"{_AUTHORIZE_URL}?{qs}"
+
+
+def _is_stealth_rejection(body_json: dict) -> bool:
+    """Detect token-endpoint rejection bodies that signal stealth-header drift.
+
+    Tightened heuristic (post-Wave-0 verifier review): require BOTH a
+    stealth-shape error code AND a stealth keyword in the description.
+    The bare substring "Claude Code" is intentionally NOT a marker —
+    legitimate `invalid_grant` refresh-failure descriptions routinely
+    contain that phrase ("Refresh token expired for Claude Code session"),
+    and misclassifying them as StealthRejected would violate the must_haves
+    contract `truth: "On 401 invalid_grant → AuthRefreshError"`.
+
+    Args:
+        body_json: Parsed JSON body of the 401/403 response. May be `{}` if
+                   the body was non-JSON or empty.
+
+    Returns:
+        True iff the body looks like Anthropic rejected the request because
+        the stealth headers/identity drifted from claude-code shape. False
+        for `invalid_grant`, network glitches, or generic 5xx.
+
+    Conservative — false positives cause user-facing "header drift suspected"
+    message; false negatives just demote to AuthLoginError / AuthRefreshError.
+    Phase 022's CLI uses StealthRejected to render a more actionable hint.
+
+    NOTE: callers MUST pre-check `body_json.get("error") == "invalid_grant"`
+    BEFORE calling this and raise AuthRefreshError directly. See `refresh()`
+    and `_exchange_code()` for the canonical precedence.
+    """
+    error = (body_json.get("error") or "").lower()
+    desc = (body_json.get("error_description") or "").lower()
+    has_error_code = error in {"invalid_client", "unauthorized_client"}
+    stealth_kw = any(
+        kw in desc
+        for kw in ("stealth", "drift", "header signature", "client identification")
+    )
+    return has_error_code and stealth_kw
+
+
+async def _exchange_code(code: str, verifier: str) -> AnthropicTokenResponse:
+    """POST _TOKEN_URL with authorization_code grant body. Per-call AsyncClient.
+
+    Raises:
+        StealthRejected: 401/403 with stealth-shape signal (header drift).
+        AuthLoginError: any other 4xx/5xx, network error, or response that
+                        fails AnthropicTokenResponse validation.
+    """
+    body = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": _REDIRECT_URI,
+        "client_id": _CLIENT_ID,
+        "code_verifier": verifier,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=False,                  # OAuth never redirects
+        ) as client:
+            resp = await client.post(
+                _TOKEN_URL,
+                json=body,                           # JSON per CONTEXT decision
+                headers={"accept": "application/json"},
+            )
+    except httpx.HTTPError as exc:
+        raise AuthLoginError(f"token exchange transport error: {exc}") from exc
+
+    if resp.status_code >= 400:
+        body_text = resp.text[:500]                  # truncate; never log full
+        body_json: dict = {}
+        try:
+            body_json = resp.json()
+        except Exception:
+            pass
+        # PRECEDENCE: invalid_grant ALWAYS wins — auth-code expiry / one-shot-use
+        # is unambiguous. Must run BEFORE any stealth heuristic to satisfy the
+        # must_haves contract `truth: "On 401 invalid_grant → AuthRefreshError"`
+        # (and the symmetric login-side expectation: invalid_grant → AuthLoginError,
+        # never StealthRejected — even when the description mentions "Claude Code").
+        if body_json.get("error") == "invalid_grant":
+            desc = body_json.get("error_description") or "invalid_grant"
+            raise AuthLoginError(
+                f"token exchange rejected: {desc}"
+            )
+        # Stealth detection only AFTER invalid_grant ruled out.
+        if _is_stealth_rejection(body_json):
+            raise StealthRejected(
+                f"token exchange rejected (status {resp.status_code}) — "
+                f"stealth headers may have drifted. Body: {body_text!r}"
+            )
+        raise AuthLoginError(
+            f"token exchange http {resp.status_code}: {body_text!r}"
+        )
+
+    try:
+        return AnthropicTokenResponse.model_validate_json(resp.content)
+    except ValidationError as exc:
+        raise AuthLoginError(f"token exchange response shape: {exc}") from exc
+
+
 # ── AnthropicAuth — AuthMethod Protocol implementation ──────────────────
 
 
@@ -372,24 +500,60 @@ class AnthropicAuth:
     # ── Async (I/O-bound) — Plan 03 implements ─────────────────────────
 
     async def login(self) -> OAuthCredential:
-        """Run the interactive paste-flow OAuth login. Plan 03 implements.
+        """Run the interactive paste-flow Anthropic OAuth login.
 
-        Plan 03 contract (014-03-PLAN.md):
-          1. verifier = generate_verifier()
-          2. challenge = build_challenge(verifier)
-          3. authorize_url = build_authorize_url(verifier, challenge)
-          4. print(authorize_url)
-          5. paste = getpass.getpass("Paste code#state: ")
-          6. code, state = _parse_paste(paste)
-          7. assert state == verifier (P0-8 client-side check)
-          8. POST _TOKEN_URL with authorization_code grant body
-          9. Parse AnthropicTokenResponse
-         10. Return _to_credential(resp, now=time.time())
+        Steps:
+            1. Generate ONE PKCE verifier; reuse as both `state` and code_verifier (P0-8).
+            2. Build authorize URL; print it for the user to open in browser.
+            3. Read `code#state` paste via getpass (hidden — auth code is a
+               transient secret, T6).
+            4. Parse paste; verify state == verifier client-side (T10).
+            5. POST token endpoint with authorization_code grant.
+            6. Convert response to wire-shape OAuthCredential.
+
+        Raises:
+            AuthLoginError: paste format wrong, state/verifier mismatch,
+                            network error, non-stealth 4xx/5xx, response
+                            shape invalid.
+            StealthRejected: 401/403 with stealth-shape signal.
         """
-        raise NotImplementedError(
-            "AnthropicAuth.login() — Plan 014-03 implements (Wave 2). "
-            "Plan 014-02 ships only the constants + class skeleton."
+        verifier = generate_verifier()
+        challenge = build_challenge(verifier)
+        authorize_url = _build_authorize_url(verifier, challenge)
+
+        # Print outside getpass so the URL appears even if stdout is a pipe.
+        print(
+            "Open this URL in your browser, complete login, "
+            "then paste the redirect URL fragment back:\n\n"
+            f"  {authorize_url}\n"
         )
+        paste = getpass.getpass("Paste code#state: ")
+
+        code, state = _parse_paste(paste)
+        if state != verifier:
+            # Defensive client-side check (T10). Server enforces server-side too.
+            raise AuthLoginError(
+                "PKCE state mismatch — pasted state does not equal generated "
+                "verifier. Re-run login (the previous URL may have been replaced "
+                "or tampered with)."
+            )
+
+        now = time.time()
+        log.info(
+            "anthropic.login.exchange",
+            client_id=_CLIENT_ID,
+            verifier_length=len(verifier),
+        )
+        resp = await _exchange_code(code, verifier)
+
+        cred = _to_credential(resp, now=now)
+        log.info(
+            "anthropic.login.success",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
+            expires_in_seconds=resp.expires_in,
+        )
+        return cred
 
     async def refresh(self, cred: Credential) -> Credential:
         """Exchange refresh_token for new tokens. Plan 03 implements.
