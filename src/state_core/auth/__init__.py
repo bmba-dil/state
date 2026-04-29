@@ -1,11 +1,11 @@
 """Auth layer: 5-method credential management.
 
-Public surface re-exported from state_core.auth.base (Phase 011) and
-state_core.auth.store (Phase 012). Downstream phases can
-`from state_core.auth import OAuthCredential, AuthVault` instead of
-reaching into the submodules.
+Public surface re-exported from state_core.auth.base (Phase 011),
+state_core.auth.store (Phase 012), and state_core.auth.refresh
+(Phase 013). Downstream phases can
+``from state_core.auth import OAuthCredential, AuthVault, refresh_credential``
+instead of reaching into the submodules.
 
-Phase 013 (refresh.py) will add its own re-exports here when it lands.
 Provider modules under state_core.auth.providers/ are intentionally
 NOT re-exported — they are accessed via the dispatcher in Phase 014.
 """
@@ -18,6 +18,15 @@ from state_core.auth.base import (
     Credential,
     CredentialAdapter,
     OAuthCredential,
+)
+from state_core.auth.refresh import (
+    EXPIRY_BUFFER_SECONDS,
+    LOCK_TIMEOUT_SECONDS,
+    REFRESH_HTTP_TIMEOUT_SECONDS,
+    RefreshLockTimeout,
+    is_expired_buffered,
+    read_credential,
+    refresh_credential,
 )
 from state_core.auth.store import (
     AuthVault,
@@ -42,4 +51,12 @@ __all__ = [
     "get_auth_json_path",
     "load_vault",
     "save_vault",
+    # Phase 013 — refresh
+    "EXPIRY_BUFFER_SECONDS",
+    "LOCK_TIMEOUT_SECONDS",
+    "REFRESH_HTTP_TIMEOUT_SECONDS",
+    "RefreshLockTimeout",
+    "is_expired_buffered",
+    "read_credential",
+    "refresh_credential",
 ]
