@@ -284,7 +284,6 @@ def test_provider_id_dotted() -> None:
     ("google.antigravity") in separate AuthVault buckets. Phase 019
     round-robin operates within ONE provider_id only.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth class")
     assert antigravity.AntigravityAuth.provider_id == "google.antigravity"
     assert antigravity.AntigravityAuth().provider_id == "google.antigravity"
 
@@ -299,7 +298,6 @@ def test_is_token() -> None:
 
     Gemini tokens (sk-ant-*) and refresh tokens (1//*) return False.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth.is_token")
     auth = antigravity.AntigravityAuth()
     assert auth.is_token("ya29.foo") is True
     assert auth.is_token("ya29.") is True  # bare prefix accepted
@@ -315,7 +313,6 @@ def test_is_expired_5min_buffer() -> None:
     Cred with `expires = now + 400` (well outside) → False.
     Delegates to is_expired_buffered — provider MUST NOT reimplement.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth.is_expired")
     from state_core.auth.base import OAuthCredential
 
     auth = antigravity.AntigravityAuth()
@@ -344,7 +341,6 @@ def test_http_headers_user_agent() -> None:
     API uses the literal string `antigravity` (NOT version-suffixed).
     Mismatched UA → quota attribution lands wrong → IAM_PERMISSION_DENIED.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth.http_headers")
     from state_core.auth.base import OAuthCredential
 
     cred = OAuthCredential(
@@ -362,7 +358,6 @@ def test_http_headers_goog_api_client() -> None:
 
     Verified literal: `google-cloud-sdk vscode_cloudshelleditor/0.1`.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth.http_headers")
     from state_core.auth.base import OAuthCredential
 
     cred = OAuthCredential(
@@ -382,7 +377,6 @@ def test_http_headers_client_metadata_json() -> None:
     keys: ideType (always "ANTIGRAVITY"), platform (run-time sys.platform
     mapping), pluginType (always "GEMINI"). No additional keys leak in.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth.http_headers")
     import orjson
     import sys
 
@@ -415,7 +409,6 @@ def test_satisfies_authmethod_protocol() -> None:
     isinstance(). All five required attributes must be present:
     provider_id, is_token, is_expired, http_headers, login, refresh.
     """
-    pytest.xfail("Plan 03 implements AntigravityAuth class")
     from state_core.auth.base import AuthMethod
 
     assert isinstance(antigravity.AntigravityAuth(), AuthMethod) is True
