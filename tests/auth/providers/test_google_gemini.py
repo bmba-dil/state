@@ -372,39 +372,180 @@ async def test_login_full_flow(
 
 
 # 015-D-02 — P2-2 forward
-def test_refresh_rotation_persisted() -> None:
-    """When Google returns a new refresh_token, persist it (creds.model_copy)."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_rotation_persisted(
+    httpx_mock,
+    fixture_google_access_token,
+    fixture_google_rotated_refresh_token,
+) -> None:
+    """P2-2: when Google returns a NEW refresh_token, persist it."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json={
+            "access_token": fixture_google_access_token,
+            "expires_in":   3599,
+            "refresh_token": fixture_google_rotated_refresh_token,    # NEW — must persist
+            "token_type":   "Bearer",
+        },
+    )
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    old = OAuthCredential(
+        access="ya29.OLD",
+        refresh="1//OLD-FIXTURE-do-not-redact-in-test-only",
+        expires=0.0,
+        provider_id="google.gemini_cli",
+    )
+    new = await GoogleGeminiAuth().refresh(old)
+    assert new.refresh == fixture_google_rotated_refresh_token
+    assert new.access == fixture_google_access_token
 
 
-def test_refresh_persists_rotated_refresh_token() -> None:
-    """Alias from research §validation row."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_persists_rotated_refresh_token(
+    httpx_mock,
+    fixture_google_access_token,
+    fixture_google_rotated_refresh_token,
+) -> None:
+    """Alias from research §validation row — same as test_refresh_rotation_persisted."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json={
+            "access_token": fixture_google_access_token,
+            "expires_in":   3599,
+            "refresh_token": fixture_google_rotated_refresh_token,
+            "token_type":   "Bearer",
+        },
+    )
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    old = OAuthCredential(
+        access="ya29.OLD",
+        refresh="1//OLD-FIXTURE-do-not-redact-in-test-only",
+        expires=0.0,
+        provider_id="google.gemini_cli",
+    )
+    new = await GoogleGeminiAuth().refresh(old)
+    assert new.refresh == fixture_google_rotated_refresh_token
 
 
 # 015-D-03 — P2-2 inverse
-def test_refresh_no_rotation_keeps_old() -> None:
-    """When Google omits refresh_token, preserve original (`creds.refresh_token or original`)."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_no_rotation_keeps_old(
+    httpx_mock,
+    fixture_google_access_token,
+) -> None:
+    """P2-2 inverse: when Google omits refresh_token, preserve the original."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json={
+            "access_token": fixture_google_access_token,
+            "expires_in":   3599,
+            # NO refresh_token in response — Google did not rotate
+            "token_type":   "Bearer",
+        },
+    )
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    old = OAuthCredential(
+        access="ya29.OLD",
+        refresh="1//PRESERVED-FIXTURE-do-not-redact-in-test-only",
+        expires=0.0,
+        provider_id="google.gemini_cli",
+    )
+    new = await GoogleGeminiAuth().refresh(old)
+    assert new.refresh == "1//PRESERVED-FIXTURE-do-not-redact-in-test-only"   # preserved
+    assert new.access == fixture_google_access_token
 
 
-def test_refresh_preserves_unrotated_refresh_token() -> None:
-    """Alias from research §validation row."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_preserves_unrotated_refresh_token(
+    httpx_mock,
+    fixture_google_access_token,
+) -> None:
+    """Alias from research §validation row — same as test_refresh_no_rotation_keeps_old."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json={
+            "access_token": fixture_google_access_token,
+            "expires_in":   3599,
+            "token_type":   "Bearer",
+        },
+    )
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    old = OAuthCredential(
+        access="ya29.OLD",
+        refresh="1//PRESERVED-FIXTURE-do-not-redact-in-test-only",
+        expires=0.0,
+        provider_id="google.gemini_cli",
+    )
+    new = await GoogleGeminiAuth().refresh(old)
+    assert new.refresh == "1//PRESERVED-FIXTURE-do-not-redact-in-test-only"
 
 
 # 015-D-04
-def test_refresh_5min_buffer() -> None:
-    """Refresh respects Phase 013's is_expired_buffered (5-min buffer at AuthMethod layer)."""
-    pytest.xfail("Plan D implementation pending")
+def test_refresh_5min_buffer(now_frozen) -> None:
+    """P0-7: AuthMethod.is_expired returns True when now >= cred.expires - 300."""
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    auth = GoogleGeminiAuth()
+    # cred expires 200s after now → already inside buffer
+    cred = OAuthCredential(
+        access="ya29.x", refresh="1//x", expires=now_frozen + 200.0,
+        provider_id="google.gemini_cli",
+    )
+    assert auth.is_expired(cred, now=now_frozen)
+    # cred expires 600s after now → outside buffer
+    cred = OAuthCredential(
+        access="ya29.x", refresh="1//x", expires=now_frozen + 600.0,
+        provider_id="google.gemini_cli",
+    )
+    assert not auth.is_expired(cred, now=now_frozen)
 
 
 # 015-D-05
-def test_refresh_request_headers_match_gemini_cli() -> None:
-    """Refresh POST body: form-urlencoded with grant_type=refresh_token,
-    refresh_token, client_id, client_secret. Headers: accept: application/json.
-    NO Authorization header (refresh uses body credentials, not Bearer)."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_request_headers_match_gemini_cli(
+    httpx_mock,
+    fixture_google_access_token,
+) -> None:
+    """Refresh POST: form-urlencoded body, accept: application/json header,
+    NO Authorization header (refresh uses body credentials)."""
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json={
+            "access_token": fixture_google_access_token,
+            "expires_in":   3599,
+            "token_type":   "Bearer",
+        },
+    )
+    from state_core.auth.base import OAuthCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    old = OAuthCredential(
+        access="ya29.OLD", refresh="1//OLD", expires=0.0,
+        provider_id="google.gemini_cli",
+    )
+    await GoogleGeminiAuth().refresh(old)
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 1
+    req = requests[0]
+    # Body assertions
+    body = req.content.decode("ascii")
+    assert "grant_type=refresh_token" in body
+    assert "refresh_token=1%2F%2FOLD" in body or "refresh_token=1//OLD" in body
+    assert "client_id=" in body
+    assert "client_secret=" in body
+    # Header assertions
+    assert req.headers.get("accept", "").lower() == "application/json"
+    # NO Authorization — refresh uses body credentials, not Bearer
+    assert "authorization" not in {k.lower() for k in req.headers.keys()}
 
 
 # 015-D-06
@@ -504,10 +645,29 @@ def test_provider_id_dotted() -> None:
 
 
 def test_expiry_epoch_timezone_invariant() -> None:
-    """Pitfall 7: creds.expiry → epoch is the same regardless of TZ."""
-    pytest.xfail("Plan D implementation pending")
+    """Pitfall 7: expires = now + expires_in — pure float arithmetic, no
+    datetime. Result is the same regardless of TZ."""
+    from state_core.auth.providers.google_gemini import (
+        GoogleTokenResponse,
+        _to_credential,
+    )
+    resp = GoogleTokenResponse(
+        access_token="ya29.x",
+        expires_in=3599,
+        refresh_token="1//x",
+        token_type="Bearer",
+    )
+    # Fix now to a known epoch
+    now = 1_770_000_000.0
+    cred = _to_credential(resp, original_refresh="1//x", now=now)
+    assert cred.expires == now + 3599.0  # exactly — no TZ math
 
 
-def test_refresh_rejects_apikey() -> None:
-    """refresh(ApiKeyCredential) raises TypeError (caller programming error)."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_refresh_rejects_apikey() -> None:
+    """refresh(ApiKeyCredential) raises TypeError — caller programming error."""
+    from state_core.auth.base import ApiKeyCredential
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    cred = ApiKeyCredential(key="sk-test", provider_id="google.gemini_cli")
+    with pytest.raises(TypeError, match="OAuthCredential"):
+        await GoogleGeminiAuth().refresh(cred)

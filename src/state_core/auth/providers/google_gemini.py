@@ -511,10 +511,112 @@ class GoogleGeminiAuth:
         return cred
 
     async def refresh(self, cred: Credential) -> Credential:
-        """Refresh access_token using refresh_token. Plan D implements the body."""
-        raise NotImplementedError(
-            "Plan D (015-D) implements GoogleGeminiAuth.refresh()"
+        """Exchange refresh_token for new tokens. Returns a new OAuthCredential.
+
+        Hand-rolled httpx POST (NOT google-auth Credentials.refresh) for:
+          - testability via pytest-httpx
+          - symmetry with Phase 014's anthropic.py refresh()
+          - explicit rotation rule (auditable inline)
+
+        Phase 013's refresh_credential wraps this call in a 10s-budgeted async
+        file lock; this method MUST NOT acquire its own lock (deadlock —
+        refresh.py rule 9). Per-call httpx.AsyncClient(Timeout(10.0, connect=5.0)).
+
+        P2-2 rotation rule: persist `parsed.refresh_token or cred.refresh`
+        UNCONDITIONALLY. Google rotates silently; the old token may be revoked.
+        NEVER compare-and-skip; treat rotation as opaque.
+
+        Args:
+            cred: The expired (or near-expired per 5-min buffer) credential.
+                  Must be an OAuthCredential — refresh of ApiKeyCredential is a
+                  programming error (Phase 013 short-circuits api keys before
+                  reaching here).
+
+        Returns:
+            New OAuthCredential via cred.model_copy(update={...}). Frozen
+            Pydantic model — input is never mutated. account_id and extras
+            (incl. project_id, email) are preserved.
+
+        Raises:
+            TypeError: if cred is not an OAuthCredential.
+            AuthRefreshError: invalid_grant, network error, 4xx/5xx, response
+                              shape invalid.
+        """
+        if not isinstance(cred, OAuthCredential):
+            raise TypeError(
+                f"GoogleGeminiAuth.refresh() requires OAuthCredential, "
+                f"got {type(cred).__name__} — Phase 013 should short-circuit "
+                f"non-OAuth credentials before reaching this method."
+            )
+
+        body = {
+            "grant_type":    "refresh_token",
+            "refresh_token": cred.refresh,
+            "client_id":     _CLIENT_ID,
+            "client_secret": _CLIENT_SECRET,
+        }
+        log.info(
+            "google_gemini.refresh.exchange",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
         )
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                follow_redirects=False,
+            ) as client:
+                resp = await client.post(
+                    _TOKEN_URL,
+                    data=body,                              # form-urlencoded
+                    headers={"accept": "application/json"},
+                )
+        except httpx.HTTPError as exc:
+            raise AuthRefreshError(f"refresh transport error: {exc}") from exc
+
+        if resp.status_code >= 400:
+            body_text = resp.text[:500]
+            body_json: dict = {}
+            try:
+                body_json = resp.json()
+            except Exception:
+                pass
+            # Precedence: invalid_grant first — refresh_token expiry is
+            # unambiguous. Caller (Phase 022 CLI) surfaces the
+            # "run state auth login google.gemini_cli" remediation.
+            if body_json.get("error") == "invalid_grant":
+                desc = body_json.get("error_description") or "invalid_grant"
+                raise AuthRefreshError(
+                    f"Refresh token rejected: {desc}"
+                )
+            raise AuthRefreshError(
+                f"refresh http {resp.status_code}: {body_text!r}"
+            )
+
+        try:
+            parsed = GoogleTokenResponse.model_validate_json(resp.content)
+        except ValidationError as exc:
+            raise AuthRefreshError(f"refresh response shape: {exc}") from exc
+
+        # P2-2 rotation rule. ALWAYS persist whatever the response returned,
+        # falling back to the original ONLY when Google omitted refresh_token.
+        new_refresh = parsed.refresh_token or cred.refresh
+
+        now = time.time()
+        new_cred = cred.model_copy(
+            update={
+                "access":  parsed.access_token,
+                "refresh": new_refresh,
+                "expires": now + float(parsed.expires_in),
+            }
+        )
+        log.info(
+            "google_gemini.refresh.success",
+            provider_id=new_cred.provider_id,
+            account_id=new_cred.account_id,
+            expires_in_seconds=parsed.expires_in,
+            rotated=parsed.refresh_token is not None,        # log fact of rotation, NOT the value
+        )
+        return new_cred
 
 
 # ── Module exports ───────────────────────────────────────────────────────
