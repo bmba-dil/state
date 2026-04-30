@@ -590,21 +590,46 @@ def test_state_and_verifier_independent() -> None:
     assert len(s2) == 43
 
 
-# 015-D-07
-def test_main_argparse_login() -> None:
-    """`python -m state_core.auth.providers.google_gemini login` runs without ImportError."""
-    pytest.xfail("Plan D implementation pending")
-
-
 def test_module_main_imports() -> None:
-    """Alias — module-level argparse entry point importable."""
-    pytest.xfail("Plan D implementation pending")
+    """`python -m state_core.auth.providers.google_gemini` imports cleanly."""
+    import importlib
+    mod = importlib.import_module("state_core.auth.providers.google_gemini")
+    assert hasattr(mod, "_main")
+    assert hasattr(mod, "GoogleGeminiAuth")
+
+
+# 015-D-07
+def test_main_argparse_login(monkeypatch, capsys) -> None:
+    """`python -m state_core.auth.providers.google_gemini login` argparse path
+    works — KeyboardInterrupt during login exits 130."""
+    import sys as _sys
+    from state_core.auth.providers import google_gemini
+
+    monkeypatch.setattr(_sys, "argv", ["google_gemini.py", "login"])
+
+    # Make login() raise KeyboardInterrupt to exercise the SIGINT path.
+    async def _fake_login(self):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(google_gemini.GoogleGeminiAuth, "login", _fake_login)
+
+    rc = google_gemini._main()
+    assert rc == 130
 
 
 # 015-D-08
-def test_main_argparse_refresh() -> None:
-    """`python -m state_core.auth.providers.google_gemini refresh google.gemini_cli` runs."""
-    pytest.xfail("Plan D implementation pending")
+def test_main_argparse_refresh(monkeypatch, capsys, tmp_path) -> None:
+    """`python -m state_core.auth.providers.google_gemini refresh google.gemini_cli`
+    argparse path — KeyError when no credential is in vault → exit 1."""
+    import sys as _sys
+    from state_core.auth.providers import google_gemini
+
+    monkeypatch.setenv("STATE_AUTH_JSON", str(tmp_path / "auth.json"))
+    monkeypatch.setattr(_sys, "argv", ["google_gemini.py", "refresh", "google.gemini_cli"])
+
+    rc = google_gemini._main()
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "No credential for provider_id" in captured.err
 
 
 # ── Supplementary (research §validation table) ────────────────────────
