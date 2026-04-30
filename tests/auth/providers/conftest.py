@@ -284,3 +284,80 @@ def mock_loopback_callback(monkeypatch: pytest.MonkeyPatch) -> Callable[..., Non
         )
 
     return _apply
+
+
+# ── Antigravity-specific fixtures (Phase 016) ────────────────────────────
+
+
+@pytest.fixture
+def mock_authorize_url_antigravity(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Capture the authorize URL printed by AntigravityAuth.login().
+
+    Returns a list that will receive each printed URL containing the Google
+    accounts host. Tests assert on the captured URL contents (must contain
+    literal `localhost:51121`, `cclog`, `experimentsandconfigs`, etc.).
+
+    Module-late-bind: in Wave 0, `state_core.auth.providers.antigravity`
+    does NOT yet exist on disk. The fixture silently no-ops in that case
+    so collection succeeds without ImportError.
+    """
+    captured: list[str] = []
+
+    def fake_print(*args: Any, **kwargs: Any) -> None:
+        for a in args:
+            if isinstance(a, str) and "https://accounts.google.com" in a:
+                captured.append(a)
+
+    # Late import — module may not exist during collection in Wave 0.
+    try:
+        from state_core.auth.providers import antigravity as _ag  # type: ignore[import-not-found]
+
+        monkeypatch.setattr(_ag, "print", fake_print, raising=False)
+    except ImportError:
+        # Wave 0: module not yet created — fixture is inert.
+        pass
+
+    return captured
+
+
+@pytest.fixture
+def captured_token_post_antigravity() -> dict[str, Any]:
+    """Standard 200-OK token response body for Antigravity.
+
+    Returns a JSON-serializable dict matching AntigravityTokenResponse
+    shape with a 3-part JWT id_token whose payload base64url-decodes to
+    ``{"sub": "test_sub_antigravity", "email": "test@example.com",
+    "email_verified": true}``.
+
+    Five Antigravity scopes embedded in the `scope` field (cloud-platform,
+    userinfo.email, userinfo.profile, cclog, experimentsandconfigs) — P2-3.
+    """
+    # Build a valid 3-part JWT with a parseable payload. orjson preserves
+    # dict insertion order (3.7+), so id_token encoding is deterministic.
+    import base64
+    import orjson
+
+    header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+    payload_dict = {
+        "sub": "test_sub_antigravity",
+        "email": "test@example.com",
+        "email_verified": True,
+    }
+    payload = base64.urlsafe_b64encode(orjson.dumps(payload_dict)).rstrip(b"=").decode()
+    signature = "sig"  # ignored — no signature verification per RESEARCH §rule 5
+    id_token = f"{header}.{payload}.{signature}"
+
+    return {
+        "access_token": "ya29.test_access_antigravity",
+        "refresh_token": "1//test_refresh_antigravity",
+        "expires_in": 3599,
+        "scope": (
+            "https://www.googleapis.com/auth/cloud-platform "
+            "https://www.googleapis.com/auth/userinfo.email "
+            "https://www.googleapis.com/auth/userinfo.profile "
+            "https://www.googleapis.com/auth/cclog "
+            "https://www.googleapis.com/auth/experimentsandconfigs"
+        ),
+        "token_type": "Bearer",
+        "id_token": id_token,
+    }
