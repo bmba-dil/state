@@ -100,7 +100,6 @@ def test_constants() -> None:
     Device-code flow is a PUBLIC client — there is NO _CLIENT_SECRET
     constant.
     """
-    pytest.xfail("Plan 02 lands constants in github_copilot.py")
     import re
     from pathlib import Path
 
@@ -140,7 +139,6 @@ def test_provider_id_dotted() -> None:
     namespace pattern is consistent across Phase 015 (google.gemini_cli)
     and Phase 016 (google.antigravity).
     """
-    pytest.xfail("Plan 02 implements GitHubCopilotAuth class")
     assert github_copilot.GitHubCopilotAuth.provider_id == _PROVIDER_ID
     assert github_copilot.GitHubCopilotAuth().provider_id == _PROVIDER_ID
     # Negative: must NOT be opencode's hyphenated form.
@@ -157,7 +155,6 @@ def test_is_token_oauth_long_lived() -> None:
 
     is_token must NOT match other providers' prefixes (sk-ant-*, ya29.*).
     """
-    pytest.xfail("Plan 02 implements is_token")
     auth = github_copilot.GitHubCopilotAuth()
 
     # All three GitHub OAuth prefixes recognised.
@@ -185,7 +182,6 @@ def test_is_token_session_token() -> None:
     is_token must return True for ALL FOUR Copilot-related prefixes so
     the token-shape sniffer in Phase 019 routing recognises both tiers.
     """
-    pytest.xfail("Plan 02 implements is_token")
     auth = github_copilot.GitHubCopilotAuth()
 
     assert auth.is_token("tid_FIXTURE") is True
@@ -211,7 +207,6 @@ def test_is_expired_5min_buffer_session() -> None:
 
     Boundary semantics: ``now >= cred.expires - 300.0`` → expired.
     """
-    pytest.xfail("Plan 02 implements is_expired (delegates to is_expired_buffered)")
     from state_core.auth.base import OAuthCredential
 
     auth = github_copilot.GitHubCopilotAuth()
@@ -261,7 +256,6 @@ def test_http_headers_copilot_stealth() -> None:
     For ApiKeyCredential the method returns {} (caller decides for
     non-OAuth — mirrors Phase 015 pattern).
     """
-    pytest.xfail("Plan 02 implements http_headers")
     from state_core.auth.base import ApiKeyCredential, OAuthCredential
 
     auth = github_copilot.GitHubCopilotAuth()
@@ -298,7 +292,6 @@ def test_satisfies_authmethod_protocol() -> None:
     documented method (is_token, is_expired, http_headers, login,
     refresh) plus the provider_id attribute must be present.
     """
-    pytest.xfail("Plan 02 implements GitHubCopilotAuth")
     from state_core.auth.base import AuthMethod
 
     assert isinstance(github_copilot.GitHubCopilotAuth(), AuthMethod) is True
