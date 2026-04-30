@@ -431,7 +431,6 @@ async def test_login_full_flow(
     canned code, token POST returns 200 with id_token, _to_credential
     extracts sub + email.
     """
-    pytest.xfail("Plan 04 implements AntigravityAuth.login()")
     import time
 
     # Patch wait_for_oauth_callback IN the antigravity module (re-import
@@ -534,7 +533,6 @@ def test_state_and_verifier_independent(monkeypatch: pytest.MonkeyPatch) -> None
     calls per login. Patch generate_verifier to a counter and assert it
     was called exactly twice.
     """
-    pytest.xfail("Plan 04 implements AntigravityAuth.login()")
     calls: list[str] = []
 
     def _counter(*_args, **_kwargs) -> str:
@@ -652,7 +650,6 @@ async def test_port_51121_in_use_error_message(monkeypatch: pytest.MonkeyPatch) 
     copy: "port 51121" + "already in use". Documented as a fundamental
     constraint of Google's redirect_uri pre-registration, NOT a state bug.
     """
-    pytest.xfail("Plan 04 implements AntigravityAuth.login() + OSError-to-AuthLoginError translation")
     from state_core.auth.errors import AuthLoginError
 
     async def _fake_callback(port: int, expected_state: str, *, timeout: float = 300.0) -> str:
