@@ -6,9 +6,11 @@ byte-for-byte to unlock Pro/Max subscription-priced inference.
 
 Module layout (CONTEXT-locked):
   * Constants (URLs, scopes, stealth headers, system prefix, client_id)
-  * Exception hierarchy (AuthError → AuthLoginError, AuthRefreshError,
-    StealthRejected) — inline; promote to state_core.auth.errors when
-    Phase 015 lands and confirms shared shape (YAGNI per RESEARCH §Open Q5).
+  * Exception hierarchy: AuthError, AuthLoginError, AuthRefreshError now
+    live in state_core.auth.errors (Phase 015 promotion — second-consumer
+    YAGNI threshold satisfied). StealthRejected remains inline below —
+    Anthropic-specific (header-drift heuristic on the stealth flow, not
+    portable to Gemini/Antigravity/Copilot).
   * Pydantic models (AnthropicAccount, AnthropicTokenResponse) with
     extra="ignore" for forward-compat (RESEARCH Pitfall 5).
   * Helpers — _parse_paste, with_beta_param, inject_stealth_system_prefix,
@@ -71,6 +73,11 @@ from state_core.auth.base import (
     AuthMethod,
     Credential,
     OAuthCredential,
+)
+from state_core.auth.errors import (
+    AuthError,
+    AuthLoginError,
+    AuthRefreshError,
 )
 from state_core.auth.refresh import is_expired_buffered
 from state_core.auth.oauth_common.pkce import (  # noqa: F401 — re-export for Plan 03 + tests
@@ -150,24 +157,13 @@ _CLAUDE_CODE_SYSTEM_PREFIX: str = (
 
 
 # ── Exception hierarchy ──────────────────────────────────────────────────
-
-
-class AuthError(Exception):
-    """Base for all Anthropic-provider auth errors. Catch this for "any auth failure"."""
-
-
-class AuthLoginError(AuthError):
-    """Token-exchange (login) failed for a non-stealth reason.
-
-    Examples:
-        - Paste format invalid (no `#` separator) — P1-2.
-        - Network error during POST.
-        - Token-endpoint returns 4xx/5xx without stealth-shape signal.
-    """
-
-
-class AuthRefreshError(AuthError):
-    """Refresh failed (invalid_grant, network, 4xx/5xx)."""
+#
+# AuthError, AuthLoginError, AuthRefreshError are imported above from
+# state_core.auth.errors (Phase 015 promotion). They are re-exported via
+# __all__ at the bottom of this module so historical imports remain valid.
+#
+# StealthRejected stays inline below — Anthropic-specific (header-drift
+# heuristic on the stealth flow, not portable to other providers).
 
 
 class StealthRejected(AuthError):
