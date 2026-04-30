@@ -120,3 +120,167 @@ def mock_generate_verifier(
             pass
 
     return _apply
+
+
+# ── Phase 015 fixtures (Gemini CLI OAuth) ─────────────────────────────
+
+# Public Desktop-App OAuth credentials from gemini-cli (verbatim — P1-3).
+# Pinned here so test_google_gemini.py can assert plaintext source-of-truth.
+_GEMINI_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+_GEMINI_CLIENT_SECRET = "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"
+
+
+@pytest.fixture
+def fixture_gemini_client_id() -> str:
+    return _GEMINI_CLIENT_ID
+
+
+@pytest.fixture
+def fixture_gemini_client_secret() -> str:
+    return _GEMINI_CLIENT_SECRET
+
+
+@pytest.fixture
+def fixture_google_state() -> str:
+    """Pinned 43-char state string. INDEPENDENT from fixture_verifier — the
+    whole point of Phase 015 is state != verifier (NOT P0-8's reuse)."""
+    return "fixture-google-state-aaaaaaaaaaaaaaaaaaaaaaa"
+
+
+@pytest.fixture
+def fixture_google_verifier() -> str:
+    """Pinned PKCE verifier for Google flow — DIFFERENT string from
+    fixture_google_state to prove independence."""
+    return "fixture-google-verifier-bbbbbbbbbbbbbbbbbbbbb"
+
+
+@pytest.fixture
+def fixture_google_id_token() -> str:
+    """Synthetic JWT with parseable payload — header.payload.signature.
+
+    Payload (decoded base64url):
+      {"sub": "u-google-fixture-12345",
+       "email": "fixture@example.test",
+       "email_verified": true,
+       "iss": "https://accounts.google.com"}
+
+    Signature is gibberish — we don't verify locally (per Pitfall 8 design
+    decision: trust TLS to oauth2.googleapis.com).
+    """
+    import base64
+    import orjson
+
+    header = base64.urlsafe_b64encode(b'{"alg":"RS256","typ":"JWT"}').rstrip(b"=").decode()
+    payload_dict = {
+        "sub": "u-google-fixture-12345",
+        "email": "fixture@example.test",
+        "email_verified": True,
+        "iss": "https://accounts.google.com",
+    }
+    payload = base64.urlsafe_b64encode(orjson.dumps(payload_dict)).rstrip(b"=").decode()
+    sig = "FIXTURE-SIG"  # not a real signature
+    return f"{header}.{payload}.{sig}"
+
+
+@pytest.fixture
+def fixture_google_access_token() -> str:
+    """ya29.* access token; matches Google's wire shape."""
+    return "ya29.FIXTURE-AAAAAAAAAAAAAAAAAAAAAAAAAA-do-not-redact-in-test-only"
+
+
+@pytest.fixture
+def fixture_google_refresh_token() -> str:
+    """1//* refresh token; matches Google's wire shape."""
+    return "1//FIXTURE-OLD-BBBBBBBBBBBBBBBBBBBBBBBBBB-do-not-redact-in-test-only"
+
+
+@pytest.fixture
+def fixture_google_rotated_refresh_token() -> str:
+    """Distinct refresh token returned by a refresh response (P2-2 rotation)."""
+    return "1//FIXTURE-ROTATED-CCCCCCCCCCCCCCCCCCCC-do-not-redact-in-test-only"
+
+
+@pytest.fixture
+def fixture_google_token_response(
+    fixture_google_access_token: str,
+    fixture_google_id_token: str,
+    fixture_google_rotated_refresh_token: str,
+) -> dict:
+    """Canonical 200-OK payload from POST oauth2.googleapis.com/token (login)."""
+    return {
+        "access_token": fixture_google_access_token,
+        "expires_in": 3599,
+        "refresh_token": fixture_google_rotated_refresh_token,
+        "scope": (
+            "https://www.googleapis.com/auth/cloud-platform "
+            "https://www.googleapis.com/auth/userinfo.email "
+            "https://www.googleapis.com/auth/userinfo.profile"
+        ),
+        "token_type": "Bearer",
+        "id_token": fixture_google_id_token,
+    }
+
+
+@pytest.fixture
+def mock_google_state_and_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+    fixture_google_state: str,
+    fixture_google_verifier: str,
+) -> Callable[[], None]:
+    """Patch generate_verifier in the gemini provider to return DIFFERENT
+    pinned strings on first vs. second call — proves state != verifier
+    (independent calls)."""
+
+    def _apply() -> None:
+        sequence = iter([fixture_google_state, fixture_google_verifier])
+
+        def _next(*_args, **_kwargs) -> str:
+            return next(sequence)
+
+        # Patch the import surface inside the gemini provider module.
+        try:
+            monkeypatch.setattr(
+                "state_core.auth.providers.google_gemini.generate_verifier",
+                _next,
+                raising=False,
+            )
+        except AttributeError:
+            pass
+        # Also patch the source so any direct re-imports see the same.
+        monkeypatch.setattr(
+            "state_core.auth.oauth_common.pkce.generate_verifier",
+            _next,
+        )
+
+    return _apply
+
+
+@pytest.fixture
+def mock_loopback_callback(monkeypatch: pytest.MonkeyPatch) -> Callable[..., None]:
+    """Patch oauth_common.loopback.wait_for_oauth_callback to return a
+    pinned authorization code without spinning up a real HTTP listener.
+
+    Tests pass the desired (code, state) tuple via param.
+    """
+
+    def _apply(code: str = "fixture-google-code", state: str | None = None) -> None:
+        async def _fake(port: int, expected_state: str, *, timeout: float = 300.0) -> str:
+            # If test passed a state, simulate state mismatch when it differs.
+            effective = state if state is not None else expected_state
+            if effective != expected_state:
+                from state_core.auth.errors import AuthLoginError
+                raise AuthLoginError("OAuth state mismatch (CSRF check failed)")
+            return code
+
+        monkeypatch.setattr(
+            "state_core.auth.providers.google_gemini.wait_for_oauth_callback",
+            _fake,
+            raising=False,
+        )
+        monkeypatch.setattr(
+            "state_core.auth.oauth_common.loopback.wait_for_oauth_callback",
+            _fake,
+            raising=False,
+        )
+
+    return _apply
