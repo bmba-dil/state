@@ -55,15 +55,14 @@ pytestmark = pytest.mark.skipif(
 # ── Pinned literal values (must match CONTEXT.md / RESEARCH.md / milady) ──
 
 _EXPECTED_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-_EXPECTED_USER_AGENT = "claude-cli/2.1.92 (external, cli)"
+_EXPECTED_USER_AGENT = "claude-cli/2.1.121 (external, cli)"
 _EXPECTED_X_APP = "cli"
 _EXPECTED_ANTHROPIC_BETA = (
-    "claude-code-20250219,oauth-2025-04-20,"
+    "oauth-2025-04-20,"
     "interleaved-thinking-2025-05-14,"
+    "redact-thinking-2026-02-12,"
     "context-management-2025-06-27,"
-    "prompt-caching-scope-2026-01-05,"
-    "advanced-tool-use-2025-11-20,"
-    "effort-2025-11-24"
+    "prompt-caching-scope-2026-01-05"
 )
 _EXPECTED_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 _EXPECTED_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
@@ -159,7 +158,7 @@ def _read_provider_source() -> str:
 # ─────────────────────────────────────────────────────────────────────────
 
 def test_http_headers_user_agent_exact(oauth_cred: OAuthCredential) -> None:
-    """user-agent MUST equal 'claude-cli/2.1.92 (external, cli)' — no startswith shortcut."""
+    """user-agent MUST equal 'claude-cli/2.1.121 (external, cli)' — no startswith shortcut."""
     h = anthropic.AnthropicAuth().http_headers(oauth_cred)
     assert h["user-agent"] == _EXPECTED_USER_AGENT, (
         f"user-agent drift: got {h.get('user-agent')!r}, expected {_EXPECTED_USER_AGENT!r}"

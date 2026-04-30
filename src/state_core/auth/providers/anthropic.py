@@ -1,4 +1,4 @@
-"""Anthropic OAuth stealth provider — claude-code-20250219 surface.
+"""Anthropic OAuth stealth provider — claude-code mitm-verified surface.
 
 Phase 014 (M-A2 / AUTH-01 / P0-1..P0-5, P0-7, P0-8 owner). First concrete
 AuthMethod implementation. Mirrors Claude Code's outbound HTTPS shape
@@ -22,7 +22,8 @@ Cardinal rules (CLAUDE.md / Phase 011 Pattern 3 / 014-CONTEXT.md):
      test / AUTH-13) imports these constants and diffs captured outbound
      traffic. Drift in these values = subscription downgrade (P0-1, P0-2,
      P0-3). Each constant carries a `# captured 2026-04 from
-     milady-ai/milady#1910 against claude-cli 2.1.92` provenance comment.
+     2026-04-29 from local Claude Code 2.1.121 mitm session` provenance
+     comment, with milady-ai/milady#1910 (2.1.92) noted as the prior snapshot.
 
   2. Determinism — no time.time() / datetime.now() reads inside Protocol
      methods. is_expired(cred, now) takes `now` as a parameter; login()
@@ -84,8 +85,9 @@ log = structlog.get_logger(__name__)
 # Each value carries a provenance comment. DO NOT edit without re-running
 # the mitmproxy capture gate (CONTEXT-locked pre-merge requirement).
 
-_CLAUDE_CLI_VERSION: str = "2.1.92"
-# captured 2026-04 from milady-ai/milady#1910 against claude-cli 2.1.92
+_CLAUDE_CLI_VERSION: str = "2.1.121"
+# captured 2026-04-29 from local Claude Code mitm session
+# (was 2.1.92 from milady-ai/milady#1910 as of 2026-04 — superseded)
 
 # base64.b64encode('9d1c250a-e61b-44d9-88ed-5944d1962f5e'.encode()).decode()
 # → 'OWQxYzI1MGEtZTYxYi00NGQ5LTg4ZWQtNTk0NGQxOTYyZjVl'
@@ -103,20 +105,27 @@ assert _CLIENT_ID == "9d1c250a-e61b-44d9-88ed-5944d1962f5e", (
 )
 
 _USER_AGENT: str = f"claude-cli/{_CLAUDE_CLI_VERSION} (external, cli)"
-# captured 2026-04 from milady-ai/milady#1910 — DO NOT drop the (external, cli) parenthetical (P0-1)
+# (external, cli) parenthetical re-confirmed against live capture 2026-04-29 — DO NOT drop (P0-1)
 
 _X_APP: str = "cli"
-# captured 2026-04 from milady-ai/milady#1910 (P0-3)
+# re-confirmed against live capture 2026-04-29 (P0-3)
 
 _ANTHROPIC_BETA: str = (
-    "claude-code-20250219,oauth-2025-04-20,"
+    "oauth-2025-04-20,"
     "interleaved-thinking-2025-05-14,"
+    "redact-thinking-2026-02-12,"
     "context-management-2025-06-27,"
-    "prompt-caching-scope-2026-01-05,"
-    "advanced-tool-use-2025-11-20,"
-    "effort-2025-11-24"
+    "prompt-caching-scope-2026-01-05"
 )
-# captured 2026-04 from milady-ai/milady#1910 — full 7-flag string (P0-2)
+# captured 2026-04-29 from local Claude Code 2.1.121 mitm session (P0-2)
+# Drift vs milady-ai/milady#1910 (2.1.92):
+#   REMOVED: claude-code-20250219, advanced-tool-use-2025-11-20, effort-2025-11-24
+#   ADDED:   redact-thinking-2026-02-12
+# Note: Claude Code 2.1.121 sends only `oauth-2025-04-20` on auth/login endpoints
+# and the full 5-flag list above on inference (/v1/messages). Phase 014 returns
+# this full list from http_headers(); v3 inference routing is responsible for
+# any per-endpoint filtering if Anthropic ever rejects the broader list on auth
+# calls (current capture shows no rejection).
 
 # ── URL constants ────────────────────────────────────────────────────────
 
@@ -428,7 +437,7 @@ async def _exchange_code(code: str, verifier: str) -> AnthropicTokenResponse:
 
 
 class AnthropicAuth:
-    """Anthropic OAuth stealth provider (claude-code-20250219).
+    """Anthropic OAuth stealth provider (claude-code 2.1.121, mitm-verified).
 
     Implements state_core.auth.base.AuthMethod structurally. The class is
     deliberately stateless — every method is pure-introspection (sync) or
