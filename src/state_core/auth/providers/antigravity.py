@@ -130,13 +130,14 @@ _TOKEN_URL: str = "https://oauth2.googleapis.com/token"
 # the same host will surface OSError EADDRINUSE — login() translates that
 # to AuthLoginError with explicit remediation copy (Plan 04).
 #
-# Pitfall 5 (localhost vs 127.0.0.1): Google's OAuth server enforces
-# redirect_uri exact-string match. The Antigravity client was registered
-# with literal `http://localhost:51121/oauth-callback`. Substituting
-# `127.0.0.1` causes redirect_uri_mismatch 400. The asyncio listener
-# binds 127.0.0.1 (loopback.py default); only the URL string differs.
+# Pitfall 5 (localhost vs the IPv4 loopback literal): Google's OAuth
+# server enforces redirect_uri exact-string match. The Antigravity client
+# was registered with literal `http://localhost:51121/oauth-callback`.
+# Substituting the IP-literal form causes redirect_uri_mismatch 400. The
+# asyncio listener binds the IPv4 loopback (loopback.py default); only
+# the URL string differs.
 
-_REDIRECT_HOST_LITERAL: str = "localhost"      # NOT '127.0.0.1' — exact-match (Pitfall 5)
+_REDIRECT_HOST_LITERAL: str = "localhost"      # NOT the IP-literal — exact-match (Pitfall 5)
 _REDIRECT_PORT: int = 51121                    # NOT kernel-allocated (Pitfall 4)
 _REDIRECT_PATH: str = "/oauth-callback"
 
@@ -222,3 +223,260 @@ class _GoogleIdTokenPayload(BaseModel):
 
     email_verified: bool | None = None
     """Whether Google has verified the email."""
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+
+def _parse_id_token_payload(id_token: str) -> _GoogleIdTokenPayload:
+    """Parse the middle segment of a Google id_token JWT — NO signature check.
+
+    JWT format (RFC 7519): <header_b64url>.<payload_b64url>.<signature_b64url>.
+    Each segment is base64url-no-pad. Python's b64decode requires padding;
+    we pad with '=' to length % 4 == 0.
+
+    Args:
+        id_token: 3-part JWT string from AntigravityTokenResponse.id_token.
+
+    Returns:
+        _GoogleIdTokenPayload with sub, optional email, optional email_verified.
+
+    Raises:
+        AuthLoginError: not a 3-part JWT, payload not valid base64url,
+                        payload not valid JSON, payload missing required `sub`.
+    """
+    parts = id_token.split(".")
+    if len(parts) != 3:
+        raise AuthLoginError(
+            f"id_token not a 3-part JWT: got {len(parts)} parts"
+        )
+    payload_b64 = parts[1]
+    pad = "=" * (-len(payload_b64) % 4)
+    try:
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + pad)
+        payload_json = orjson.loads(payload_bytes)
+    except Exception as exc:
+        raise AuthLoginError(f"id_token payload parse: {exc}") from exc
+    try:
+        return _GoogleIdTokenPayload.model_validate(payload_json)
+    except ValidationError as exc:
+        raise AuthLoginError(f"id_token payload shape: {exc}") from exc
+
+
+def _to_credential(
+    resp: AntigravityTokenResponse,
+    *,
+    original_refresh: str,
+    now: float,
+) -> OAuthCredential:
+    """Convert token-endpoint response → wire-shape OAuthCredential.
+
+    Identical to google_gemini._to_credential except provider_id="google.antigravity".
+    Phase 011 invariant: expires is the absolute epoch (now + expires_in).
+    NO 5-min buffer subtracted at storage — buffer is applied in
+    is_expired_buffered (P0-7 / AUTH-09).
+
+    P2-2: refresh = resp.refresh_token or original_refresh — Google rotates
+    silently; caller MUST persist whatever the response returns, falling
+    back to the original ONLY when Google omitted the field.
+
+    Args:
+        resp: Validated AntigravityTokenResponse.
+        original_refresh: The refresh_token we sent (login: empty string;
+                          refresh: cred.refresh from the input credential).
+                          Empty string is fine for login because Google
+                          ALWAYS returns a refresh_token on first
+                          authorization_code exchange.
+        now: Wall clock at the START of the wire call (caller passes
+             time.time() ONCE).
+
+    Returns:
+        Frozen OAuthCredential with wire-shape expires + rotation-aware refresh.
+        extras may include `project_id` once v3 provider routing fetches it via
+        loadCodeAssist; for the login() call path, extras starts with email +
+        email_verified only.
+    """
+    if resp.id_token:
+        payload = _parse_id_token_payload(resp.id_token)
+        account_id: str | None = payload.sub
+        extras: dict[str, Any] = {}
+        if payload.email:
+            extras["email"] = payload.email
+        if payload.email_verified is not None:
+            extras["email_verified"] = payload.email_verified
+    else:
+        account_id = None
+        extras = {}
+
+    return OAuthCredential(
+        access=resp.access_token,
+        refresh=resp.refresh_token or original_refresh,
+        expires=now + float(resp.expires_in),
+        provider_id="google.antigravity",
+        account_id=account_id,
+        extras=extras,
+    )
+
+
+def _build_authorize_url(redirect_uri: str, state: str, challenge: str) -> str:
+    """Construct the Google authorize URL with PKCE S256 + loopback redirect.
+
+    state and challenge are TWO INDEPENDENT strings (NOT P0-8's reuse —
+    that's Anthropic-only). Caller (Plan 04 login) generates them via two
+    separate `generate_verifier()` calls. RFC 6749 §10.12 (CSRF) and
+    RFC 7636 (PKCE) are orthogonal defenses; reusing state==verifier
+    weakens CSRF on the loopback redirect.
+
+    access_type=offline + prompt=consent are MANDATORY:
+      - access_type=offline → Google issues a refresh_token (without it,
+        only short-lived access_token).
+      - prompt=consent → forces refresh_token issuance even when the user
+        has previously consented (without it, repeat-login may skip
+        refresh_token).
+
+    Args:
+        redirect_uri: f"http://localhost:51121/oauth-callback" — literal
+                      `localhost` (NOT the IP-literal — Pitfall 5), FIXED port
+                      51121 (NOT kernel-allocated — Pitfall 4).
+        state: CSRF token from generate_verifier() — independent of verifier.
+        challenge: PKCE S256 challenge from build_challenge(verifier).
+
+    Returns:
+        Full URL ready for the user to open in their browser.
+    """
+    qs = urlencode(
+        {
+            "client_id":             _CLIENT_ID,
+            "redirect_uri":          redirect_uri,
+            "response_type":         "code",
+            "scope":                 _SCOPES,
+            "state":                 state,
+            "code_challenge":        challenge,
+            "code_challenge_method": "S256",
+            "access_type":           "offline",
+            "prompt":                "consent",
+        }
+    )
+    return f"{_AUTHORIZE_URL}?{qs}"
+
+
+def _platform_for_client_metadata() -> str:
+    """Map sys.platform → Client-Metadata `platform` value.
+
+    Antigravity's backend pattern-matches on the literal strings
+    MACOS / LINUX / WINDOWS (uppercase, no separator). Computed per-call
+    so tests can monkey-patch sys.platform across all three branches.
+    """
+    p = sys.platform
+    if p == "darwin":
+        return "MACOS"
+    if p.startswith("linux"):
+        return "LINUX"
+    if p.startswith("win"):                # win32 / cygwin / msys
+        return "WINDOWS"
+    return "LINUX"                          # defensive fallback
+
+
+def _build_client_metadata(platform: str) -> str:
+    """Compose the Client-Metadata header value as deterministic JSON.
+
+    orjson default key order is insertion-order; we explicitly insert
+    ideType → platform → pluginType to match the Antigravity-IDE wire
+    format. AUTH-13 (Phase 022) golden-files this string; deterministic
+    key order is required for the regression test to bind.
+    """
+    return orjson.dumps(
+        {"ideType": "ANTIGRAVITY", "platform": platform, "pluginType": "GEMINI"},
+    ).decode("ascii")
+
+
+async def _exchange_code(
+    code: str,
+    verifier: str,
+    redirect_uri: str,
+) -> AntigravityTokenResponse:
+    """POST _TOKEN_URL with authorization_code grant body. Per-call AsyncClient.
+
+    Body is form-urlencoded (Google's documented preference for Desktop apps,
+    UNLIKE Anthropic's JSON). data= kwarg in httpx → application/x-www-form-urlencoded.
+
+    OAuth traffic NEVER routes through litellm — CLAUDE.md cardinal rule.
+    Direct httpx is the only path. Per-call AsyncClient (no module-level
+    singleton — Phase 014/015 pattern; auth calls infrequent, pool-keepalive
+    saves nothing, singletons leak across tests).
+
+    Raises:
+        AuthLoginError: any 4xx/5xx, network error, or response that fails
+                        AntigravityTokenResponse validation.
+    """
+    body = {
+        "code":          code,
+        "client_id":     _CLIENT_ID,
+        "client_secret": _CLIENT_SECRET,
+        "redirect_uri":  redirect_uri,
+        "grant_type":    "authorization_code",
+        "code_verifier": verifier,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=False,
+        ) as client:
+            resp = await client.post(
+                _TOKEN_URL,
+                data=body,
+                headers={"accept": "application/json"},
+            )
+    except httpx.HTTPError as exc:
+        raise AuthLoginError(f"token exchange transport error: {exc}") from exc
+
+    if resp.status_code >= 400:
+        body_text = resp.text[:500]
+        raise AuthLoginError(
+            f"token exchange http {resp.status_code}: {body_text!r}"
+        )
+
+    try:
+        return AntigravityTokenResponse.model_validate_json(resp.content)
+    except ValidationError as exc:
+        raise AuthLoginError(f"token exchange response shape: {exc}") from exc
+
+
+# ── Module exports ───────────────────────────────────────────────────────
+
+
+__all__ = [
+    # Constants (Phase 022 golden-file test imports these)
+    "_CLIENT_ID",
+    "_CLIENT_SECRET",
+    "_AUTHORIZE_URL",
+    "_TOKEN_URL",
+    "_SCOPES",
+    "_REDIRECT_HOST_LITERAL",
+    "_REDIRECT_PORT",
+    "_REDIRECT_PATH",
+    "_USER_AGENT_LITERAL",
+    "_X_GOOG_API_CLIENT",
+    # Re-exports from oauth_common (test surfaces). NOTE: the kernel-port-
+    # allocation helper is intentionally NOT re-exported (Pitfall 4 + the
+    # Plan 02 test_fixed_port_51121 source-text assertion).
+    "SIGN_IN_SUCCESS_URL",
+    "SIGN_IN_FAILURE_URL",
+    "wait_for_oauth_callback",
+    "generate_verifier",
+    "build_challenge",
+    # Re-exports from errors (catch surfaces)
+    "AuthError",
+    "AuthLoginError",
+    "AuthRefreshError",
+    # Models
+    "AntigravityTokenResponse",
+    "_GoogleIdTokenPayload",
+    # Helpers
+    "_parse_id_token_payload",
+    "_to_credential",
+    "_build_authorize_url",
+    "_platform_for_client_metadata",
+    "_build_client_metadata",
+    "_exchange_code",
+]

@@ -101,7 +101,6 @@ def test_build_authorize_url() -> None:
     client_id swap. Both `access_type=offline` and `prompt=consent` are
     mandatory for refresh_token issuance (P1).
     """
-    pytest.xfail("Plan 02 implements antigravity._build_authorize_url")
     from urllib.parse import parse_qs, urlparse
 
     challenge = antigravity.build_challenge("verifier-aaaaaaaaaaaaaaaaaaaaaaaaaaaa")
@@ -131,7 +130,6 @@ def test_localhost_literal_in_redirect_uri() -> None:
     (urlencoded as `localhost%3A51121%2Foauth-callback`) and MUST NOT
     contain `127.0.0.1`.
     """
-    pytest.xfail("Plan 02 implements antigravity._build_authorize_url")
     redirect_uri = "http://localhost:51121/oauth-callback"
     url = antigravity._build_authorize_url(
         redirect_uri,
@@ -190,7 +188,6 @@ def test_id_token_parser(captured_token_post_antigravity: dict) -> None:
     test_google_gemini.test_id_token_parser with the antigravity sub.
     Bad JWT (2 parts, invalid base64) raises AuthLoginError.
     """
-    pytest.xfail("Plan 02 implements antigravity._parse_id_token_payload")
     from state_core.auth.errors import AuthLoginError
 
     id_token = captured_token_post_antigravity["id_token"]
@@ -217,7 +214,6 @@ async def test_exchange_code(
     code_verifier. The plaintext _CLIENT_SECRET literal must appear in
     the body (P1-3 — sent verbatim, not signed/encrypted).
     """
-    pytest.xfail("Plan 02 implements antigravity._exchange_code")
     httpx_mock.add_response(
         method="POST",
         url="https://oauth2.googleapis.com/token",
@@ -254,7 +250,6 @@ def test_client_metadata_platform_detection(monkeypatch: pytest.MonkeyPatch) -> 
     "GEMINI" — the Antigravity backend treats Antigravity IDE as a
     Gemini-family plugin).
     """
-    pytest.xfail("Plan 02 implements antigravity._build_client_metadata + _platform_for_client_metadata")
     import orjson
 
     # darwin → MACOS
