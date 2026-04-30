@@ -809,7 +809,6 @@ async def test_login_full_device_flow(
         epoch, NOT now+expires_in)
       - extras["oauth_token"] == cred.refresh (mirror)
     """
-    pytest.xfail("Plan 04 implements GitHubCopilotAuth.login orchestration")
     # 1. Device-code endpoint
     httpx_mock.add_response(
         method="POST",
@@ -874,7 +873,6 @@ async def test_refresh_remints_session_no_oauth_call(
     After refresh: new access (new tid), refresh="gho_OLD" (unchanged
     — gho_* is long-lived).
     """
-    pytest.xfail("Plan 04 implements GitHubCopilotAuth.refresh")
     from state_core.auth.base import OAuthCredential
 
     httpx_mock.add_response(
@@ -925,7 +923,6 @@ async def test_refresh_persists_extras_oauth_token(
     extras["editor_version"] is preserved (frozen-model-safe via
     model_copy).
     """
-    pytest.xfail("Plan 04 implements GitHubCopilotAuth.refresh extras passthrough")
     from state_core.auth.base import OAuthCredential
 
     httpx_mock.add_response(

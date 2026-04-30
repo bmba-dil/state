@@ -617,10 +617,77 @@ class GitHubCopilotAuth:
         See 017-RESEARCH.md §Pattern 5 (skeleton lines 425-507). Plan 04
         implements.
         """
-        raise NotImplementedError(
-            "Plan 04 implements GitHubCopilotAuth.login() body — "
-            "device-code → poll → mint → OAuthCredential"
+        base_domain = (
+            normalize_domain(enterprise_url) if enterprise_url else "github.com"
         )
+        base_api = (
+            f"https://copilot-api.{normalize_domain(enterprise_url)}"
+            if enterprise_url
+            else "https://api.github.com"
+        )
+
+        # Leg 1: device-code request.
+        device_resp = await _request_device_code(base_domain=base_domain)
+
+        # Print outside any prompt — user_code must appear even if stdout is piped.
+        # Phase 022 will add webbrowser.open(verification_uri_complete) + --no-browser.
+        print(
+            f"Open this URL in your browser to grant GitHub Copilot access:\n\n"
+            f"  {device_resp.verification_uri}\n\n"
+            f"And enter the code: {device_resp.user_code}\n\n"
+            f"(Code expires in {device_resp.expires_in // 60} minutes; polling "
+            f"every {device_resp.interval}s)\n"
+        )
+
+        log.info(
+            "github_copilot.login.waiting_for_device",
+            verification_uri=device_resp.verification_uri,
+            expires_in=device_resp.expires_in,
+            interval=device_resp.interval,
+        )
+
+        # Leg 2: RFC 8628 polling — blocks until success / denial / expiry.
+        oauth_token = await _poll_for_token(
+            device_code=device_resp.device_code,
+            initial_interval=device_resp.interval,
+            expires_in=device_resp.expires_in,
+            base_domain=base_domain,
+        )
+
+        log.info("github_copilot.login.minting_session")
+
+        # Leg 3: eager tid_* mint (Pitfall 14).
+        session = await _mint_session_token(oauth_token, base_api=base_api)
+
+        extras: dict[str, Any] = {
+            "oauth_token":    oauth_token,           # mirror of cred.refresh (read-clarity)
+            "editor_version": _EDITOR_VERSION,        # captured at login (Pitfall 12 forensics)
+        }
+        if enterprise_url:
+            extras["enterprise_url"] = enterprise_url
+        if session.sku:
+            extras["sku"] = session.sku
+
+        # Two-tier mapping (Pattern 4 — see module docstring + Pitfall 5):
+        #   access  = tid_* short-lived Copilot session token
+        #   refresh = gho_* / ghu_* long-lived OAuth token
+        #   expires = tid_* expiry epoch (server-issued absolute Unix timestamp)
+        cred = OAuthCredential(
+            access=session.token,
+            refresh=oauth_token,
+            expires=float(session.expires_at),
+            provider_id="github.copilot",
+            account_id=None,            # Phase 022 polishes via GET /user
+            extras=extras,
+        )
+
+        log.info(
+            "github_copilot.login.success",
+            provider_id=cred.provider_id,
+            sku=session.sku,
+            expires_at=session.expires_at,
+        )
+        return cred
 
     async def refresh(self, cred: Credential) -> Credential:
         """Re-mint the short-lived Copilot session token from stored OAuth token.
@@ -629,10 +696,57 @@ class GitHubCopilotAuth:
         implements. Note: does NOT call GitHub OAuth refresh endpoint
         (legacy OAuth App `Iv1...` doesn't issue refresh_tokens).
         """
-        raise NotImplementedError(
-            "Plan 04 implements GitHubCopilotAuth.refresh() body — "
-            "re-mint tid_* via copilot_internal/v2/token"
+        if not isinstance(cred, OAuthCredential):
+            raise TypeError(
+                f"GitHubCopilotAuth.refresh() requires OAuthCredential, "
+                f"got {type(cred).__name__} — Phase 013 should short-circuit "
+                f"non-OAuth credentials before reaching this method."
+            )
+
+        # GHE base URL substitution from extras (Pitfall 11). At refresh time,
+        # the original enterprise_url kwarg is gone — we read it from extras
+        # which login() persisted.
+        base_api = (
+            f"https://copilot-api.{cred.extras['enterprise_url']}"
+            if cred.extras.get("enterprise_url")
+            else "https://api.github.com"
         )
+
+        log.info(
+            "github_copilot.refresh.minting",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
+        )
+
+        # Re-mint tid_* via copilot_internal/v2/token using stored gho_*.
+        # NOTE: We do NOT call GitHub's OAuth refresh endpoint — the legacy
+        # OAuth App Iv1.b507a08c87ecfe98 does not issue refresh_tokens; the
+        # gho_* IS the persistent grant. Calling /login/oauth/access_token
+        # with grant_type=refresh_token would return unsupported_grant_type.
+        session = await _mint_session_token(cred.refresh, base_api=base_api)
+
+        new_extras = dict(cred.extras)
+        if session.sku:
+            new_extras["sku"] = session.sku
+
+        # model_copy is frozen-model-safe; preserves account_id + non-rotated
+        # extras (extras["oauth_token"] still equals the gho_*).
+        new_cred = cred.model_copy(
+            update={
+                "access":  session.token,
+                # refresh stays the same — gho_* is long-lived; we are NOT
+                # rotating it, only re-minting tid_*.
+                "expires": float(session.expires_at),
+                "extras":  new_extras,
+            }
+        )
+        log.info(
+            "github_copilot.refresh.success",
+            provider_id=new_cred.provider_id,
+            sku=session.sku,
+            expires_at=session.expires_at,
+        )
+        return new_cred
 
 
 # ── argparse __main__ entry-point — Plan 04 implements ──────────────────
