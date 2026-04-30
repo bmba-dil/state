@@ -695,7 +695,6 @@ async def test_mint_session_token(
     with Authorization: Bearer <gho_*> and the three Copilot-stealth
     headers. Returns CopilotSessionResponse.
     """
-    pytest.xfail("Plan 04 implements _mint_session_token")
     httpx_mock.add_response(
         method="POST",
         url="https://api.github.com/copilot_internal/v2/token",
@@ -735,7 +734,6 @@ async def test_mint_grant_revoked_200_null_body(httpx_mock) -> None:
     keeps issuing 200s with empty bodies for `copilot_internal/v2/token`
     rather than 401s. We MUST treat 200-with-null-body as terminal.
     """
-    pytest.xfail("Plan 04 implements _mint_session_token grant-revocation")
     from state_core.auth.errors import AuthRefreshError
 
     httpx_mock.add_response(
@@ -756,7 +754,6 @@ async def test_mint_grant_revoked_401(httpx_mock) -> None:
     _mint_session_token raises AuthRefreshError with a message
     containing "401" or "grant rejected".
     """
-    pytest.xfail("Plan 04 implements _mint_session_token 401 branch")
     from state_core.auth.errors import AuthRefreshError
 
     httpx_mock.add_response(
@@ -778,7 +775,6 @@ async def test_mint_pydantic_validation(httpx_mock) -> None:
     (wrong type). _mint_session_token raises AuthRefreshError
     containing "session-token response shape" or "ValidationError".
     """
-    pytest.xfail("Plan 04 implements _mint_session_token pydantic validation")
     from state_core.auth.errors import AuthRefreshError
 
     httpx_mock.add_response(

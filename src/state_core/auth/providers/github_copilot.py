@@ -476,9 +476,48 @@ async def _mint_session_token(
     See 017-RESEARCH.md §Pattern 3 + §Code Examples (skeleton lines 338-395).
     Plan 04 implements.
     """
-    raise NotImplementedError(
-        "Plan 04 implements _mint_session_token() body — copilot_internal/v2/token"
-    )
+    url = f"{base_api}/copilot_internal/v2/token"
+    headers = {
+        "accept":                "application/json",
+        "authorization":         f"Bearer {oauth_token}",
+        "user-agent":             _USER_AGENT,
+        "editor-version":         _EDITOR_VERSION,
+        "editor-plugin-version":  _EDITOR_PLUGIN_VERSION,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=False,
+        ) as client:
+            resp = await client.post(url, headers=headers)
+    except httpx.HTTPError as exc:
+        raise AuthRefreshError(
+            f"copilot session-token transport: {exc}"
+        ) from exc
+
+    # 401/403: oauth token rejected, grant revoked, or Copilot subscription
+    # lapsed. Terminal — caller (refresh path) surfaces re-login remediation.
+    if resp.status_code in (401, 403):
+        raise AuthRefreshError(
+            f"Copilot grant rejected (http {resp.status_code}): "
+            f"{resp.text[:500]!r}"
+        )
+    if resp.status_code >= 400:
+        raise AuthRefreshError(
+            f"copilot session-token http {resp.status_code}: "
+            f"{resp.text[:500]!r}"
+        )
+
+    try:
+        return CopilotSessionResponse.model_validate_json(resp.content)
+    except ValidationError as exc:
+        # P1-6 / Pitfall 4: 200 with null/missing token → ValidationError
+        # because `token: str` is required. Re-raise with grant-revoked
+        # message so callers can surface the right remediation.
+        raise AuthRefreshError(
+            f"Copilot session-token response shape "
+            f"(likely grant revoked): {exc}"
+        ) from exc
 
 
 # ── GitHubCopilotAuth — AuthMethod Protocol implementation ───────────────
