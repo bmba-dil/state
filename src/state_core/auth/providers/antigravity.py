@@ -442,6 +442,119 @@ async def _exchange_code(
         raise AuthLoginError(f"token exchange response shape: {exc}") from exc
 
 
+# ── AntigravityAuth — AuthMethod Protocol implementation ───────────────
+
+
+class AntigravityAuth:
+    """Antigravity (Google Cloud Code Assist Companion) OAuth provider.
+
+    Implements state_core.auth.base.AuthMethod structurally. Stateless —
+    every method is pure introspection (sync) or constructs its own
+    AsyncClient (async, per-call lifecycle, Plan 04).
+
+    Self-check available via:
+        from state_core.auth.base import AuthMethod
+        assert isinstance(AntigravityAuth(), AuthMethod)
+    """
+
+    provider_id: str = "google.antigravity"
+
+    # ── Sync (pure introspection) ──────────────────────────────────────
+
+    def is_token(self, value: str) -> bool:
+        """First branch of token-shape sniffer (Pitfall 6 / P1-1).
+
+        Antigravity access tokens are Google OAuth tokens — they begin
+        `ya29.` just like Gemini-CLI tokens. This method returns True
+        for ANY ya29.* token; provider-level routing disambiguates
+        Antigravity vs Gemini via the credential's `provider_id` field,
+        NEVER via token sniffing.
+
+        Each provider's is_token is INDEPENDENTLY AFFIRMATIVE:
+            google_gemini.is_token('ya29.…')  → True
+            antigravity.is_token('ya29.…')    → True
+            anthropic.is_token('ya29.…')      → False  (sk-ant-oat*)
+        """
+        return value.startswith("ya29.")
+
+    def is_expired(self, cred: Credential, now: float) -> bool:
+        """Delegate to Phase 013 — never duplicate buffer math (P0-7).
+
+        `now` MUST be a parameter — this method never reads the clock
+        internally (Phase 011 cardinal rule).
+        """
+        return is_expired_buffered(cred, now)
+
+    def http_headers(self, cred: Credential) -> dict[str, str]:
+        """Bearer + three Antigravity-specific headers (AUTH-13 surface).
+
+        cloudcode-pa.googleapis.com/v1internal (the Cloud Code Assist
+        Companion API serving Antigravity inference) requires:
+            Authorization:     Bearer <ya29.…>
+            User-Agent:        antigravity
+            X-Goog-Api-Client: google-cloud-sdk vscode_cloudshelleditor/0.1
+            Client-Metadata:   {"ideType":"ANTIGRAVITY","platform":"<MACOS|LINUX|WINDOWS>","pluginType":"GEMINI"}
+
+        AUTH-13 (Phase 022) golden-files this dict. Mutating it in v3
+        provider routing would break the regression test.
+
+        Phase 015's `x-goog-user-project` is NOT emitted here — Antigravity
+        attributes the project via Client-Metadata (set by loadCodeAssist
+        boot, v3 routing's concern). RESEARCH §Pattern 5 note.
+        """
+        if not isinstance(cred, OAuthCredential):
+            return {}
+        return {
+            "authorization":     f"Bearer {cred.access}",
+            "user-agent":        _USER_AGENT_LITERAL,
+            "x-goog-api-client": _X_GOOG_API_CLIENT,
+            "client-metadata":   _build_client_metadata(_platform_for_client_metadata()),
+        }
+
+    # ── Async (I/O-bound) — Plan 04 implements ──────────────────────────
+
+    async def login(self) -> OAuthCredential:
+        """Run the loopback OAuth login flow (Plan 04).
+
+        Steps (Plan 04 implements):
+            1. Generate state and verifier as TWO INDEPENDENT strings (NOT
+               P0-8 reuse — that's Anthropic-only). RFC 6749 §10.12 CSRF
+               + RFC 7636 PKCE are orthogonal defenses.
+            2. Build redirect_uri using FIXED port 51121 + literal
+               'localhost' (Pitfalls 4 + 5).
+            3. Build authorize URL.
+            4. Print URL — supports headless SSH copy-paste fallback
+               (Phase 022 adds webbrowser.open).
+            5. await wait_for_oauth_callback(port=51121, ...) — catch
+               OSError EADDRINUSE → AuthLoginError with port-collision
+               remediation copy (Pitfall 4).
+            6. Exchange code for tokens via _exchange_code.
+            7. Convert response to OAuthCredential — id_token sub →
+               account_id, id_token email → extras['email'].
+        """
+        raise NotImplementedError(
+            "Plan 04 implements AntigravityAuth.login() body — "
+            "see .planning/milestones/v2/phases/016-antigravity-oauth-provider/016-04-PLAN.md"
+        )
+
+    async def refresh(self, cred: Credential) -> Credential:
+        """Exchange refresh_token for new tokens (Plan 04).
+
+        Plan 04 implements:
+          - isinstance(cred, OAuthCredential) defensive guard
+          - form-urlencoded body (4 fields) POST to _TOKEN_URL
+          - per-call httpx.AsyncClient(Timeout(10.0, connect=5.0))
+          - invalid_grant precedence FIRST in error branching
+          - P2-2 rotation: new_refresh = parsed.refresh_token or cred.refresh
+          - cred.model_copy(update={...}) — preserves account_id + extras
+          - structlog `rotated=parsed.refresh_token is not None` log fact
+        """
+        raise NotImplementedError(
+            "Plan 04 implements AntigravityAuth.refresh() body — "
+            "see .planning/milestones/v2/phases/016-antigravity-oauth-provider/016-04-PLAN.md"
+        )
+
+
 # ── Module exports ───────────────────────────────────────────────────────
 
 
@@ -479,4 +592,20 @@ __all__ = [
     "_platform_for_client_metadata",
     "_build_client_metadata",
     "_exchange_code",
+    # Class
+    "AntigravityAuth",
 ]
+
+
+# ── Module entry point — Plan 04 fills argparse wiring ──────────────────
+
+
+def _main() -> int:  # pragma: no cover — covered by Plan 04 unit tests
+    raise NotImplementedError(
+        "Plan 04 implements `python -m state_core.auth.providers.antigravity` argparse — "
+        "login + refresh subcommands"
+    )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(_main())
