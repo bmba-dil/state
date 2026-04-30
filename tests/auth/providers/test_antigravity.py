@@ -70,7 +70,6 @@ def test_constants_plaintext() -> None:
     obfuscated literals as malicious; every Antigravity OAuth client in
     the wild ships them plaintext.
     """
-    pytest.xfail("Plan 02 implements antigravity.py constants block")
     import re
     from pathlib import Path
 
@@ -155,7 +154,6 @@ def test_fixed_port_51121() -> None:
     antigravity module MUST NOT reference it at all (otherwise a future
     refactor could silently re-introduce kernel-allocated ports).
     """
-    pytest.xfail("Plan 02 implements antigravity._REDIRECT_PORT et al")
     from pathlib import Path
 
     assert antigravity._REDIRECT_PORT == 51121
@@ -176,7 +174,6 @@ def test_five_scopes_present() -> None:
     cclog or experimentsandconfigs causes the loadCodeAssist boot call
     to 403 with IAM_PERMISSION_DENIED. P2-3 is THIS phase's owned pitfall.
     """
-    pytest.xfail("Plan 02 implements antigravity._SCOPES")
     scopes = antigravity._SCOPES
     assert "cloud-platform" in scopes
     assert "userinfo.email" in scopes
