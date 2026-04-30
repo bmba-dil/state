@@ -964,7 +964,6 @@ def test_main_argparse_login(
     tmp_path. Assert exit code 0 and stdout contains "Logged in as".
     Verify --enterprise-url argument is accepted by argparse.
     """
-    pytest.xfail("Plan 04 implements _main argparse login subcommand")
     import sys as _sys
 
     from state_core.auth.base import OAuthCredential
@@ -1011,7 +1010,6 @@ def test_main_argparse_refresh(
     Patch refresh_credential to a no-op coroutine. Assert exit code 0
     and stdout contains "Refreshed access_token for github.copilot".
     """
-    pytest.xfail("Plan 04 implements _main argparse refresh subcommand")
     import sys as _sys
 
     monkeypatch.setenv("STATE_AUTH_JSON", str(tmp_path / "auth.json"))
@@ -1047,7 +1045,6 @@ def test_no_oauth_common_imports() -> None:
          (refresh.py rule 9: provider does NOT acquire its own
          filelock; Phase 013's refresh_credential owns the lock).
     """
-    pytest.xfail("Plan 04 lands the source module that satisfies these gates")
     from pathlib import Path
 
     src_path = Path("src/state_core/auth/providers/github_copilot.py")

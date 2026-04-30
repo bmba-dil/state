@@ -752,15 +752,131 @@ class GitHubCopilotAuth:
 # ── argparse __main__ entry-point — Plan 04 implements ──────────────────
 
 
-def _main() -> int:
+def _main() -> int:  # pragma: no cover — covered by integration smoke + unit tests
     """argparse entry-point: login + refresh subcommands.
+
+    login subcommand:
+        python -m state_core.auth.providers.github_copilot login [--enterprise-url URL]
+    refresh subcommand:
+        python -m state_core.auth.providers.github_copilot refresh [provider_id] [--idx N]
+
+    login persists the credential via store.save_vault (chmod 0600 atomic);
+    refresh drives Phase 013's refresh_credential filelock-guarded path.
+
+    Exit codes:
+      0  — success
+      1  — AuthLoginError / AuthRefreshError / KeyError
+      2  — argparse usage error (provided by argparse itself)
+      130 — KeyboardInterrupt (POSIX SIGINT)
 
     See 017-RESEARCH.md §Pattern 9 + §Code Examples §8 (skeleton lines
     657-688). Plan 04 implements.
     """
-    raise NotImplementedError(
-        "Plan 04 implements _main() argparse — login + refresh subcommands"
+    import argparse
+    import asyncio
+    import sys
+
+    from state_core.auth.refresh import refresh_credential
+    from state_core.auth.store import (
+        ensure_initialized,
+        get_auth_json_path,
+        load_vault,
+        save_vault,
     )
+
+    parser = argparse.ArgumentParser(
+        prog="python -m state_core.auth.providers.github_copilot",
+        description="GitHub Copilot device-code OAuth — Phase 017 smoke surface.",
+    )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    login_parser = sub.add_parser(
+        "login",
+        help="Run the interactive Copilot device-code login flow.",
+    )
+    login_parser.add_argument(
+        "--enterprise-url",
+        default=None,
+        help="Optional GHE domain (e.g. company.ghe.com). Defaults to github.com.",
+    )
+
+    refresh_parser = sub.add_parser(
+        "refresh",
+        help="Re-mint the Copilot session token via Phase 013's filelock-guarded path.",
+    )
+    refresh_parser.add_argument(
+        "provider_id",
+        nargs="?",
+        default="github.copilot",
+        help="Provider ID (default: github.copilot).",
+    )
+    refresh_parser.add_argument(
+        "--idx",
+        type=int,
+        default=0,
+        help="Credential index in the provider's array (default: 0).",
+    )
+
+    args = parser.parse_args()
+
+    if args.cmd == "login":
+        try:
+            cred = asyncio.run(
+                GitHubCopilotAuth().login(enterprise_url=args.enterprise_url)
+            )
+        except KeyboardInterrupt:
+            print("\nLogin cancelled.", file=sys.stderr)
+            return 130
+        except AuthLoginError as exc:
+            print(f"Login failed: {exc}", file=sys.stderr)
+            return 1
+
+        # Persist via Phase 012's atomic-write + chmod 0600. P1-7 array invariant.
+        try:
+            vault_path = get_auth_json_path()
+            ensure_initialized(vault_path)
+            vault = load_vault(vault_path)
+            vault.providers.setdefault("github.copilot", []).append(cred)
+            save_vault(vault_path, vault)
+        except Exception as exc:
+            print(f"Failed to persist credential to vault: {exc}", file=sys.stderr)
+            return 1
+
+        account_label = (
+            cred.account_id
+            or cred.extras.get("oauth_token", "<unknown>")[:10]
+            or "<unknown>"
+        )
+        print(f"Logged in as {account_label}")
+        return 0
+
+    if args.cmd == "refresh":
+        try:
+            asyncio.run(
+                refresh_credential(
+                    GitHubCopilotAuth(),
+                    args.provider_id,
+                    idx=args.idx,
+                )
+            )
+        except KeyboardInterrupt:
+            print("\nRefresh cancelled.", file=sys.stderr)
+            return 130
+        except KeyError as exc:
+            print(
+                f"No credential for provider_id={args.provider_id!r}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        except AuthRefreshError as exc:
+            print(f"Refresh failed: {exc}", file=sys.stderr)
+            return 1
+
+        print(f"Refreshed access_token for {args.provider_id}")
+        return 0
+
+    # argparse with required=True should never reach here.
+    return 2
 
 
 if __name__ == "__main__":
