@@ -434,10 +434,81 @@ class GoogleGeminiAuth:
     # ── Async (I/O-bound) — Plan D implements ──────────────────────────
 
     async def login(self) -> OAuthCredential:
-        """Run the loopback OAuth login flow. Plan D implements the body."""
-        raise NotImplementedError(
-            "Plan D (015-D) implements GoogleGeminiAuth.login()"
+        """Run the loopback OAuth login flow.
+
+        Steps:
+            1. Generate state and verifier as TWO INDEPENDENT strings (NOT P0-8
+               reuse — that's Anthropic-only). RFC 6749 §10.12 CSRF + RFC 7636 PKCE
+               are orthogonal defenses.
+            2. Allocate a kernel-ephemeral loopback port.
+            3. Build authorize URL (access_type=offline + prompt=consent for
+               refresh_token issuance).
+            4. Print URL — supports headless SSH copy-paste fallback (Phase 022
+               adds polished webbrowser.open + --no-browser).
+            5. Await wait_for_oauth_callback — blocks until browser redirects.
+               AuthLoginError raised on state mismatch / error param / missing code.
+            6. Exchange code for tokens via _exchange_code.
+            7. Convert response to OAuthCredential — id_token sub → account_id,
+               id_token email → extras["email"].
+
+        Returns:
+            OAuthCredential with provider_id="google.gemini_cli", access_token
+            beginning "ya29.", refresh_token beginning "1//", expires=now+expires_in
+            (wire shape; AUTH-09's 5-min buffer applied at is_expired layer).
+
+        Raises:
+            AuthLoginError: state CSRF mismatch, error= callback param, missing
+                            code, network error, 4xx/5xx, response shape invalid,
+                            id_token parse failure.
+            asyncio.TimeoutError: user did not complete the flow within 5 minutes
+                                  (default wait_for_oauth_callback timeout).
+        """
+        # CSRF token (state) and PKCE verifier are TWO INDEPENDENT strings.
+        # NOT Phase 014's state==verifier reuse (P0-8 — Anthropic-only).
+        # Two separate generate_verifier() calls → two 43-char base64url-no-pad
+        # strings, each from a fresh os.urandom(32) draw. Collision probability
+        # is 2^-256 per call — vanishingly rare.
+        state = generate_verifier()
+        verifier = generate_verifier()
+        challenge = build_challenge(verifier)
+
+        port = allocate_loopback_port()
+        redirect_uri = f"http://127.0.0.1:{port}/oauth2callback"
+        authorize_url = _build_authorize_url(redirect_uri, state, challenge)
+
+        # Print outside any getpass — URL must appear even if stdout is piped.
+        # Phase 022 will add `webbrowser.open(authorize_url)` and a `--no-browser`
+        # flag. For 015, print-only supports SSH copy-paste fallback.
+        print(
+            "Open this URL in your browser to grant Gemini CLI access:\n\n"
+            f"  {authorize_url}\n\n"
+            f"Waiting for the OAuth callback on http://127.0.0.1:{port}/ ...\n"
         )
+
+        log.info(
+            "google_gemini.login.waiting_for_callback",
+            port=port,
+            client_id_suffix=_CLIENT_ID.split("-")[0],   # NEVER full client_id in logs
+        )
+
+        code = await wait_for_oauth_callback(port, expected_state=state, timeout=300.0)
+
+        now = time.time()
+        log.info(
+            "google_gemini.login.exchange",
+            verifier_length=len(verifier),
+        )
+
+        resp = await _exchange_code(code, verifier, redirect_uri)
+        cred = _to_credential(resp, original_refresh="", now=now)
+
+        log.info(
+            "google_gemini.login.success",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
+            expires_in_seconds=resp.expires_in,
+        )
+        return cred
 
     async def refresh(self, cred: Credential) -> Credential:
         """Refresh access_token using refresh_token. Plan D implements the body."""

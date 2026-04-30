@@ -333,9 +333,42 @@ async def test_token_post_form_urlencoded_shape(
 # ── Wave 3 (Plan D) — orchestration ───────────────────────────────────
 
 # 015-D-01
-def test_login_full_flow() -> None:
-    """End-to-end login: builds URL → mock loopback returns code → token POST → OAuthCredential."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_login_full_flow(
+    httpx_mock,
+    monkeypatch,
+    mock_google_state_and_verifier,
+    mock_loopback_callback,
+    fixture_google_state,
+    fixture_google_verifier,
+    fixture_google_token_response,
+) -> None:
+    """End-to-end login: state/verifier generated, port allocated, URL built,
+    loopback returns code, token POST returns response, OAuthCredential
+    constructed with account_id from id_token."""
+    mock_google_state_and_verifier()
+    mock_loopback_callback(code="fixture-code", state=fixture_google_state)
+
+    # pytest-httpx for token-endpoint POST
+    httpx_mock.add_response(
+        method="POST",
+        url="https://oauth2.googleapis.com/token",
+        json=fixture_google_token_response,
+    )
+
+    # Suppress the print() of authorize URL during test
+    monkeypatch.setattr(
+        "state_core.auth.providers.google_gemini.print",
+        lambda *_a, **_kw: None,
+    )
+
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    cred = await GoogleGeminiAuth().login()
+    assert cred.provider_id == "google.gemini_cli"
+    assert cred.access.startswith("ya29.")
+    assert cred.refresh.startswith("1//")
+    assert cred.account_id == "u-google-fixture-12345"
+    assert cred.extras["email"] == "fixture@example.test"
 
 
 # 015-D-02 — P2-2 forward
@@ -375,9 +408,34 @@ def test_refresh_request_headers_match_gemini_cli() -> None:
 
 
 # 015-D-06
-def test_state_param_csrf_check() -> None:
-    """Loopback handler validates state == expected_state; mismatch → AuthLoginError."""
-    pytest.xfail("Plan D implementation pending")
+@pytest.mark.asyncio
+async def test_state_param_csrf_check(
+    monkeypatch,
+    mock_google_state_and_verifier,
+    fixture_google_state,
+) -> None:
+    """Loopback handler validates state — mismatch raises AuthLoginError before
+    any token POST happens."""
+    mock_google_state_and_verifier()
+
+    # Loopback simulator returns a WRONG state — should raise AuthLoginError.
+    async def _fake_callback(port: int, expected_state: str, *, timeout: float = 300.0):
+        from state_core.auth.errors import AuthLoginError
+        raise AuthLoginError("OAuth state mismatch (CSRF check failed)")
+
+    monkeypatch.setattr(
+        "state_core.auth.providers.google_gemini.wait_for_oauth_callback",
+        _fake_callback,
+    )
+    monkeypatch.setattr(
+        "state_core.auth.providers.google_gemini.print",
+        lambda *_a, **_kw: None,
+    )
+
+    from state_core.auth.errors import AuthLoginError
+    from state_core.auth.providers.google_gemini import GoogleGeminiAuth
+    with pytest.raises(AuthLoginError, match="state mismatch"):
+        await GoogleGeminiAuth().login()
 
 
 def test_state_and_verifier_independent() -> None:
