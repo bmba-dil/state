@@ -1,15 +1,15 @@
 ---
 gsd_state_version: 1.0
-milestone: v1
-milestone_name: Event Store Foundation
-current_phase: complete
-status: v1 shipped — Tier 1 (v2..v5) ready to start in parallel
-last_updated: "2026-04-28T03:14:44.283Z"
+milestone: v2
+milestone_name: Auth Coverage
+current_phase: "011"
+status: v2 active — phase 011 (state_core.auth.base) up next; v1 shipped & merged
+last_updated: "2026-04-29T00:54:32.609Z"
 ---
 
 # STATE: state
 
-**Last updated:** 2026-04-28 — v1 (Event Store Foundation) **shipped and merged to `main`**. All 10 phases + 010.1 gap-closure complete. 67 commits, ~2,779 LoC Python, 321 tests passing, 0 regressions.
+**Last updated:** 2026-04-28 — v2 (Auth Coverage) is now the **active milestone**. Phase 011 (`state_core.auth.base`) is next up. v1 (Event Store Foundation) shipped and merged to `main` 2026-04-28: 11 phases + 010.1 gap-closure, 67 commits, ~2,779 LoC Python, 321 tests passing, 0 regressions.
 
 ---
 
@@ -29,13 +29,14 @@ last_updated: "2026-04-28T03:14:44.283Z"
 ## Current Position
 
 **Current tier:** Tier 1 (Foundation)
-**Active milestone:** none (v1 shipped 2026-04-26, merged to main 2026-04-28)
-**Next recommended:** v2 — Auth Coverage (carries 9 of 16 P0 pitfalls)
-**Previous milestone:** v1 — Event Store Foundation — Complete
+**Active milestone:** v2 — Auth Coverage (5 Methods + Multi-Cred) — phases 011–022 (12 phases)
+**Active phase:** 011 — `state_core.auth.base` (AuthMethod protocol + Credential container) — Not started
+**Previous milestone:** v1 — Event Store Foundation — Complete (shipped 2026-04-26, merged to main 2026-04-28)
 
 **Phases complete:** 11 / 256 (v1.001 .. v1.010 + v1.010.1)
 **Milestones complete:** 1 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
+**v2 requirements satisfied:** 0 / N (phase-time mapping; AUTH-01..AUTH-09 + ANTH-* + GEM-* + AGR-* + COP-* + APIK-*)
 
 ```
 [##..........................................................] 4%
@@ -43,12 +44,12 @@ last_updated: "2026-04-28T03:14:44.283Z"
 
 ### Unblocked milestones (ready to start, parallel-safe)
 
-- v2 — Auth Coverage (5 methods) — **recommended next** (9× P0 pitfalls)
+- v2 — Auth Coverage (5 methods) — **active** (9× P0 pitfalls)
 - v3 — Provider Routing + Model Profiles — soft-depends on v2 for cred testing; scaffolding parallel-safe
 - v4 — Worktree + Snapshot Service — independent
-- v5 — DAG Scheduler — was hard-blocked on v1 (reactive to event stream); **now unblocked**
+- v5 — DAG Scheduler — was hard-blocked on v1 (reactive to event stream); now unblocked
 
-All four can start concurrently.
+v3, v4, v5 can run concurrently with v2.
 
 ### Critical path preview
 
@@ -161,7 +162,7 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:plan-phase v2.011`** — start v2 (Auth Coverage). v2 owns 9 of 16 P0 pitfalls; highest-priority Tier 1 sibling.
+1. **Run `/gsd:autonomous --from 11`** (or `/gsd:plan-phase v2.011`) — start v2 (Auth Coverage). v2 owns 9 of 16 P0 pitfalls; highest-priority Tier 1 sibling.
 2. **In parallel:** scaffold v3 (Provider Routing) and v4 (Worktree + Snapshot) — both are independent of v2's runtime, only soft-depend on auth creds for tests.
 3. **v5 (DAG Scheduler)** — now unblocked since v1 ships event stream; can start concurrently.
 4. (Optional) Delete merged `gsd/phase-{008..010.1*}` branches at convenience.
@@ -198,4 +199,4 @@ Already in PROJECT.md Key Decisions table; re-referenced here:
 
 ---
 
-*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v1 merged to main: 2026-04-28*
+*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v1 merged to main: 2026-04-28 — v2 activated: 2026-04-28*
