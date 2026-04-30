@@ -578,7 +578,6 @@ def test_main_argparse_login(
     Patch login() to return canned cred, patch vault helpers to redirect
     to tmp_path. Assert exit code 0 and stdout contains "Logged in as".
     """
-    pytest.xfail("Plan 04 implements antigravity._main")
     import sys as _sys
 
     from state_core.auth.base import OAuthCredential
@@ -616,7 +615,6 @@ def test_main_argparse_refresh(
     Patch refresh_credential to a no-op coroutine. Assert exit code 0
     and stdout contains "Refreshed access_token for google.antigravity".
     """
-    pytest.xfail("Plan 04 implements antigravity._main")
     import sys as _sys
 
     monkeypatch.setenv("STATE_AUTH_JSON", str(tmp_path / "auth.json"))
