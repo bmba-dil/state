@@ -532,10 +532,69 @@ class AntigravityAuth:
             7. Convert response to OAuthCredential — id_token sub →
                account_id, id_token email → extras['email'].
         """
-        raise NotImplementedError(
-            "Plan 04 implements AntigravityAuth.login() body — "
-            "see .planning/milestones/v2/phases/016-antigravity-oauth-provider/016-04-PLAN.md"
+        # CSRF token (state) and PKCE verifier are TWO INDEPENDENT strings.
+        # NOT Phase 014's state==verifier reuse (P0-8 — Anthropic-only).
+        # Two separate generate_verifier() calls → two 43-char base64url-no-pad
+        # strings, each from a fresh os.urandom(32) draw. Collision
+        # probability is 2^-256 per call — vanishingly rare. RFC 6749 §10.12
+        # CSRF + RFC 7636 PKCE are orthogonal defenses.
+        state = generate_verifier()
+        verifier = generate_verifier()
+        challenge = build_challenge(verifier)
+
+        # FIXED port 51121 — Antigravity's OAuth client is pre-registered
+        # against literal `http://localhost:51121/oauth-callback` (Pitfalls 4, 5).
+        # Substituting 127.0.0.1 OR a different port → redirect_uri_mismatch 400.
+        redirect_uri = f"http://{_REDIRECT_HOST_LITERAL}:{_REDIRECT_PORT}{_REDIRECT_PATH}"
+        authorize_url = _build_authorize_url(redirect_uri, state, challenge)
+
+        # Print outside any getpass — URL must appear even if stdout is piped.
+        # Phase 022 will add `webbrowser.open(authorize_url)` and a
+        # `--no-browser` flag. For 016, print-only supports SSH copy-paste.
+        print(
+            "Open this URL in your browser to grant Antigravity access:\n\n"
+            f"  {authorize_url}\n\n"
+            f"Waiting for the OAuth callback on http://{_REDIRECT_HOST_LITERAL}:{_REDIRECT_PORT}/ ...\n"
         )
+
+        log.info(
+            "antigravity.login.waiting_for_callback",
+            port=_REDIRECT_PORT,
+            client_id_suffix=_CLIENT_ID.split("-")[0],
+        )
+
+        # Pitfall 4: port 51121 may already be in use by a concurrent
+        # `state` CLI. Surface the clear remediation message rather than
+        # leaking the OSError. EADDRINUSE = errno 48 (Darwin/BSD) or 98 (Linux).
+        try:
+            code = await wait_for_oauth_callback(
+                port=_REDIRECT_PORT,
+                expected_state=state,
+                timeout=300.0,
+            )
+        except OSError as exc:
+            raise AuthLoginError(
+                f"Antigravity login: port {_REDIRECT_PORT} is already in use. "
+                f"Close any other state-cli antigravity-login process or wait "
+                f"for it to finish, then retry. Underlying: {exc}"
+            ) from exc
+
+        now = time.time()
+        log.info(
+            "antigravity.login.exchange",
+            verifier_length=len(verifier),
+        )
+
+        resp = await _exchange_code(code, verifier, redirect_uri)
+        cred = _to_credential(resp, original_refresh="", now=now)
+
+        log.info(
+            "antigravity.login.success",
+            provider_id=cred.provider_id,
+            account_id=cred.account_id,
+            expires_in_seconds=resp.expires_in,
+        )
+        return cred
 
     async def refresh(self, cred: Credential) -> Credential:
         """Exchange refresh_token for new tokens (Plan 04).
