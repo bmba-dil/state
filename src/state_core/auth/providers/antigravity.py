@@ -544,7 +544,8 @@ class AntigravityAuth:
 
         # FIXED port 51121 — Antigravity's OAuth client is pre-registered
         # against literal `http://localhost:51121/oauth-callback` (Pitfalls 4, 5).
-        # Substituting 127.0.0.1 OR a different port → redirect_uri_mismatch 400.
+        # Substituting the IP-literal loopback form OR a different port →
+        # redirect_uri_mismatch 400.
         redirect_uri = f"http://{_REDIRECT_HOST_LITERAL}:{_REDIRECT_PORT}{_REDIRECT_PATH}"
         authorize_url = _build_authorize_url(redirect_uri, state, challenge)
 
@@ -731,11 +732,95 @@ __all__ = [
 # ── Module entry point — Plan 04 fills argparse wiring ──────────────────
 
 
-def _main() -> int:  # pragma: no cover — covered by Plan 04 unit tests
-    raise NotImplementedError(
-        "Plan 04 implements `python -m state_core.auth.providers.antigravity` argparse — "
-        "login + refresh subcommands"
+def _main() -> int:  # pragma: no cover — covered by integration smoke + unit tests
+    import argparse
+    import asyncio
+
+    parser = argparse.ArgumentParser(
+        prog="python -m state_core.auth.providers.antigravity",
+        description="Antigravity OAuth login/refresh — Phase 016 smoke surface.",
     )
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub.add_parser(
+        "login",
+        help="Run the interactive Antigravity OAuth loopback login flow.",
+    )
+    refresh_parser = sub.add_parser(
+        "refresh",
+        help="Refresh an existing Antigravity credential via Phase 013's filelock-guarded path.",
+    )
+    refresh_parser.add_argument(
+        "provider_id",
+        nargs="?",
+        default="google.antigravity",
+        help="Provider ID to refresh (default: google.antigravity).",
+    )
+    refresh_parser.add_argument(
+        "--idx",
+        type=int,
+        default=0,
+        help="Credential index in the provider's array (default: 0).",
+    )
+    args = parser.parse_args()
+
+    if args.cmd == "login":
+        try:
+            cred = asyncio.run(AntigravityAuth().login())
+        except KeyboardInterrupt:
+            print("\nLogin cancelled.", file=sys.stderr)
+            return 130
+        except AuthLoginError as exc:
+            print(f"Login failed: {exc}", file=sys.stderr)
+            return 1
+
+        # Persist to vault — preserve P1-7 array invariant.
+        try:
+            from state_core.auth.store import (
+                ensure_initialized,
+                get_auth_json_path,
+                load_vault,
+                save_vault,
+            )
+            vault_path = get_auth_json_path()
+            ensure_initialized(vault_path)
+            vault = load_vault(vault_path)
+            vault.providers.setdefault("google.antigravity", []).append(cred)
+            save_vault(vault_path, vault)
+        except Exception as exc:
+            print(f"Failed to persist credential to vault: {exc}", file=sys.stderr)
+            return 1
+
+        label = (
+            cred.extras.get("email")
+            or cred.account_id
+            or "<unknown account>"
+        )
+        print(f"Logged in as {label}")
+        return 0
+
+    if args.cmd == "refresh":
+        from state_core.auth.refresh import refresh_credential
+
+        try:
+            asyncio.run(
+                refresh_credential(AntigravityAuth(), args.provider_id, idx=args.idx)
+            )
+        except KeyboardInterrupt:
+            print("\nRefresh cancelled.", file=sys.stderr)
+            return 130
+        except KeyError as exc:
+            print(
+                f"No credential for provider_id={args.provider_id!r}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+        except AuthRefreshError as exc:
+            print(f"Refresh failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"Refreshed access_token for {args.provider_id}")
+        return 0
+
+    return 2  # unknown subcommand
 
 
 if __name__ == "__main__":  # pragma: no cover
