@@ -469,7 +469,6 @@ async def test_refresh_rotation_persisted(httpx_mock) -> None:
     refresh="1//new". Google rotates silently; the old token may be
     revoked — the new one MUST be persisted.
     """
-    pytest.xfail("Plan 04 implements AntigravityAuth.refresh()")
     httpx_mock.add_response(
         method="POST",
         url="https://oauth2.googleapis.com/token",
@@ -501,7 +500,6 @@ async def test_refresh_no_rotation_keeps_old(httpx_mock) -> None:
     occurred), the original refresh_token is preserved. Caller (refresh
     method) computes ``parsed.refresh_token or cred.refresh``.
     """
-    pytest.xfail("Plan 04 implements AntigravityAuth.refresh()")
     httpx_mock.add_response(
         method="POST",
         url="https://oauth2.googleapis.com/token",
