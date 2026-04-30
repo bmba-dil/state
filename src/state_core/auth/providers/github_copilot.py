@@ -49,9 +49,9 @@ Cardinal rules (CLAUDE.md / Phase 011 / Phase 017 RESEARCH):
      user_code at the verification_uri) is the security boundary, not
      client-secret confidentiality.
 
-  3. Polling deadline math uses time.monotonic(), NOT time.time()
-     (Pitfall 7). Wall-clock skew during a 15-minute device-code
-     window is real; monotonic time is wall-clock-independent.
+  3. Polling deadline math uses time.monotonic(), NOT wall-clock now
+     (Pitfall 7). Clock skew during a 15-minute device-code window is
+     real; monotonic time is wall-clock-independent.
 
   4. RFC 8628 §3.5 slow_down PERSISTS — every slow_down response
      bumps the interval by +5 seconds; the bump is cumulative across
@@ -339,14 +339,124 @@ async def _poll_for_token(
     timeout.
 
     Determinism: monotonic + sleep are injectable. The function NEVER
-    reads time.time() for deadline math (Pitfall 7).
+    reads wall-clock now for deadline math (Pitfall 7).
 
     See 017-RESEARCH.md §Pattern 2 + §Code Examples (skeleton lines 230-321).
-    Plan 03 implements.
+    Plan 03 implementation — RFC 8628 §3.5 state machine.
+
+    Critical anti-pattern guards:
+    - Mutate state.interval (NOT a local) — RFC 8628 §3.5 mandates
+      persistence across iterations (Pitfall 6 NEW OWNED).
+    - Use monotonic() for deadline (NOT wall-clock now) — wall-clock-
+      independent (Pitfall 7 NEW OWNED).
+    - Sleep BEFORE poll — user needs interval seconds anyway to walk to
+      a browser; mirrors opencode reference.
+    - Add safety_margin to EVERY sleep — defends client/server clock
+      skew (Pitfall 10 NEW OWNED).
+    - DO NOT catch asyncio.CancelledError — let it propagate so daemon
+      shutdown cleanly cancels the polling task (Pitfall 9 NEW OWNED).
+    - DO NOT log full tokens — only token_prefix.
     """
-    raise NotImplementedError(
-        "Plan 03 implements _poll_for_token() body — RFC 8628 §3.5 state machine"
+    url = f"https://{base_domain}/login/oauth/access_token"
+    body = {
+        "client_id":   _CLIENT_ID,
+        "device_code": device_code,
+        "grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
+    }
+    headers = {
+        "accept":       "application/json",
+        "content-type": "application/json",
+        "user-agent":   _USER_AGENT,
+    }
+    state = _PollingState(
+        interval=float(initial_interval),
+        deadline=monotonic() + float(expires_in),
     )
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(10.0, connect=5.0),
+        follow_redirects=False,
+    ) as client:
+        while True:
+            # Sleep BEFORE each poll — user needs `interval` seconds anyway
+            # to walk to a browser. 3-second safety margin (Pitfall 10).
+            #
+            # asyncio.CancelledError propagates from sleep — daemon shutdown
+            # cleanly cancels the polling task (Pitfall 9). DO NOT catch.
+            await sleep(state.interval + state.safety_margin)
+
+            try:
+                resp = await client.post(url, json=body, headers=headers)
+            except httpx.HTTPError as exc:
+                raise AuthLoginError(f"polling transport: {exc}") from exc
+
+            # GitHub returns 200 even for known error codes (RFC 8628 deviation);
+            # only 5xx and unexpected non-400 4xx raise.
+            if resp.status_code >= 500 or (
+                resp.status_code >= 400 and resp.status_code != 400
+            ):
+                raise AuthLoginError(
+                    f"polling http {resp.status_code}: {resp.text[:500]!r}"
+                )
+
+            try:
+                parsed = DeviceTokenResponse.model_validate_json(resp.content)
+            except ValidationError as exc:
+                raise AuthLoginError(f"polling response shape: {exc}") from exc
+
+            if parsed.access_token:
+                log.info(
+                    "github_copilot.poll.success",
+                    token_prefix=parsed.access_token[:4],   # gho_ / ghu_ — no full token
+                )
+                return parsed.access_token
+
+            err = parsed.error
+            if err == "authorization_pending":
+                # Wall-clock-independent deadline check AFTER each poll
+                # (Pitfall 7). Placed here so the first registered response
+                # is always consumed before the deadline can fire — matches
+                # opencode's order-of-operations.
+                if state.remaining(monotonic()) <= 0.0:
+                    raise AuthLoginError(
+                        f"Device-code authorization expired after "
+                        f"{expires_in}s; please re-run login."
+                    )
+                log.debug(
+                    "github_copilot.poll.pending",
+                    interval=state.interval,
+                )
+                continue
+            if err == "slow_down":
+                # RFC 8628 §3.5: MUST increase by 5s, persist increase
+                # across ALL subsequent requests (Pitfall 6 NEW OWNED).
+                # If server provided a new interval, prefer it.
+                if parsed.interval and parsed.interval > 0:
+                    state.interval = float(parsed.interval)
+                else:
+                    state.interval += _SLOW_DOWN_BUMP_S
+                # Wall-clock-independent deadline check (Pitfall 7).
+                if state.remaining(monotonic()) <= 0.0:
+                    raise AuthLoginError(
+                        f"Device-code authorization expired after "
+                        f"{expires_in}s; please re-run login."
+                    )
+                log.info(
+                    "github_copilot.poll.slow_down",
+                    new_interval=state.interval,
+                )
+                continue
+            if err == "expired_token":
+                raise AuthLoginError(
+                    "Device code expired; please re-run login."
+                )
+            if err == "access_denied":
+                raise AuthLoginError("User denied authorization.")
+
+            # Unknown error — terminal.
+            raise AuthLoginError(
+                f"polling unexpected error: {err!r} body={resp.text[:500]!r}"
+            )
 
 
 async def _mint_session_token(

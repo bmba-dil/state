@@ -352,7 +352,6 @@ async def test_poll_authorization_pending(
     iterations and final return is the access_token from the success
     response.
     """
-    pytest.xfail("Plan 03 implements _poll_for_token")
     # Sequenced responses: pending then success.
     httpx_mock.add_response(
         method="POST",
@@ -398,7 +397,6 @@ async def test_poll_slow_down_increases_interval(
     args. Assert second sleep is (initial + 5) + safety_margin = 8 + 3
     = 11 seconds (initial=5, +5 RFC bump, +3 safety margin).
     """
-    pytest.xfail("Plan 03 implements _poll_for_token slow_down handling")
     httpx_mock.add_response(
         method="POST",
         url="https://github.com/login/oauth/access_token",
@@ -447,7 +445,6 @@ async def test_poll_slow_down_persists(
     interval does NOT reset between iterations — RFC §3.5 mandates
     persistence).
     """
-    pytest.xfail("Plan 03 implements _poll_for_token slow_down persistence")
     httpx_mock.add_response(
         method="POST",
         url="https://github.com/login/oauth/access_token",
@@ -498,7 +495,6 @@ async def test_poll_access_denied(
     Poll receives {"error":"access_denied"} → raises AuthLoginError
     with a message containing "denied" or "User denied".
     """
-    pytest.xfail("Plan 03 implements _poll_for_token access_denied branch")
     from state_core.auth.errors import AuthLoginError
 
     httpx_mock.add_response(
@@ -533,7 +529,6 @@ async def test_poll_expired_token(
     Poll receives {"error":"expired_token"} → raises AuthLoginError
     with a message containing "expired" or "Device code expired".
     """
-    pytest.xfail("Plan 03 implements _poll_for_token expired_token branch")
     from state_core.auth.errors import AuthLoginError
 
     httpx_mock.add_response(
@@ -575,7 +570,6 @@ async def test_poll_monotonic_deadline(
     expires-epoch wire-shape construction; we tolerate ≤ 1 occurrence
     for that.)
     """
-    pytest.xfail("Plan 03 implements _poll_for_token monotonic deadline")
     from pathlib import Path
 
     from state_core.auth.errors import AuthLoginError
@@ -624,7 +618,6 @@ async def test_poll_safety_margin_3s(
     OAUTH_POLLING_SAFETY_MARGIN_MS=3000 from opencode is added to every
     sleep — defends against client/server clock skew).
     """
-    pytest.xfail("Plan 03 implements _poll_for_token safety margin")
     httpx_mock.add_response(
         method="POST",
         url="https://github.com/login/oauth/access_token",
@@ -650,6 +643,7 @@ async def test_poll_safety_margin_3s(
 
 
 @pytest.mark.asyncio
+@pytest.mark.httpx_mock(assert_all_responses_were_requested=False)
 async def test_poll_cancelled_via_signal(
     httpx_mock,
     mock_token_poll_responses: dict[str, dict[str, Any]],
@@ -661,8 +655,11 @@ async def test_poll_cancelled_via_signal(
     AuthLoginError). Long-running polling loops must respect SIGINT /
     asyncio task cancellation; swallowing CancelledError leaves zombie
     tasks alive.
+
+    Note: ``assert_all_responses_were_requested=False`` because sleep
+    raises CancelledError BEFORE the first HTTP call, so the registered
+    response is never consumed — that's the whole point of the test.
     """
-    pytest.xfail("Plan 03 implements _poll_for_token CancelledError passthrough")
     httpx_mock.add_response(
         method="POST",
         url="https://github.com/login/oauth/access_token",
