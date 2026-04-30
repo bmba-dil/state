@@ -361,3 +361,99 @@ def captured_token_post_antigravity() -> dict[str, Any]:
         "token_type": "Bearer",
         "id_token": id_token,
     }
+
+
+# ── GitHub Copilot fixtures (Phase 017) ──────────────────────────────────
+
+
+@pytest.fixture
+def mock_device_code_response() -> dict[str, Any]:
+    """Canonical 200-OK payload from POST https://github.com/login/device/code.
+
+    Matches DeviceCodeResponse(extra='ignore') shape per RESEARCH §Code
+    Examples §3. Pinned values:
+      - device_code: opaque ~40-char identifier returned by GitHub
+      - user_code: 8-char dashed code the human types into the browser
+      - verification_uri: URL the user visits to enter user_code
+      - verification_uri_complete: same URL with user_code embedded
+        as a query param (one-click flow)
+      - expires_in=900: 15-minute hard wall-clock deadline (RFC 8628)
+      - interval=5: initial poll cadence in seconds (server-suggested)
+    """
+    return {
+        "device_code": "FIXTURE-DEVICE-CODE-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "user_code": "ABCD-1234",
+        "verification_uri": "https://github.com/login/device",
+        "verification_uri_complete": "https://github.com/login/device?user_code=ABCD-1234",
+        "expires_in": 900,
+        "interval": 5,
+    }
+
+
+@pytest.fixture
+def mock_token_poll_responses() -> dict[str, dict[str, Any]]:
+    """Canonical RFC 8628 §3.5 poll-endpoint response variants.
+
+    Returns a dict of named response payloads tests can sequence via
+    pytest-httpx httpx_mock.add_response(json=...) calls.
+
+    All variants match DeviceTokenResponse(extra='ignore') shape per
+    RESEARCH §Code Examples §3. The five canonical states (success +
+    four RFC-8628 errors) cover every branch of the polling state
+    machine in Pattern 2.
+
+    Pitfall 6 (slow_down): two variants exist — one without server-
+    suggested interval (RFC §3.5 default +5s bump) and one WITH a
+    server-suggested interval (server overrides client cadence).
+    """
+    return {
+        "success": {
+            "access_token": "gho_FIXTURE-LONG-LIVED-OAUTH-TOKEN-aaaaaaaaaaaaaaaaaa",
+            "token_type": "bearer",
+            "scope": "read:user",
+        },
+        "authorization_pending": {
+            "error": "authorization_pending",
+            "error_description": "The authorization request is still pending.",
+        },
+        "slow_down_no_interval": {
+            "error": "slow_down",
+            "error_description": "You are polling too quickly.",
+        },
+        "slow_down_with_server_interval": {
+            "error": "slow_down",
+            "error_description": "Server suggests new interval.",
+            "interval": 10,
+        },
+        "expired_token": {
+            "error": "expired_token",
+            "error_description": "The device_code has expired.",
+        },
+        "access_denied": {
+            "error": "access_denied",
+            "error_description": "The user denied the authorization request.",
+        },
+    }
+
+
+@pytest.fixture
+def captured_session_mint_post() -> dict[str, Any]:
+    """Canonical 200-OK payload from POST https://api.github.com/copilot_internal/v2/token.
+
+    Matches CopilotSessionResponse(extra='ignore') shape per RESEARCH
+    §Code Examples §3. ``expires_at`` is a future Unix timestamp pinned
+    to 2030-01-01 UTC so tests never see a naturally-expired token.
+
+    The ``token`` field is REQUIRED — Pydantic ValidationError fires on
+    null/missing, which the implementation re-raises as
+    ``AuthRefreshError`` (Pitfall 4 / P1-6 grant-revocation detection:
+    GitHub returns 200 with a missing ``token`` when the user has
+    revoked Copilot access in their GitHub settings).
+    """
+    return {
+        "token": "tid_FIXTURE-COPILOT-SESSION-TOKEN-bbbbbbbbbbbbbbbbbb",
+        "expires_at": 1893456000,  # 2030-01-01 UTC — far-future epoch
+        "refresh_in": 1500,         # 25 minutes (refresh 5 min before expiry)
+        "sku": "copilot-individual",
+        "chat_enabled": True,
+    }
