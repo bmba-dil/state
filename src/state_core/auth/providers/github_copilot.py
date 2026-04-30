@@ -288,11 +288,39 @@ async def _request_device_code(
     """POST {base_domain}/login/device/code with client_id + scope=read:user.
 
     See 017-RESEARCH.md §Pattern 1 + §Code Examples (skeleton lines 162-198).
-    Plan 03 implements.
+    Plan 03 implementation.
+
+    JSON content-type (NOT form-urlencoded) — GitHub accepts both for the
+    device-code endpoint, but JSON keeps body shape consistent across all
+    three endpoints in this provider (device-code, poll, mint).
+
+    Per-call AsyncClient (NO module-level singleton — Phase 014/015/016
+    pattern). follow_redirects=False is the DoS-by-redirect mitigation.
     """
-    raise NotImplementedError(
-        "Plan 03 implements _request_device_code() body — RFC 8628 §3.1"
-    )
+    url = f"https://{base_domain}/login/device/code"
+    body = {"client_id": _CLIENT_ID, "scope": _SCOPE}
+    headers = {
+        "accept":       "application/json",
+        "content-type": "application/json",
+        "user-agent":   _USER_AGENT,
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0),
+            follow_redirects=False,
+        ) as client:
+            resp = await client.post(url, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        raise AuthLoginError(f"device-code request transport: {exc}") from exc
+
+    if resp.status_code >= 400:
+        raise AuthLoginError(
+            f"device-code request http {resp.status_code}: {resp.text[:500]!r}"
+        )
+    try:
+        return DeviceCodeResponse.model_validate_json(resp.content)
+    except ValidationError as exc:
+        raise AuthLoginError(f"device-code response shape: {exc}") from exc
 
 
 async def _poll_for_token(

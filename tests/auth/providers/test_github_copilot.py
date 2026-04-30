@@ -311,7 +311,6 @@ async def test_request_device_code(
     with body {"client_id": _CLIENT_ID, "scope": "read:user"} and
     headers accept/content-type/user-agent. Returns DeviceCodeResponse.
     """
-    pytest.xfail("Plan 03 implements _request_device_code")
     httpx_mock.add_response(
         method="POST",
         url="https://github.com/login/device/code",
