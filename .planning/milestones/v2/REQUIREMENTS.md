@@ -15,7 +15,7 @@
 - [x] **AUTH-07**: Filelock-guarded refresh: acquire lock (10s timeout), re-read `auth.json`, double-check expiry, refresh only if stale, write, release
 - [x] **AUTH-08**: Multi-cred round-robin across credentials of the same provider
 - [x] **AUTH-09**: Access token renewal 5 minutes before `expires_in` (never verbatim)
-- [ ] **AUTH-10**: Root-logger token redactor strips `sk-ant-*`, `sk-*`, `ya29.*`, etc. from every log record
-- [ ] **AUTH-11**: First-run import from opencode's existing auth store when detected
-- [ ] **AUTH-12**: `state auth login <provider>` / `state auth logout <provider>` / `state auth status` CLI
-- [ ] **AUTH-13**: Captured-header regression test: golden-file compare of actual outbound HTTP headers against claude-oauth.md spec for every stealth request
+- [x] **AUTH-10**: Root-logger token redactor strips `sk-ant-*`, `sk-*`, `ya29.*`, etc. from every log record
+- [x] **AUTH-11**: First-run import from opencode's existing auth store when detected
+- [x] **AUTH-12**: `state auth login <provider>` / `state auth logout <provider>` / `state auth status` CLI
+- [x] **AUTH-13**: Captured-header regression test: golden-file compare of actual outbound HTTP headers against claude-oauth.md spec for every stealth request

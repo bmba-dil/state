@@ -1,24 +1,24 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.1
-milestone_name: milestone
-status: planning
-last_updated: "2026-05-01T03:27:57.856Z"
-last_activity: 2026-04-28 — Activated as the next Tier 1 milestone
+milestone: v2
+milestone_name: Auth Coverage
+status: completed
+last_updated: "2026-05-03T00:53:35.643Z"
+last_activity: 2026-05-03 — Milestone shipped (v2 tag), archived to .planning/milestones/v2-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md
 progress:
-  total_phases: 12
-  completed_phases: 7
-  total_plans: 29
-  completed_plans: 26
+  total_phases: 15
+  completed_phases: 15
+  total_plans: 46
+  completed_plans: 46
 ---
 
 # STATE: v2 — Auth Coverage (5 Methods + Multi-Cred)
 
 **Milestone:** v2
-**Phase range:** 011–022 (12 phases)
-**Status:** Ready to plan
-**Phases complete:** 0 / 12
-**Last activity:** 2026-04-28 — Activated as the next Tier 1 milestone
+**Phase range:** 011–022 + 022.1–022.3 (12 + 3 gap-closure)
+**Status:** ✅ Shipped 2026-05-03
+**Phases complete:** 15 / 15
+**Last activity:** 2026-05-03 — Milestone archived; v3 activated as next active milestone
 
 ---
 
@@ -26,30 +26,34 @@ progress:
 
 | Phase | Slug | Status |
 |-------|------|--------|
-| 011 | state-core-auth-base | **Next up** |
-| 012 | auth-json-vault-chmod-0600 | Not started |
-| 013 | filelock-guarded-refresh-lock | Not started |
-| 014 | anthropic-oauth-provider | Not started |
-| 015 | gemini-cli-oauth-provider | Not started |
-| 016 | antigravity-oauth-provider | Not started |
-| 017 | github-copilot-device-code-flow | Not started |
-| 018 | plain-api-key-vault | Not started |
-| 019 | multi-cred-round-robin-across | Not started |
-| 020 | root-logger-token-redactor | Not started |
-| 021 | first-run-import-opencode-local | Not started |
-| 022 | cli-state-auth-login-logout | Not started |
+| 011 | state-core-auth-base | ✅ Complete |
+| 012 | auth-json-vault-chmod-0600 | ✅ Complete |
+| 013 | filelock-guarded-refresh-lock | ✅ Complete |
+| 014 | anthropic-oauth-provider | ✅ Complete |
+| 015 | gemini-cli-oauth-provider | ✅ Complete |
+| 016 | antigravity-oauth-provider | ✅ Complete |
+| 017 | github-copilot-device-code-flow | ✅ Complete |
+| 018 | plain-api-key-vault | ✅ Complete |
+| 019 | multi-cred-round-robin-across | ✅ Complete |
+| 020 | root-logger-token-redactor | ✅ Complete |
+| 021 | first-run-import-opencode-local | ✅ Complete |
+| 022 | cli-state-auth-login-logout | ✅ Complete |
+| 022.1 | nyquist-typing-hygiene | ✅ Complete (gap-closure) |
+| 022.2 | deferred-low-auth-threats | ✅ Complete (gap-closure) |
+| 022.3 | reviewer-cleanup | ✅ Complete (gap-closure) |
 
 ---
 
-## Why v2 Is Active
+## Outcome
 
-- v1 (Event Store Foundation) shipped 2026-04-26, merged to `main` 2026-04-28.
-- v2 carries **9 of 16 P0 pitfalls** — highest-priority Tier 1 sibling.
-- v3 / v4 / v5 are parallel-safe and may run concurrently with v2.
+- All 13 AUTH-XX requirements satisfied (verified via `.planning/milestones/v2-MILESTONE-AUDIT.md`).
+- 9 of 9 in-scope P0 pitfalls closed.
+- 5/5 cross-phase E2E flows wired against live source.
+- 5/5 cardinal-rule grep gates PASS.
+- 784 tests passing (321 v1 baseline + 463 net-new).
 
-## Entry Point
+**Tech debt at close** (intentional, recorded in milestone audit):
+- Release-time manual smoke gates for live OAuth (Anthropic/Gemini/Antigravity/Copilot) — owned by user at release.
+- Retroactive SECURITY.md backfill for phases 011..022 + 022.1, 022.2 — security_enforcement was enabled mid-milestone; only 022.3 has SECURITY.md.
 
-- `/gsd:autonomous --from 11` — drive phases 011..022 end-to-end.
-- `/gsd:plan-phase v2.011` — plan phase 011 only.
-
-See `.planning/milestones/v2/ROADMAP.md` for per-phase goals, deps, and pitfalls.
+See `.planning/milestones/v2-ROADMAP.md` for the full archived phase plan and `.planning/milestones/v2-MILESTONE-AUDIT.md` for the final audit report.

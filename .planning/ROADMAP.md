@@ -30,8 +30,8 @@
 ### Tier 1 — Foundation (parallel — no internal deps after scaffolding)
 
 - [x] **v1 — Event Store Foundation** — Dual-write SQLite + SyncEvent event store with deterministic replay ✓ Shipped 2026-04-26
-- [ ] **v2 — Auth Coverage (5 methods)** — All five auth methods with filelock-guarded refresh and token redaction
-- [ ] **v3 — Provider Routing + Model Profiles** — litellm default + Anthropic SDK escape hatch with OAuth bypass
+- [x] **v2 — Auth Coverage (5 methods)** — All five auth methods with filelock-guarded refresh and token redaction ✓ Shipped 2026-05-03
+- [ ] **v3 — Provider Routing + Model Profiles** — litellm default + Anthropic SDK escape hatch with OAuth bypass — **active**
 - [ ] **v4 — Worktree + Snapshot Service** — Per-Slice worktrees with Step/Slice snapshots and GC
 - [ ] **v5 — DAG Scheduler** — Pure-Python reactive scheduler with TaskGroup watchdog
 
@@ -397,6 +397,24 @@ Tier 4 ends at v27 shipped — this is v1 release.
 **Depends on:** 014, 015, 016, 017, 018, 020
 **Requirements:** AUTH-12, AUTH-13
 **Parallelizable:** no (integration)
+
+#### Phase 022.1 — Nyquist + typing hygiene (gap closure from `v2-MILESTONE-AUDIT.md`)
+**Goal:** Address documentation-state hygiene from v2 audit (2026-05-02): (A) flip VALIDATION.md frontmatter (`nyquist_compliant: true`, `wave_0_complete: true`) on phases 014, 015, 016, 017, 022 — tests already GREEN, frontmatter never updated; (B) author missing VALIDATION.md for Phase 021; (C) add `py.typed` marker to `src/state_core/` to silence mypy `[import-untyped]` warnings.
+**Depends on:** 011, 014, 015, 016, 017, 021, 022
+**Requirements:** (none — gap closure)
+**Parallelizable:** no (gap closure)
+
+#### Phase 022.2 — Deferred LOW-severity auth threats (gap closure)
+**Goal:** Close T-018-8 (vault-file race condition) and T-018-9 (symlink attack on `auth.json`) — both deferred from Phase 018 with expectation of landing in Phase 022; did not.
+**Depends on:** 012, 013
+**Requirements:** AUTH-06 (extends vault hardening)
+**Parallelizable:** no (gap closure)
+
+#### Phase 022.3 — Reviewer worth-knowing + warning cleanup (gap closure)
+**Goal:** Phase 020 WK-01..06 (regex cycle-detection, pattern-order regression test, NamedTuple support in `_walk_value`, docstring polish, log-level clobber edge case, `RedactorNotAttached` precision) + Phase 021 WR-01..03 (`list[Credential]` count= log key, `auth.import.unreadable` WARN missing `path`, AST determinism scan nested-attribute backup).
+**Depends on:** 020, 021
+**Requirements:** AUTH-10, AUTH-11 (hardening)
+**Parallelizable:** yes (020 vs 021 fixes are independent)
 
 ---
 

@@ -1,0 +1,40 @@
+{
+  "graphify": {
+    "enabled": true
+  },
+  "mode": "yolo",
+  "granularity": "fine",
+  "parallelization": true,
+  "commit_docs": false,
+  "model_profile": "budget",
+  "workflow": {
+    "research": true,
+    "plan_check": true,
+    "verifier": true,
+    "nyquist_validation": true,
+    "auto_advance": true,
+    "ui_phase": true,
+    "ui_safety_gate": true,
+    "research_before_questions": false,
+    "skip_discuss": true,
+    "use_worktrees": true,
+    "_auto_chain_active": false
+  },
+  "git": {
+    "branching_strategy": "phase"
+  },
+  "hooks": {
+    "context_warnings": true
+  },
+  "quality": {
+    "level": "fast",
+    "test_exemptions": [
+      ".md",
+      ".json",
+      "templates/**",
+      ".planning/**"
+    ],
+    "context7_token_cap": 2000
+  },
+  "concurrent": true
+}
