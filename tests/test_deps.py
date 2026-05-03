@@ -32,12 +32,21 @@ async def test_startup_creates_deps() -> None:
     """startup() creates Deps and assigns litellm.aclient_session.
 
     We patch:
-    - state_core.http_client.build_shared_client  -> returns a fake client
-    - state_core.deps.Deps                        -> records construction
-    - litellm (module-level)                      -> captures aclient_session assignment
+    - state_daemon.orchestrator.build_shared_client -> returns a fake client
+    - state_daemon.orchestrator.litellm             -> captures aclient_session assignment
     All other startup steps are patched out to avoid side effects.
     """
     fake_client = MagicMock(spec=httpx.AsyncClient)
+
+    # SqliteEventStore mock needs async run_repair_now()
+    mock_store = MagicMock()
+    mock_store.run_repair_now = AsyncMock(return_value=[])
+    mock_store_cls = MagicMock(return_value=mock_store)
+
+    # StartupReconciler mock needs async start()
+    mock_reconciler = MagicMock()
+    mock_reconciler.start = AsyncMock(return_value=None)
+    mock_reconciler_cls = MagicMock(return_value=mock_reconciler)
 
     with (
         patch("state_daemon.orchestrator.build_shared_client", return_value=fake_client) as mock_build,
@@ -45,10 +54,10 @@ async def test_startup_creates_deps() -> None:
         patch("state_daemon.orchestrator.install"),
         patch("state_daemon.orchestrator.assert_redactor_attached"),
         patch("state_daemon.orchestrator.import_from_opencode", new_callable=AsyncMock, return_value=[]),
-        patch("state_daemon.orchestrator.SqliteEventStore"),
+        patch("state_daemon.orchestrator.SqliteEventStore", mock_store_cls),
         patch("state_daemon.orchestrator.SyncEventMirror"),
         patch("state_daemon.orchestrator.migrate", new_callable=AsyncMock),
-        patch("state_daemon.orchestrator.StartupReconciler"),
+        patch("state_daemon.orchestrator.StartupReconciler", mock_reconciler_cls),
     ):
         from state_daemon.orchestrator import startup
         await startup()

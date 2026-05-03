@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import litellm
 import structlog
 
 from state_core.auth import import_from_opencode
+from state_core.deps import Deps
 from state_core.events import SqliteEventStore
+from state_core.http_client import build_shared_client
 from state_core.migrations import migrate
 from state_core.observability import assert_redactor_attached, install
 from state_core.reconciler import StartupReconciler
@@ -47,6 +50,13 @@ async def startup() -> None:
     # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
     install()
     assert_redactor_attached()
+
+    # Step 0.1 (Phase 023 / PRV-06): build shared HTTP client + Deps container.
+    # Must be created inside an async function (not at module level) to avoid
+    # asyncio event loop binding issues.  Available to all subsequent steps.
+    deps = Deps(http_client=build_shared_client())
+    litellm.aclient_session = deps.http_client  # best-effort; works for non-Anthropic providers
+    log.info("startup: shared httpx client created", max_connections=100)
 
     store = SqliteEventStore()
     mirror = SyncEventMirror()
