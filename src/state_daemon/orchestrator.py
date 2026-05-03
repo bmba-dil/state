@@ -1,21 +1,28 @@
-"""Daemon startup orchestrator — enforces repair → migrate → reconciler ordering."""
+"""Daemon startup orchestrator — enforces redactor → repair → migrate → reconciler ordering."""
 
 from __future__ import annotations
 
 import structlog
 
-from src.state_core.events import SqliteEventStore
-from src.state_core.migrations import migrate
-from src.state_core.reconciler import StartupReconciler
-from src.state_core.sync_mirror import SyncEventMirror
+from state_core.events import SqliteEventStore
+from state_core.migrations import migrate
+from state_core.observability import assert_redactor_attached, install
+from state_core.reconciler import StartupReconciler
+from state_core.sync_mirror import SyncEventMirror
 
 log = structlog.get_logger(__name__)
 
 
 async def startup() -> None:
-    """Run the full startup sequence: repair → migrate → reconciler.
+    """Run the full startup sequence: redactor → repair → migrate → reconciler.
 
-    Each step is gated on the previous step completing without error.
+    Step 0 (Phase 020 / AUTH-10) installs the root-logger token
+    redactor and self-checks that it is attached. If the redactor
+    is not attached, RedactorNotAttached fires and the daemon
+    process exits before any other I/O (P0-14 defense layer 2).
+
+    Each subsequent step is gated on the previous step completing
+    without error.
 
     Step 1 (repair) uses ``run_repair_now()`` instead of lazy repair to
     ensure aggregate_seq consistency BEFORE migration 0004 creates the
@@ -24,6 +31,12 @@ async def startup() -> None:
     performs an immediate reconciliation sweep of unsent events before
     starting the periodic background sweep loop.
     """
+    # Step 0 (Phase 020 / AUTH-10): install + verify redactor BEFORE any other I/O.
+    # Failure raises RedactorNotAttached which is fatal — the daemon process
+    # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
+    install()
+    assert_redactor_attached()
+
     store = SqliteEventStore()
 
     # Step 1: Repair aggregate seq
