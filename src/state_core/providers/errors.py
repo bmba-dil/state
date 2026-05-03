@@ -46,3 +46,12 @@ class ProviderResponseError(StateProviderError):
 
     Raised for: APIResponseValidationError, JSONSchemaValidationError.
     """
+
+
+class OAuthRoutingError(StateProviderError):
+    """Raised when OAuth stealth traffic bypasses ProviderRouter to reach LitellmClient.
+
+    This is a programmer error — PRV-03 requires that all OAuthCredential
+    traffic routes through AnthropicClient (direct SDK). If this error appears
+    in production, ProviderRouter.select() was bypassed. Never retry this error.
+    """
