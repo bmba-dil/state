@@ -1,14 +1,12 @@
-"""RED stubs for state_core.http_client — build_shared_client() contract.
+"""Tests for state_core.http_client — build_shared_client() contract.
 
-All tests fail with ModuleNotFoundError until Plan 02 (Wave 1) creates
-src/state_core/http_client.py.  Do NOT add pytest.skip() or conditional
-imports — the tests MUST fail red until the implementation lands.
+Wave 0 RED stubs made GREEN in Plan 02 (Wave 1).
 """
 from __future__ import annotations
 
-import os
 import ssl
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -21,10 +19,11 @@ async def test_build_shared_client_defaults() -> None:
     client = build_shared_client()
     try:
         assert isinstance(client, httpx.AsyncClient)
-        limits = client._limits  # httpx exposes limits on _limits attribute
-        assert limits.max_connections == 100
-        assert limits.max_keepalive_connections == 20
-        assert limits.keepalive_expiry == 30.0
+        # httpx 0.28.x stores limits on the underlying httpcore pool
+        pool = client._transport._pool
+        assert pool._max_connections == 100
+        assert pool._max_keepalive_connections == 20
+        assert pool._keepalive_expiry == 30.0
     finally:
         await client.aclose()
 
@@ -65,22 +64,17 @@ async def test_build_shared_client_env_ca(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """STATE_CA_BUNDLE env var pointing to a PEM file is picked up."""
-    # Create a minimal (self-signed) PEM file so ssl.create_default_context
-    # can load it without error.  We use Python's ssl module to generate
-    # a context first to verify our build_shared_client path at least
-    # reaches ssl.create_default_context(cafile=...).
-    #
-    # For the RED phase this test simply imports build_shared_client
-    # (which fails), so the PEM content doesn't matter yet.
+    """STATE_CA_BUNDLE env var is picked up by build_shared_client()."""
     pem_path = tmp_path / "ca.pem"
-    pem_path.write_text("")  # empty — real validation in GREEN phase
+    pem_path.write_text("")  # empty — we mock ssl.create_default_context
+
+    fake_ctx = MagicMock(spec=ssl.SSLContext)
     monkeypatch.setenv("STATE_CA_BUNDLE", str(pem_path))
-    # We expect this to raise ssl.SSLError for empty PEM in GREEN,
-    # but the module import (which fails here) is the RED gate.
-    # The GREEN task will update this test to use a real PEM or mock ssl.
-    client = build_shared_client()  # GREEN: update PEM handling
-    try:
-        assert isinstance(client, httpx.AsyncClient)
-    finally:
-        await client.aclose()
+
+    with patch("state_core.http_client.ssl.create_default_context", return_value=fake_ctx) as mock_ctx:
+        client = build_shared_client()
+        try:
+            assert isinstance(client, httpx.AsyncClient)
+            mock_ctx.assert_called_once_with(cafile=str(pem_path))
+        finally:
+            await client.aclose()
