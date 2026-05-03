@@ -86,7 +86,11 @@ DRILL_EVENT_TYPES = Literal[
 # Single-event aggregates
 MODE_EVENT_TYPES = Literal["state.mode.activated"]
 DECISION_EVENT_TYPES = Literal["state.decision.asked", "state.decision.made"]
-AUTH_EVENT_TYPES = Literal["state.auth.refreshed", "state.auth.rotated"]
+AUTH_EVENT_TYPES = Literal[
+    "state.auth.refreshed",
+    "state.auth.rotated",
+    "state.auth.imported",
+]
 
 # -- ULID validation -------------------------------------------------------------
 
@@ -342,6 +346,29 @@ class AuthRotatedData(BaseModel):
     index: int
 
 
+class AuthImportedData(BaseModel):
+    """Payload for state.auth.imported events emitted by Phase 021 importer.
+
+    Contract (P0-14 / AUTH-11): NEVER carries secret bytes. The three
+    fields below are the COMPLETE schema -- adding access/refresh/key/
+    expires would violate the secret-leak prevention contract owned by
+    this phase. Phase 020 redactor is the SECOND defense layer; this
+    payload contract is the FIRST.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    provider_id: str
+    """Stable provider identifier (e.g., 'anthropic', 'openrouter')."""
+
+    source: Literal["opencode"] = "opencode"
+    """Origin of the imported credential. Currently only opencode; future
+    sources (gsd-pi, raw env file, ...) extend this Literal."""
+
+    cred_kind: Literal["oauth", "api_key"]
+    """Variant of the imported credential. Mirrors the discriminator on
+    state_core.auth.base.Credential."""
+
+
 # -- Typed event models (discriminated unions) ------------------------------------
 
 
@@ -549,6 +576,12 @@ class AuthRotatedEvent(EventEnvelope):
     data: AuthRotatedData  # type: ignore[assignment]
 
 
+class AuthImportedEvent(EventEnvelope):
+    type: Literal["state.auth.imported"] = "state.auth.imported"
+    aggregate_type: Literal["auth"] = "auth"
+    data: AuthImportedData  # type: ignore[assignment]
+
+
 # -- Aggregate discriminated unions ------------------------------------------------
 
 
@@ -597,7 +630,7 @@ DecisionEvent = Annotated[
 ]
 
 AuthEvent = Annotated[
-    AuthRefreshedEvent | AuthRotatedEvent,
+    AuthRefreshedEvent | AuthRotatedEvent | AuthImportedEvent,
     Field(discriminator="type"),
 ]
 

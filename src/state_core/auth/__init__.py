@@ -28,6 +28,7 @@ from state_core.auth.errors import (
     NoCredentialsAvailableError,
     UnknownApiKeyProviderError,
 )
+from state_core.auth.import_opencode import import_from_opencode
 from state_core.auth.loader import load_credentials
 from state_core.auth.refresh import (
     EXPIRY_BUFFER_SECONDS,
@@ -83,6 +84,8 @@ __all__ = [
     "UnknownApiKeyProviderError",
     # Phase 018 — loader (orchestration; providers/* deliberately not re-exported)
     "load_credentials",
+    # Phase 021 — opencode importer (AUTH-11)
+    "import_from_opencode",
     # Phase 019 — rotation
     "BUCKET_MS",
     "NoCredentialsAvailableError",

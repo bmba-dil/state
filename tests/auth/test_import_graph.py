@@ -141,3 +141,103 @@ def test_rotation_imports_only_allowed_targets() -> None:
         assert target in allowed, (
             f"rotation.py imports {target!r} — allowed set is {allowed!r}"
         )
+
+
+# ── Phase 021: IMPORT-MODE-ISOLATION — import_opencode.py mode isolation ─
+
+
+_IMPORT_OPENCODE_PATH = (
+    _REPO_ROOT / "src" / "state_core" / "auth" / "import_opencode.py"
+)
+
+
+def test_import_opencode_no_mode_imports() -> None:
+    """Phase 021 IMPORT-MODE-ISOLATION — state_core.auth.import_opencode
+    MUST NOT import state_build.* / state_teach.* / state.build / state.teach.
+
+    Mode isolation cardinal rule (CLAUDE.md). The CI import-graph lint
+    enforces this for every state_core.auth.* module.
+
+    Wave 1 RED — file does not exist yet. Plan 02 lands the implementation.
+    """
+    if not _IMPORT_OPENCODE_PATH.exists():
+        pytest.fail(
+            "Wave 1 RED: src/state_core/auth/import_opencode.py does not exist yet"
+        )
+
+    src = _IMPORT_OPENCODE_PATH.read_text()
+    forbidden = [
+        "from state_build",
+        "from state_teach",
+        "import state_build",
+        "import state_teach",
+        "from state.build",
+        "from state.teach",
+    ]
+    for pat in forbidden:
+        assert pat not in src, (
+            f"state_core.auth.import_opencode.py contains forbidden import "
+            f"{pat!r} — mode isolation violation (cardinal rule, CLAUDE.md)"
+        )
+
+
+def test_import_opencode_imports_only_allowed_modules() -> None:
+    """Phase 021 IMPORT-MODE-ALLOWLIST — explicit allowlist of allowed
+    import roots: stdlib + pydantic + orjson + structlog + a narrowed
+    set of state_core submodules.
+
+    Also enforces SF-04 cardinal: bare-package imports only — `from src.*`
+    is BANNED outright (commit a955608). Mixed `src.state_core.*` and
+    `state_core.*` resolve to two distinct sys.modules entries with
+    separate class objects, breaking pydantic discriminated-union identity.
+
+    Wave 1 RED — file does not exist yet.
+    """
+    if not _IMPORT_OPENCODE_PATH.exists():
+        pytest.fail(
+            "Wave 1 RED: src/state_core/auth/import_opencode.py does not exist yet"
+        )
+
+    import ast
+    import sys
+
+    tree = ast.parse(_IMPORT_OPENCODE_PATH.read_text())
+    allowed_roots = set(sys.stdlib_module_names) | {
+        "pydantic",
+        "orjson",
+        "structlog",
+        "state_core",  # narrowed below by submodule check
+    }
+    allowed_state_core_submods = {
+        "state_core.auth.base",
+        "state_core.auth.store",
+        "state_core.auth.providers.api_key",
+        "state_core.events",
+        "state_core.schema",
+        "state_core.sync_mirror",
+    }
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            mod = node.module
+            assert not mod.startswith("src."), (
+                f"SF-04 violation: `from src.{mod[4:]} import ...` — "
+                "use bare `from {mod[4:]} import ...` (commit a955608)"
+            )
+            root = mod.split(".")[0]
+            if root not in allowed_roots:
+                pytest.fail(f"forbidden import root: {mod}")
+            if mod.startswith("state_core."):
+                if not any(
+                    mod == a or mod.startswith(a + ".")
+                    for a in allowed_state_core_submods
+                ):
+                    pytest.fail(f"state_core import outside allowlist: {mod}")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith("src."), (
+                    f"SF-04 violation: `import src.{alias.name[4:]}` — "
+                    "use bare `import {alias.name[4:]}` (commit a955608)"
+                )
+                root = alias.name.split(".")[0]
+                if root not in allowed_roots:
+                    pytest.fail(f"forbidden import root: {alias.name}")

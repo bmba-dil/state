@@ -1,9 +1,10 @@
-"""Daemon startup orchestrator — enforces redactor → repair → migrate → reconciler ordering."""
+"""Daemon startup orchestrator — enforces redactor → import → repair → migrate → reconciler ordering."""
 
 from __future__ import annotations
 
 import structlog
 
+from state_core.auth import import_from_opencode
 from state_core.events import SqliteEventStore
 from state_core.migrations import migrate
 from state_core.observability import assert_redactor_attached, install
@@ -14,12 +15,22 @@ log = structlog.get_logger(__name__)
 
 
 async def startup() -> None:
-    """Run the full startup sequence: redactor → repair → migrate → reconciler.
+    """Run the full startup sequence: redactor → import → repair → migrate → reconciler.
 
     Step 0 (Phase 020 / AUTH-10) installs the root-logger token
     redactor and self-checks that it is attached. If the redactor
     is not attached, RedactorNotAttached fires and the daemon
     process exits before any other I/O (P0-14 defense layer 2).
+
+    Step 0.5 (Phase 021 / AUTH-11) runs the opencode auth.json
+    importer. It MUST run AFTER the redactor is attached (so any
+    structlog calls during import are filtered) and BEFORE store-
+    driven steps (so its auth.imported events flow through the same
+    SqliteEventStore + SyncEventMirror dual-write path as runtime
+    events). Importer failure is non-fatal — wrapped in try/except;
+    daemon boot continues with a WARN log. Foreign data tolerance:
+    opencode is read-only from state's perspective, and a corrupt
+    opencode auth.json must never block our daemon.
 
     Each subsequent step is gated on the previous step completing
     without error.
@@ -38,6 +49,24 @@ async def startup() -> None:
     assert_redactor_attached()
 
     store = SqliteEventStore()
+    mirror = SyncEventMirror()
+
+    # Step 0.5 (Phase 021 / AUTH-11): first-run import from opencode auth.json.
+    # Runs AFTER redactor attach (logs filtered) and BEFORE repair (importer's
+    # auth.imported events dual-write through the same path). Non-fatal: any
+    # exception is logged and boot continues.
+    try:
+        imported = await import_from_opencode(store=store, mirror=mirror)
+        if imported:
+            log.info("startup: opencode importer added credentials", count=len(imported))
+        else:
+            log.info("startup: opencode importer no-op")
+    except Exception as e:
+        # Defensive WARN — error_type only; never log the exception payload (could leak bytes).
+        log.warning(
+            "daemon.startup.importer_failed",
+            error_type=type(e).__name__,
+        )
 
     # Step 1: Repair aggregate seq
     log.info("startup: repairing aggregate sequences")
@@ -53,7 +82,6 @@ async def startup() -> None:
 
     # Step 3: Reconcile unsent events
     log.info("startup: reconciling unsent events")
-    mirror = SyncEventMirror()
     reconciler = StartupReconciler(db=store, mirror=mirror)
     await reconciler.start()
 

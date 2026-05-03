@@ -1,6 +1,7 @@
 .DS_Store
 state-inputs/
-.planning/
+.state-inputs/
+.claude/
 
 # Python
 __pycache__/
