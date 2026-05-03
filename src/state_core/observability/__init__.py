@@ -23,13 +23,15 @@ Public surface:
   * iter_token_patterns() -> tuple[re.Pattern, ...]
     — accessor for the 12-family regex set (Plan 02 owns).
   * REDACTED — replacement literal (`"[REDACTED]"`, Plan 02 owns).
-  * install() -> None — idempotent installer (Plan 03 owns).
+  * CYCLE_SENTINEL — cycle-detection sentinel (`"[CYCLE]"`, WK-01 / 022.3).
+  * install(level=logging.DEBUG) -> None — idempotent installer (Plan 03 owns).
   * assert_redactor_attached() -> None — startup self-check (Plan 03 owns).
   * RedactorNotAttached — fatal exception (Plan 03 owns).
 """
 from __future__ import annotations
 
 from state_core.observability.redactor import (
+    CYCLE_SENTINEL,
     REDACTED,
     RedactorNotAttached,
     assert_redactor_attached,
@@ -39,6 +41,7 @@ from state_core.observability.redactor import (
 )
 
 __all__ = [
+    "CYCLE_SENTINEL",
     "REDACTED",
     "RedactorNotAttached",
     "assert_redactor_attached",

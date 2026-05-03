@@ -23,10 +23,10 @@ Cardinal rules (per PROJECT.md / CLAUDE.md):
      auth providers (Phases 011-019) is layer 1; this module is
      the root-logger safety net. Both required.
 
-  5. Circular-reference policy: _walk_value does NOT cycle-detect.
-     structlog event-dicts in practice never contain circular refs
-     (Pydantic serialization breaks them). RESEARCH §Open Question 3
-     documents the deferral; not in P0-14 scope.
+  5. Circular-reference policy: _walk_value detects cycles via an
+     id()-keyed visited set and substitutes `[CYCLE]` sentinel.
+     WK-01 (Phase 022.3) closed the deferral — see 020-REVIEW.md
+     §WK-01 for the reviewer's prescription.
 
 Token shape provenance (every regex traceable to a source):
   * sk-ant-oat-       → .state-inputs/claude-oauth.md (Anthropic OAuth access)
@@ -114,6 +114,11 @@ _SECRET_KEYS: frozenset[str] = frozenset({
 REDACTED: str = "[REDACTED]"
 """Replacement literal. Length-uniform; greppable; non-secret."""
 
+CYCLE_SENTINEL: str = "[CYCLE]"
+"""Cycle-detection sentinel emitted by _walk_value when a container
+is encountered a second time on a single walk. WK-01 / Phase 022.3.
+Length-uniform (7 chars), greppable, non-secret."""
+
 
 def _redact_string(s: str) -> str:
     """Apply every pattern in _PATTERNS to *s*; replace each match with REDACTED.
@@ -128,7 +133,11 @@ def _redact_string(s: str) -> str:
     return s
 
 
-def _walk_value(v: Any, key_hint: str | None = None) -> Any:
+def _walk_value(
+    v: Any,
+    key_hint: str | None = None,
+    visited: set[int] | None = None,
+) -> Any:
     """Recursive type-dispatch redactor — the redaction kernel.
 
     Args:
@@ -139,6 +148,12 @@ def _walk_value(v: Any, key_hint: str | None = None) -> Any:
             shape (covers opaque refresh tokens — RESEARCH §Pitfall 3).
             None when called at the top of a call chain (e.g., a list
             element's first walk).
+        visited: id()-keyed set of containers already encountered on
+            this walk. Threaded through every recursive call inside
+            container branches so a self-referencing dict / list /
+            tuple produces `CYCLE_SENTINEL` instead of RecursionError.
+            Containers only — strings, ints, etc. cannot self-reference
+            and need not pay the visited-check cost. WK-01 / 022.3.
 
     Returns:
         A NEW structure with secrets replaced. Strings: regex-substituted.
@@ -147,6 +162,7 @@ def _walk_value(v: Any, key_hint: str | None = None) -> Any:
         key_hint propagation through index access). BaseException: a
         new instance of the same exception class with `_redact_string(str(v))`
         as the message — DOES NOT mutate the live exception object.
+        Cyclic containers: `CYCLE_SENTINEL` literal on the second visit.
         Other types: returned as-is (no walk; caller handles repr if
         stringification matters).
 
@@ -155,6 +171,13 @@ def _walk_value(v: Any, key_hint: str | None = None) -> Any:
     signal "there's a secret here, just not currently set" — worse than
     leaving the absence visible).
     """
+    if visited is None:
+        visited = set()
+    # Only containers can self-reference. id()-keyed so identity, not equality.
+    if isinstance(v, (dict, list, tuple, set, frozenset)):
+        if id(v) in visited:
+            return CYCLE_SENTINEL
+        visited.add(id(v))
     if (
         key_hint
         and key_hint.lower() in _SECRET_KEYS
@@ -164,10 +187,31 @@ def _walk_value(v: Any, key_hint: str | None = None) -> Any:
     if isinstance(v, str):
         return _redact_string(v)
     if isinstance(v, dict):
-        return {k: _walk_value(item, key_hint=str(k)) for k, item in v.items()}
-    if isinstance(v, (list, tuple)):
-        walked = [_walk_value(item) for item in v]
-        return type(v)(walked)
+        return {k: _walk_value(item, key_hint=str(k), visited=visited) for k, item in v.items()}
+    if isinstance(v, list):
+        return [_walk_value(item, visited=visited) for item in v]
+    if isinstance(v, tuple):
+        walked = [_walk_value(item, visited=visited) for item in v]
+        cls = type(v)
+        if cls is tuple:
+            return tuple(walked)
+        # NamedTuple convention: `cls._make(iterable)` is the canonical
+        # constructor (per typing.NamedTuple docs).
+        make = getattr(cls, "_make", None)
+        if callable(make):
+            try:
+                return make(walked)
+            except (TypeError, ValueError):
+                pass  # fall through to *walked / plain tuple
+        # Plain tuple subclass with positional __init__: try *walked.
+        try:
+            return cls(*walked)
+        except TypeError:
+            # Subclass with incompatible signature — surrender class
+            # identity rather than crash. Returning a plain tuple keeps
+            # the redacted contents flowing; downstream renderers see a
+            # tuple, not a TypeError. WK-03 / Phase 022.3.
+            return tuple(walked)
     if isinstance(v, BaseException):
         # Preserve the exception class for downstream renderers; redact str(v).
         # Construct a NEW instance so the live exception is unmutated.
@@ -260,7 +304,7 @@ class RedactorNotAttached(RuntimeError):
 _INSTALLED: bool = False
 
 
-def install() -> None:
+def install(level: int | None = logging.DEBUG) -> None:
     """Idempotently install the redactor at position 0 of the structlog chain
     AND attach a ProcessorFormatter to the stdlib root logger.
 
@@ -273,6 +317,12 @@ def install() -> None:
     'shared_processors' wiring for unified coverage). See RESEARCH §Code
     Examples §4.
 
+    Args:
+        level: Stdlib root logger level to set after handler attachment.
+            Defaults to `logging.DEBUG` (preserves Phase 020 behavior).
+            Pass `None` to skip the setLevel call entirely (operators
+            with pre-configured levels). WK-05 / Phase 022.3.
+
     Idempotency:
       * Calling install() multiple times is a no-op after the first.
       * The `_INSTALLED` module-level guard prevents duplicate handlers
@@ -283,10 +333,16 @@ def install() -> None:
       * structlog.configure(...) replaces the global structlog config.
       * logging.getLogger().addHandler(...) appends a stream handler to
         the stdlib root logger.
-      * logging.getLogger().setLevel(logging.DEBUG) — install() sets the
-        root level to DEBUG so third-party libraries at DEBUG can flow
-        through the redactor (otherwise litellm verbose-mode logging
-        would be filtered out before the formatter runs).
+      * logging.getLogger().setLevel(level) — when *level* is not None
+        (default `logging.DEBUG`), install() sets the root logger
+        level so third-party libraries at that level flow through the
+        redactor. Pass `level=None` to skip the setLevel call entirely
+        and leave any pre-existing root level intact (useful for tests
+        and CLI tools that have already configured a level). The
+        DEBUG default is intentional in production: at higher levels,
+        DEBUG records from httpx/litellm/pygit2/aiosqlite are dropped
+        before the redactor sees them, reducing redactor coverage —
+        an operator-tunable tradeoff.
 
     Tests must use the `_isolate_structlog_for_redactor_tests` autouse
     fixture (tests/test_redactor.py) which snapshots and restores
@@ -343,7 +399,8 @@ def install() -> None:
         handler = logging.StreamHandler()
         handler.setFormatter(formatter)
         root.addHandler(handler)
-    root.setLevel(logging.DEBUG)
+    if level is not None:
+        root.setLevel(level)
 
     _INSTALLED = True
 
@@ -358,10 +415,12 @@ def assert_redactor_attached() -> None:
     attached but bypassed by a wiring bug), this function raises
     RedactorNotAttached — fatal — and the daemon process exits.
 
-    The canary is `sk-ant-oat-canary-<uuid4-hex>-<32 X chars>`. The
-    regex set will match it (sk-ant-oat- + ≥20 alnum chars). On
-    success, the rendered output contains `[REDACTED]` instead of
-    the canary bytes.
+    A fresh canary is generated per call as
+    `sk-ant-oat-canary-<uuid4-hex>-<32 X chars>`. The regex set
+    matches it (sk-ant-oat- + ≥20 alnum chars). On success, the
+    rendered output contains `[REDACTED]` instead of the canary
+    bytes. The per-call freshness prevents an attacker who has read
+    a previous canary from spoofing the self-check.
 
     Raises:
         RedactorNotAttached: if the canary survives in either:
@@ -425,6 +484,7 @@ def assert_redactor_attached() -> None:
     )
     root = logging.getLogger()
     rendered_outputs: list[str] = []
+    formatter_count = 0
     for handler in root.handlers:
         fmt = handler.formatter
         # Only audit ProcessorFormatter instances (the ones install()
@@ -435,15 +495,20 @@ def assert_redactor_attached() -> None:
         # know about foreign_pre_chain) or fail in confusing ways.
         if not isinstance(fmt, structlog.stdlib.ProcessorFormatter):
             continue
+        formatter_count += 1
         try:
             rendered_outputs.append(fmt.format(rec))
-        except Exception:
-            # A misconfigured ProcessorFormatter may still raise on a
-            # synthetic record; treat that as "could not verify" and
-            # continue — we'll fail below if no successful render
-            # happened.
-            continue
-    if not rendered_outputs:
+        except Exception as exc:
+            # WK-06: a misconfigured ProcessorFormatter that raises on
+            # render is FATAL — we cannot verify redactor attachment
+            # against its output. Distinguish from "no formatter present"
+            # below. Chain via `from exc` to preserve traceback.
+            raise RedactorNotAttached(
+                f"ProcessorFormatter on root logger raised on canary "
+                f"render: {type(exc).__name__}: {exc!r}. "
+                "Cannot verify redactor attachment. Refusing to start."
+            ) from exc
+    if formatter_count == 0:
         raise RedactorNotAttached(
             "stdlib root logger has no ProcessorFormatter handler; "
             "install() did not attach a ProcessorFormatter. "
@@ -459,6 +524,7 @@ def assert_redactor_attached() -> None:
 
 
 __all__ = [
+    "CYCLE_SENTINEL",
     "REDACTED",
     "RedactorNotAttached",
     "assert_redactor_attached",

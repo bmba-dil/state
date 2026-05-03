@@ -809,3 +809,203 @@ def test_walk_value_and_secret_keys_imported() -> None:
         assert k in _SECRET_KEYS, (
             f"{k!r} missing from _SECRET_KEYS={_SECRET_KEYS!r}"
         )
+
+
+# ── WK-01 (Phase 022.3) ────────────────────────────
+
+
+def test_walk_value_handles_cyclic_dict() -> None:
+    """WK-01 — cyclic dict produces [CYCLE] sentinel without RecursionError."""
+    d: dict[str, Any] = {}
+    d["self"] = d
+    d["token"] = "sk-ant-oat-" + "A" * 40
+    result = _walk_value(d)
+    assert result["self"] == "[CYCLE]", (
+        f"expected [CYCLE] sentinel for self-reference, got {result['self']!r}"
+    )
+    assert result["token"] == "[REDACTED]", (
+        f"secret-keyed redaction should still fire on cyclic walk, got {result['token']!r}"
+    )
+
+
+def test_walk_value_handles_cyclic_list() -> None:
+    """WK-01 — cyclic list produces [CYCLE] sentinel and surrounding values still redact."""
+    lst: list[Any] = [1, 2]
+    lst.append(lst)
+    lst.append("Bearer " + "a" * 40)
+    result = _walk_value(lst)
+    assert result[2] == "[CYCLE]", (
+        f"expected [CYCLE] sentinel at self-reference index, got {result[2]!r}"
+    )
+    assert "[REDACTED]" in result[3] and "a" * 40 not in result[3], (
+        f"surrounding string should still be redacted, got {result[3]!r}"
+    )
+
+
+def test_walk_value_acyclic_unaffected() -> None:
+    """WK-01 regression — visited-set must NOT mark equal-by-value strings as cycles.
+    id()-keyed identity check; two identical strings at different keys must both walk normally.
+    """
+    d = {"a": "plain-string", "b": "plain-string", "c": [1, 2, 3]}
+    result = _walk_value(d)
+    assert result == d, (
+        f"acyclic dict mutated by visited-set false-positive: {result!r} != {d!r}"
+    )
+
+
+# ── WK-02 (Phase 022.3) ──────────────────────────────
+
+
+def test_pattern_order_specific_before_generic() -> None:
+    """WK-02 — Order contract: more-specific shapes BEFORE generic sk-... pattern.
+
+    The 12-pattern set in `_PATTERNS` is order-dependent. The generic
+    `sk-[A-Za-z0-9]{40,}` pattern (index 4 today) must run AFTER the
+    specific `sk-ant-oat-...` pattern (index 0 today) so the generic
+    does not consume bytes a specific would have caught (and so that
+    any future generic-then-specific reorder is caught here, not in
+    production).
+    """
+    sources = [p.pattern for p in _PATTERNS]
+    specific_idx = next(i for i, s in enumerate(sources) if "sk-ant-oat-" in s)
+    generic_idx = next(i for i, s in enumerate(sources) if s.startswith("(?<!\\w)sk-[A-Za-z0-9]{40"))
+    assert specific_idx < generic_idx, (
+        f"order regression: specific (idx={specific_idx}) "
+        f"must come before generic (idx={generic_idx})"
+    )
+
+
+# ── WK-03 (Phase 022.3) ──────────────────────────
+
+
+from typing import NamedTuple as _WK03_NamedTuple  # local alias to avoid top-of-file collision
+
+
+def test_walk_value_preserves_namedtuple_class() -> None:
+    """WK-03 — NamedTuple subclass survives _walk_value with class identity intact."""
+    class Token(_WK03_NamedTuple):
+        label: str
+        secret: str
+    t = Token(label="hdr", secret="sk-ant-oat-" + "X" * 40)
+    result = _walk_value(t)
+    assert isinstance(result, Token), (
+        f"expected NamedTuple class identity preserved, got {type(result).__name__}"
+    )
+    assert result.label == "hdr", f"non-secret field mutated: {result.label!r}"
+    assert result.secret == "[REDACTED]", (
+        f"secret field not redacted: {result.secret!r}"
+    )
+
+
+def test_walk_value_falls_back_for_unconstructable_tuple_subclass() -> None:
+    """WK-03 — tuple subclass with broken __init__ falls back to plain tuple, no TypeError."""
+    class WeirdTuple(tuple):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise TypeError("cannot construct WeirdTuple")
+    w = tuple.__new__(WeirdTuple, ("a", "Bearer " + "x" * 40))
+    # Confirm the broken __init__ would actually raise on positional construction.
+    # (Uses tuple.__new__ to bypass __init__ on the test subject itself.)
+    result = _walk_value(w)
+    # Reviewer prescription: surrender class identity rather than crash.
+    assert type(result) is tuple, (
+        f"expected fallback to plain tuple, got {type(result).__name__}"
+    )
+    assert result[0] == "a"
+    assert "[REDACTED]" in result[1] and "x" * 40 not in result[1]
+
+
+def test_walk_value_plain_tuple_unchanged() -> None:
+    """WK-03 regression — plain tuple still produces plain tuple with redacted contents."""
+    v = ("Bearer " + "a" * 40, 1, "x")
+    result = _walk_value(v)
+    assert type(result) is tuple
+    assert "[REDACTED]" in result[0] and "a" * 40 not in result[0]
+    assert result[1] == 1
+    assert result[2] == "x"
+
+
+# ── WK-05 (Phase 022.3) ──────────────────────────
+
+
+def test_install_respects_level_parameter() -> None:
+    """WK-05 — install(level=logging.WARNING) sets root logger level to WARNING (no DEBUG clobber)."""
+    install(level=logging.WARNING)
+    assert logging.getLogger().level == logging.WARNING, (
+        f"install(level=WARNING) did not set root level: got {logging.getLogger().level}"
+    )
+
+
+def test_install_default_level_is_debug() -> None:
+    """WK-05 regression — install() (no kwarg) still sets DEBUG (REDACT-19 contract preserved)."""
+    install()
+    assert logging.getLogger().level == logging.DEBUG, (
+        f"install() default no longer DEBUG: got {logging.getLogger().level}"
+    )
+
+
+def test_install_skips_setlevel_when_level_is_none() -> None:
+    """WK-05 — install(level=None) does NOT touch the root logger level."""
+    logging.getLogger().setLevel(logging.ERROR)
+    pre = logging.getLogger().level
+    install(level=None)
+    assert logging.getLogger().level == pre, (
+        f"install(level=None) clobbered root level: pre={pre}, post={logging.getLogger().level}"
+    )
+
+
+# ── WK-06 (Phase 022.3) ──────────────────────────
+
+
+def test_assert_redactor_attached_raises_on_broken_formatter(
+    installed_redactor: Any,
+) -> None:
+    """WK-06 — broken ProcessorFormatter raises RedactorNotAttached with precise diagnostic."""
+    # Find the redactor's ProcessorFormatter and monkey-patch its format()
+    # to always raise. This simulates a misconfigured JSONRenderer.
+    root = logging.getLogger()
+    target_handler = next(
+        (h for h in root.handlers
+         if isinstance(h.formatter, structlog.stdlib.ProcessorFormatter)),
+        None,
+    )
+    assert target_handler is not None, "installed_redactor fixture did not attach a ProcessorFormatter"
+
+    original_format = target_handler.formatter.format
+
+    def broken_format(rec: logging.LogRecord) -> str:
+        raise ValueError("simulated broken formatter")
+
+    target_handler.formatter.format = broken_format  # type: ignore[method-assign]
+    try:
+        with pytest.raises(RedactorNotAttached) as exc_info:
+            assert_redactor_attached()
+        msg = str(exc_info.value)
+        assert "ProcessorFormatter on root logger raised on canary render" in msg, (
+            f"WK-06 message regression: got {msg!r}"
+        )
+        assert "ValueError" in msg, (
+            f"WK-06 message must name the exception class: got {msg!r}"
+        )
+        assert isinstance(exc_info.value.__cause__, ValueError), (
+            f"WK-06 must chain via `from exc`; got __cause__={exc_info.value.__cause__!r}"
+        )
+    finally:
+        target_handler.formatter.format = original_format  # type: ignore[method-assign]
+
+
+def test_assert_redactor_attached_no_formatter_message_unchanged(
+    installed_redactor: Any,
+) -> None:
+    """WK-06 regression — when zero ProcessorFormatters exist, original error message preserved."""
+    root = logging.getLogger()
+    # Strip any ProcessorFormatter handlers post-install (simulates a
+    # later misconfiguration that detaches them).
+    for h in list(root.handlers):
+        if isinstance(h.formatter, structlog.stdlib.ProcessorFormatter):
+            root.removeHandler(h)
+    with pytest.raises(RedactorNotAttached) as exc_info:
+        assert_redactor_attached()
+    msg = str(exc_info.value)
+    assert msg.startswith("stdlib root logger has no ProcessorFormatter handler"), (
+        f"WK-06 must preserve original count==0 message: got {msg!r}"
+    )
