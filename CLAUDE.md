@@ -82,7 +82,21 @@ Entry points:
 - `/gsd:quick` — small ad-hoc tasks outside the roadmap
 - `/gsd:debug` — investigation and bug fixing
 
-Config: `.planning/config.json` — mode=yolo, granularity=fine, parallelization=true, commit_docs=false (planning docs local-only).
+Config: `.planning/config.json` — mode=yolo, granularity=fine, parallelization=true, commit_docs=false (planning docs local-only), security_enforcement=true, summary_strict=true.
+
+### Per-plan SUMMARY.md is mandatory (project-specific gate)
+
+Every PLAN.md execution MUST land a paired SUMMARY.md before the plan is considered complete. **No exceptions**, including:
+
+- RED-only / Wave-0 / scaffold plans — write a thin SUMMARY pointing at the GREEN successor.
+- Plans whose narrative content overlaps with VERIFICATION.md or a peer SUMMARY — write the SUMMARY anyway, even if it just states the consolidation rationale and points to the canonical artifact.
+- Trivial single-task plans — still need the SUMMARY to keep the plan-summary chain auditable for milestone-close.
+
+If the executor agent skips a SUMMARY, the wave spot-check in `execute-phase` will block in yolo mode and respawn the agent with explicit "create SUMMARY.md" instruction. Backfilling at milestone-close (as v2 had to for 4 plans: 011-01, 011-02, 013-01, 020-01) is a known regression — do not normalize it.
+
+### Per-phase SECURITY.md is mandatory before phase close
+
+Every phase MUST land a SECURITY.md before its phase-close commit. With `security_enforcement=true` and yolo mode, `execute-phase` auto-spawns `/gsd:secure-phase` after the last wave if SECURITY.md is missing — do not bypass. The retroactive backfill that v2 needs for phases 011..022 + 022.1 + 022.2 is a known debt — v3+ phases must not contribute to it.
 
 Reference material (gitignored): `state-inputs/opencode/`, `state-inputs/get-shit-done/`, `state-inputs/gsd-2pi-codebase-analysis/`, auth specs (`state-inputs/claude-oauth.md`, `state-inputs/gsd2-auth-analysis.md`).
 

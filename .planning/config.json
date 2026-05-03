@@ -18,6 +18,8 @@
     "research_before_questions": false,
     "skip_discuss": true,
     "use_worktrees": true,
+    "security_enforcement": true,
+    "summary_strict": true,
     "_auto_chain_active": false
   },
   "git": {

@@ -55,11 +55,28 @@
 **Requirements:** PRV-09
 **Parallelizable:** no (integration)
 
-#### Phase 031 — Provider parity matrix tests
-**Goal:** Hypothesis-driven 10-prompt matrix across Anthropic/Gemini/Copilot/API-key; normalized output snapshot diff.
+#### Phase 031 — Provider parity matrix tests (available-provider scope)
+**Goal:** Hypothesis-driven 10-prompt matrix across the **providers user has live credentials for**; normalized output snapshot diff. **Live coverage limited by available auth** — providers without local creds are deferred to a documented release-time smoke gate (mirrors v2 OAuth smoke pattern).
+
+**In-scope (live, executed in CI):**
+- Anthropic OAuth (stealth route via direct SDK)
+- Anthropic API key (litellm route)
+- Gemini CLI OAuth (free-tier; via litellm, normalized)
+- Antigravity OAuth (free-tier; via litellm, normalized)
+
+**Deferred to release-time smoke gate (recorded as tech debt at phase close):**
+- GitHub Copilot device-code (requires Copilot subscription)
+- Plain API-key providers (12): OpenAI, Gemini API-key, DeepSeek, Groq, Together, Anyscale, Mistral, Cohere, OpenRouter, Grok (xAI), Cerebras, plus any v3-era additions (Codex, GLM if added later) — each requires a paid key the user does not currently hold
+
+**Test approach:**
+- 10-prompt Hypothesis-driven matrix on the 4 in-scope providers (40 live calls per CI run; bounded cost on the 2 paid routes via `model_profile=budget`)
+- Normalized output snapshot diff (structural, not byte-exact — providers differ on stop reasons, token counts, safety refusals)
+- Per-provider golden header capture (mirrors v2 Phase 014's captured-header pattern) for the deferred providers, so contract-level regressions surface even without live calls
+
 **Depends on:** 026, 027
-**Requirements:** (verifier; PRV-01..09)
+**Requirements:** (verifier; PRV-01..09 — full coverage on in-scope providers; structural-only coverage on deferred providers)
 **Parallelizable:** no (final)
+**Tech debt at close:** "Phase 031 release-time smoke — 13 providers (Copilot + 12 plain API-key) require live credentials" (intentional; same shape as v2's manual OAuth smoke gates)
 
 ---
 
