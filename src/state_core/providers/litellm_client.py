@@ -17,10 +17,6 @@ Anthropic path.
 
 Security: Never call aclose() on the shared client — lifecycle is owned by
 Deps/orchestrator (T-024-2).
-
-# TODO(phase-025): extract StateProviderError hierarchy to
-# state_core/providers/errors.py once Anthropic escape hatch needs shared
-# exception types.
 """
 
 from __future__ import annotations
@@ -31,50 +27,15 @@ import structlog
 from collections.abc import AsyncGenerator
 from litellm.types.utils import ModelResponse, ModelResponseStream
 
+from state_core.providers.errors import (
+    StateProviderError,
+    ProviderTransientError,
+    ProviderAuthError,
+    ProviderBadRequestError,
+    ProviderResponseError,
+)
+
 log = structlog.get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# State provider error hierarchy (PRV-01 error surface)
-# ---------------------------------------------------------------------------
-
-
-class StateProviderError(Exception):
-    """Base for all state provider errors.
-
-    Callers should catch this base class for generic provider-failure
-    handling, or catch the specific subclasses for retry/auth logic.
-    """
-
-
-class ProviderTransientError(StateProviderError):
-    """Retry-able error; caller should back off and retry.
-
-    Raised for: RateLimitError, APIConnectionError, Timeout,
-    InternalServerError, ServiceUnavailableError, BadGatewayError.
-    """
-
-
-class ProviderAuthError(StateProviderError):
-    """Authentication failure; caller should refresh credentials.
-
-    Raised for: AuthenticationError, PermissionDeniedError.
-    """
-
-
-class ProviderBadRequestError(StateProviderError):
-    """Non-retryable request error; caller must fix the request.
-
-    Raised for: BadRequestError, ContextWindowExceededError,
-    UnsupportedParamsError, InvalidRequestError, LiteLLMUnknownProvider.
-    """
-
-
-class ProviderResponseError(StateProviderError):
-    """Unexpected or invalid provider response; caller must fix response handling.
-
-    Raised for: APIResponseValidationError, JSONSchemaValidationError.
-    """
 
 
 # ---------------------------------------------------------------------------
