@@ -129,6 +129,19 @@ def _new_async_lock(vault_path: Path) -> filelock.AsyncFileLock:
     )
 
 
+# Public alias — Phase 019 promoted this from private to public surface so
+# state_core.auth.rotation can reuse the SAME (thread_local=False,
+# poll_interval=0.05, timeout=10.0) config tuple without duplicating it.
+# The leading-underscore name remains the canonical implementation; this
+# alias is the documented import path for new callers.
+#
+# WARNING (Pitfall 6, REFRESH-27): each call returns a NEW AsyncFileLock
+# instance. Instances are NOT cross-aware — two locks pointing at the same
+# path serialize via the kernel's POSIX lock. DO NOT call this from inside
+# a held lock block (reentrant deadlock at the 10s acquire timeout).
+new_async_lock = _new_async_lock
+
+
 def _extract_cred(vault: AuthVault, provider_id: str, idx: int) -> Credential:
     """Return ``vault.providers[provider_id][idx]``.
 
@@ -313,6 +326,7 @@ __all__ = [
     "REFRESH_HTTP_TIMEOUT_SECONDS",
     "RefreshLockTimeout",
     "is_expired_buffered",
+    "new_async_lock",
     "read_credential",
     "refresh_credential",
 ]

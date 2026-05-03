@@ -79,3 +79,65 @@ def test_loader_imports_only_allowed_targets() -> None:
         assert target in allowed, (
             f"loader.py imports {target!r} — allowed set is {allowed!r}"
         )
+
+
+# ── Phase 019: ROTATE-21 — rotation.py mode isolation ────────────────────
+
+
+_ROTATION_PATH = _REPO_ROOT / "src" / "state_core" / "auth" / "rotation.py"
+
+
+def test_rotation_no_mode_imports() -> None:
+    """ROTATE-21 — state_core.auth.rotation MUST NOT import state.build.* or state.teach.*.
+
+    Mode isolation cardinal rule (CLAUDE.md). The CI import-graph lint
+    enforces this for every state_core.auth.* module.
+
+    Wave 0 RED — file does not exist.
+    """
+    if not _ROTATION_PATH.exists():
+        pytest.fail(
+            "Wave 0 RED: src/state_core/auth/rotation.py does not exist yet"
+        )
+
+    src = _ROTATION_PATH.read_text()
+    forbidden_substrings = (
+        "from state.build",
+        "import state.build",
+        "from state.teach",
+        "import state.teach",
+    )
+    for needle in forbidden_substrings:
+        assert needle not in src, (
+            f"rotation.py contains forbidden import substring {needle!r} "
+            "(mode isolation breach)"
+        )
+
+
+def test_rotation_imports_only_allowed_targets() -> None:
+    """rotation.py may import ONLY from base / store / refresh / errors / loader under state_core.
+
+    Per RESEARCH §Standard Stack Core. Any other state_core.* import
+    indicates an unexpected dependency and should be flagged.
+
+    Wave 0 RED — file does not exist.
+    """
+    if not _ROTATION_PATH.exists():
+        pytest.fail(
+            "Wave 0 RED: src/state_core/auth/rotation.py does not exist yet"
+        )
+
+    src = _ROTATION_PATH.read_text()
+    allowed = {
+        "state_core.auth.base",
+        "state_core.auth.store",
+        "state_core.auth.refresh",
+        "state_core.auth.errors",
+        "state_core.auth.loader",
+    }
+    pattern = re.compile(r"(?:from|import)\s+(state_core\.[\w.]+)")
+    for match in pattern.finditer(src):
+        target = match.group(1).rstrip(",")
+        assert target in allowed, (
+            f"rotation.py imports {target!r} — allowed set is {allowed!r}"
+        )

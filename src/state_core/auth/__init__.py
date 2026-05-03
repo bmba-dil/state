@@ -1,8 +1,10 @@
 """Auth layer: 5-method credential management.
 
 Public surface re-exported from state_core.auth.base (Phase 011),
-state_core.auth.store (Phase 012), and state_core.auth.refresh
-(Phase 013). Downstream phases can
+state_core.auth.store (Phase 012), state_core.auth.refresh (Phase
+013), state_core.auth.errors (Phase 015), state_core.auth.loader
+(Phase 018), and state_core.auth.rotation (Phase 019). Downstream
+phases can
 ``from state_core.auth import OAuthCredential, AuthVault, refresh_credential``
 instead of reaching into the submodules.
 
@@ -19,6 +21,13 @@ from state_core.auth.base import (
     CredentialAdapter,
     OAuthCredential,
 )
+from state_core.auth.errors import (
+    AuthError,
+    AuthLoginError,
+    AuthRefreshError,
+    NoCredentialsAvailableError,
+    UnknownApiKeyProviderError,
+)
 from state_core.auth.loader import load_credentials
 from state_core.auth.refresh import (
     EXPIRY_BUFFER_SECONDS,
@@ -28,6 +37,13 @@ from state_core.auth.refresh import (
     is_expired_buffered,
     read_credential,
     refresh_credential,
+)
+from state_core.auth.rotation import (
+    BUCKET_MS,
+    clear_rate_limited,
+    iter_active_credentials,
+    mark_rate_limited,
+    select_credential,
 )
 from state_core.auth.store import (
     AuthVault,
@@ -60,6 +76,18 @@ __all__ = [
     "is_expired_buffered",
     "read_credential",
     "refresh_credential",
+    # Phase 015 — errors (promoted hierarchy)
+    "AuthError",
+    "AuthLoginError",
+    "AuthRefreshError",
+    "UnknownApiKeyProviderError",
     # Phase 018 — loader (orchestration; providers/* deliberately not re-exported)
     "load_credentials",
+    # Phase 019 — rotation
+    "BUCKET_MS",
+    "NoCredentialsAvailableError",
+    "clear_rate_limited",
+    "iter_active_credentials",
+    "mark_rate_limited",
+    "select_credential",
 ]

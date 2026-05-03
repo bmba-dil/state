@@ -1,4 +1,4 @@
-"""Shared fixtures for auth tests (Phase 011 + Phase 012 + Phase 018)."""
+"""Shared fixtures for auth tests (Phase 011 + Phase 012 + Phase 013 + Phase 018 + Phase 019)."""
 
 from __future__ import annotations
 
@@ -297,3 +297,105 @@ def mock_api_key_getpass(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Non
             pass
 
     return _apply
+
+
+# ── Phase 019 fixtures ────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _clear_cool_down() -> Iterator[None]:
+    """Clear state_core.auth.rotation._COOL_DOWN before AND after each test.
+
+    Defense against Pitfall 14 (RESEARCH §Common Pitfalls): module-global
+    cool-down state leaks across tests under random ordering.
+
+    Late-bind safe: in Wave 0 the rotation module does not yet exist; the
+    try/except ImportError fallback is a no-op so collection succeeds.
+    """
+    try:
+        from state_core.auth import rotation as _rotation_mod
+
+        _rotation_mod._COOL_DOWN.clear()
+    except (ImportError, AttributeError):
+        pass
+    yield
+    try:
+        from state_core.auth import rotation as _rotation_mod
+
+        _rotation_mod._COOL_DOWN.clear()
+    except (ImportError, AttributeError):
+        pass
+
+
+@pytest.fixture
+async def busy_lock_holder():  # type: ignore[no-untyped-def]
+    """Async context manager that holds `_new_async_lock(vault_path)` open.
+
+    Used by ROTATE-19 (test_select_lock_timeout_raises) — the test enters
+    this fixture's lock then calls `select_credential` from the same loop;
+    the inner call must raise `RefreshLockTimeout` within ~10s (or sooner
+    if the test passes a smaller `LOCK_TIMEOUT_SECONDS` patch).
+
+    Mirrors the lock-busy pattern from tests/auth/test_refresh.py for
+    REFRESH-25 / REFRESH-27.
+    """
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def _hold(vault_path: "Path"):
+        from state_core.auth.refresh import _new_async_lock
+
+        lock = _new_async_lock(vault_path)
+        await lock.acquire()
+        try:
+            yield lock
+        finally:
+            try:
+                await lock.release()
+            except Exception:
+                pass
+
+    return _hold
+
+
+@pytest.fixture
+def vault_with_three_oauth(now_frozen: float):  # type: ignore[no-untyped-def]
+    """In-memory AuthVault with three anthropic OAuth credentials.
+
+    Far-future `expires` ensures freshness; provider_id="anthropic".
+    Use for ROTATE-04, 07, 08, 09, 10, 16, 17.
+    """
+    store = pytest.importorskip("state_core.auth.store")
+    return store.AuthVault(
+        providers={
+            "anthropic": [
+                OAuthCredential(
+                    access=f"sk-ant-oat-TEST-{i}",
+                    refresh=f"rt-TEST-{i}",
+                    expires=now_frozen + 86400.0,
+                    provider_id="anthropic",
+                    account_id=f"acct-TEST-{i}",
+                )
+                for i in range(3)
+            ],
+        },
+        last_rotation={"anthropic": 0},
+    )
+
+
+@pytest.fixture
+def vault_with_three_api_keys():  # type: ignore[no-untyped-def]
+    """In-memory AuthVault with three openai ApiKeyCredentials.
+
+    Use for ROTATE-23 hypothesis (api keys never expire — pure rotation).
+    """
+    store = pytest.importorskip("state_core.auth.store")
+    return store.AuthVault(
+        providers={
+            "openai": [
+                ApiKeyCredential(key=f"TEST-key-{i}", provider_id="openai")
+                for i in range(3)
+            ],
+        },
+        last_rotation={"openai": 0},
+    )

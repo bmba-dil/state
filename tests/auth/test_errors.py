@@ -18,12 +18,14 @@ def test_errors_module_exports() -> None:
     assert hasattr(errors, "AuthError")
     assert hasattr(errors, "AuthLoginError")
     assert hasattr(errors, "AuthRefreshError")
-    # Phase 018 added UnknownApiKeyProviderError. The exact composition is
-    # asserted as a sorted set so future additions append cleanly.
+    # Phase 018 added UnknownApiKeyProviderError; Phase 019 added
+    # NoCredentialsAvailableError. The exact composition is asserted as a
+    # sorted list so future additions append cleanly.
     assert errors.__all__ == [
         "AuthError",
         "AuthLoginError",
         "AuthRefreshError",
+        "NoCredentialsAvailableError",
         "UnknownApiKeyProviderError",
     ]
 
