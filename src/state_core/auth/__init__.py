@@ -19,6 +19,7 @@ from state_core.auth.base import (
     CredentialAdapter,
     OAuthCredential,
 )
+from state_core.auth.loader import load_credentials
 from state_core.auth.refresh import (
     EXPIRY_BUFFER_SECONDS,
     LOCK_TIMEOUT_SECONDS,
@@ -59,4 +60,6 @@ __all__ = [
     "is_expired_buffered",
     "read_credential",
     "refresh_credential",
+    # Phase 018 — loader (orchestration; providers/* deliberately not re-exported)
+    "load_credentials",
 ]

@@ -18,7 +18,29 @@ def test_errors_module_exports() -> None:
     assert hasattr(errors, "AuthError")
     assert hasattr(errors, "AuthLoginError")
     assert hasattr(errors, "AuthRefreshError")
-    assert errors.__all__ == ["AuthError", "AuthLoginError", "AuthRefreshError"]
+    # Phase 018 added UnknownApiKeyProviderError. The exact composition is
+    # asserted as a sorted set so future additions append cleanly.
+    assert errors.__all__ == [
+        "AuthError",
+        "AuthLoginError",
+        "AuthRefreshError",
+        "UnknownApiKeyProviderError",
+    ]
+
+
+def test_unknown_api_key_provider_error_subclasses_auth_error() -> None:
+    """Phase 018 — UnknownApiKeyProviderError carries provider_id, no key bytes.
+
+    T-018-2 mitigation: message is provider_id-only, never an api key.
+    """
+    from state_core.auth.errors import AuthError, UnknownApiKeyProviderError
+
+    exc = UnknownApiKeyProviderError("foo-bar")
+    assert isinstance(exc, AuthError)
+    assert exc.provider_id == "foo-bar"
+    assert "foo-bar" in str(exc)
+    # T-018-2 secret-hygiene smoke: the message must not contain "key=".
+    assert "key=" not in str(exc)
 
 
 def test_errors_hierarchy() -> None:

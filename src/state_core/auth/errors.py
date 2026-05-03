@@ -24,6 +24,7 @@ Downstream consumers:
   * Phase 015 providers/google_gemini.py — direct import
   * Phase 016 providers/antigravity.py — will import (when shipped)
   * Phase 017 providers/github_copilot.py — will import (when shipped)
+  * Phase 018 providers/api_key.py — get_api_key_auth raises UnknownApiKeyProviderError
   * Phase 022 CLI — catches AuthError as the broad "any auth failure" net
 """
 
@@ -65,8 +66,36 @@ class AuthRefreshError(AuthError):
     """
 
 
+class UnknownApiKeyProviderError(AuthError):
+    """Raised when get_api_key_auth() is called with an unknown provider_id.
+
+    Phase 018 (M-A2 / AUTH-05): the registry-driven PlainApiKeyAuth factory
+    (state_core.auth.providers.api_key.get_api_key_auth) raises this when
+    the requested provider_id is not present in _REGISTRY.
+
+    Message contract (T-018-2 — secret hygiene):
+        The exception message includes the offending provider_id (a public
+        string) but NEVER the api key. Callers passing a key alongside the
+        provider_id MUST NOT include the key in any subsequent log/raise
+        chain — Phase 020's redactor is the second defense layer, not the
+        first.
+
+    Attributes:
+        provider_id: The unknown provider_id the caller requested.
+
+    Example:
+        >>> raise UnknownApiKeyProviderError("not-a-real-provider")
+        UnknownApiKeyProviderError: Unknown api_key provider_id: 'not-a-real-provider'
+    """
+
+    def __init__(self, provider_id: str) -> None:
+        self.provider_id = provider_id
+        super().__init__(f"Unknown api_key provider_id: {provider_id!r}")
+
+
 __all__ = [
     "AuthError",
     "AuthLoginError",
     "AuthRefreshError",
+    "UnknownApiKeyProviderError",
 ]
