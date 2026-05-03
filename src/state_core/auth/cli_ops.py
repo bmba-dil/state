@@ -25,7 +25,7 @@ from state_core.auth.errors import (
     UnknownApiKeyProviderError,
 )
 from state_core.auth.loader import load_credentials
-from state_core.auth.refresh import is_expired_buffered
+from state_core.auth.refresh import is_expired_buffered, with_vault_lock
 from state_core.auth.store import (
     AuthVault,
     get_auth_json_path,
@@ -269,15 +269,20 @@ async def login(
                 result = await auth_method.login()
                 cred = result if isinstance(result, (OAuthCredential, ApiKeyCredential)) else result
 
-    # Persist: append to vault array (never replaces — Phase 019 round-robin)
+    # Persist: append to vault array (never replaces — Phase 019 round-robin).
+    # T-018-8 mitigation (Phase 022.2): hold the vault filelock across the
+    # read-modify-write window so concurrent CLI invocations do not clobber.
     vault_path = get_auth_json_path()
-    vault = load_vault(vault_path) if vault_path.exists() else AuthVault()
-    existing = list(vault.providers.get(canonical, []))
-    existing.append(cred)
-    vault = vault.model_copy(update={"providers": {**vault.providers, canonical: existing}})
-    save_vault(vault_path, vault)
+    with with_vault_lock(vault_path):
+        vault = load_vault(vault_path) if vault_path.exists() else AuthVault()
+        existing = list(vault.providers.get(canonical, []))
+        existing.append(cred)
+        vault = vault.model_copy(update={"providers": {**vault.providers, canonical: existing}})
+        save_vault(vault_path, vault)
 
-    # Dual-write event (SQLite first, SyncEvent second — v1 cardinal rule)
+    # Dual-write event (SQLite first, SyncEvent second — v1 cardinal rule).
+    # OUTSIDE the lock: event mirroring can be slow; vault mutation is atomic
+    # within the with-block above.
     await _emit_auth_event("auth.logged_in", cred, store, mirror)
 
     log.info("auth.login.success", provider_id=canonical, account_label=_account_label(cred))
@@ -314,54 +319,56 @@ async def logout(
     if not vault_path.exists():
         return 0
 
-    vault = load_vault(vault_path)
-    creds = list(vault.providers.get(canonical, []))
+    # T-018-8 mitigation (Phase 022.2): hold the vault filelock across the
+    # read-modify-write window so concurrent CLI invocations do not clobber.
+    to_remove: list[OAuthCredential | ApiKeyCredential] = []
+    with with_vault_lock(vault_path):
+        vault = load_vault(vault_path)
+        creds = list(vault.providers.get(canonical, []))
 
-    if not creds:
-        return 0
-
-    to_remove: list[OAuthCredential | ApiKeyCredential]
-
-    if all_:
-        to_remove = list(creds)
-    elif account_id is not None:
-        # Match against account_id, then email, then prefix12
-        matches = [
-            c for c in creds
-            if (
-                (isinstance(c, OAuthCredential) and c.account_id == account_id)
-                or c.extras.get("email_address") == account_id
-                or _prefix12(c).startswith(account_id[:12])
-            )
-        ]
-        if len(matches) == 0:
+        if not creds:
             return 0
-        if len(matches) > 1:
-            raise ValueError(
-                f"Ambiguous --account {account_id!r}; "
-                f"matched {len(matches)} credentials: "
-                + ", ".join(_account_label(c) for c in matches)
-            )
-        to_remove = matches
-    else:
-        # No --account: remove all (single-cred case) OR the entire array
-        # Caller (Typer command) should have prompted for confirmation before reaching here
-        to_remove = list(creds)
 
-    # Rewrite vault minus to_remove
-    to_remove_set = set(id(c) for c in to_remove)
-    remaining = [c for c in creds if id(c) not in to_remove_set]
+        if all_:
+            to_remove = list(creds)
+        elif account_id is not None:
+            # Match against account_id, then email, then prefix12
+            matches = [
+                c for c in creds
+                if (
+                    (isinstance(c, OAuthCredential) and c.account_id == account_id)
+                    or c.extras.get("email_address") == account_id
+                    or _prefix12(c).startswith(account_id[:12])
+                )
+            ]
+            if len(matches) == 0:
+                return 0
+            if len(matches) > 1:
+                raise ValueError(
+                    f"Ambiguous --account {account_id!r}; "
+                    f"matched {len(matches)} credentials: "
+                    + ", ".join(_account_label(c) for c in matches)
+                )
+            to_remove = matches
+        else:
+            # No --account: remove all (single-cred case) OR the entire array
+            # Caller (Typer command) should have prompted for confirmation before reaching here
+            to_remove = list(creds)
 
-    updated_providers = dict(vault.providers)
-    if remaining:
-        updated_providers[canonical] = remaining
-    else:
-        updated_providers.pop(canonical, None)
+        # Rewrite vault minus to_remove
+        to_remove_set = set(id(c) for c in to_remove)
+        remaining = [c for c in creds if id(c) not in to_remove_set]
 
-    vault = vault.model_copy(update={"providers": updated_providers})
-    save_vault(vault_path, vault)
+        updated_providers = dict(vault.providers)
+        if remaining:
+            updated_providers[canonical] = remaining
+        else:
+            updated_providers.pop(canonical, None)
 
-    # Emit auth.logged_out per removed cred (SQLite first, SyncEvent second)
+        vault = vault.model_copy(update={"providers": updated_providers})
+        save_vault(vault_path, vault)
+
+    # Emit auth.logged_out per removed cred (OUTSIDE the lock; same rationale as login).
     for c in to_remove:
         await _emit_auth_event("auth.logged_out", c, store, mirror)
 

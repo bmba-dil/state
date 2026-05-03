@@ -22,9 +22,12 @@ Cardinal rules:
      + structlog + state_core.auth.base. NO state_build.* or
      state_teach.* imports. STORE-17 enforces.
 
-  5. Symlink attack (Pitfall 6) is OUT OF SCOPE — Phase 022 audit
-     adds O_NOFOLLOW + os.lstat checks. The skipped placeholder test
-     in tests/auth/test_store.py surfaces this gap.
+  5. Symlink attack (Pitfall 6, T-018-9) is CLOSED by Phase 022.2 —
+     `_atomic_write` opens with O_NOFOLLOW and re-raises ELOOP as
+     AuthVaultSymlinkError; `_verify_mode` and `ensure_initialized`
+     use os.lstat and refuse symlinks at the vault path itself or
+     its parent directory. `tests/auth/test_store.py` exercises ≥4
+     symlink-attack scenarios.
 
 See .planning/milestones/v2/phases/012-auth-json-vault-chmod-0600/
 012-RESEARCH.md for the full rationale, 8 pitfalls, and downstream
@@ -33,7 +36,9 @@ consumer contracts.
 
 from __future__ import annotations
 
+import errno
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -76,6 +81,28 @@ class AuthVaultPermissionError(PermissionError):
         super().__init__(
             f"Refusing to read {path}: mode is {observed_mode:#o}, "
             f"expected {VAULT_MODE:#o}. Run: chmod 600 {path}"
+        )
+
+
+class AuthVaultSymlinkError(OSError):
+    """Raised when a symlink is detected on the vault path, tmp path, or parent dir.
+
+    T-018-9 mitigation (Phase 022.2). Attacker-planted symlinks could redirect
+    writes to attacker-controlled locations or leak reads via os.stat following
+    the link. We refuse to read or write through any symlink in the vault path
+    chain.
+
+    Carries the offending path. Does NOT include any link target contents in
+    the message — credential bytes never leak into exception strings.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        super().__init__(
+            errno.ELOOP,
+            f"Refusing to traverse symlink at {path}: vault path must be "
+            f"a regular file. Investigate before deleting; this may indicate "
+            f"a local-FS attack.",
         )
 
 
@@ -145,10 +172,14 @@ def get_auth_json_path() -> Path:
 def _verify_mode(path: Path) -> None:
     """Raise AuthVaultPermissionError unless *path* is mode 0o600.
 
-    POSIX-only check. On Windows, st_mode is synthesized — we emit a
-    one-time structlog warning and skip the check (per Pitfall 2 in
-    RESEARCH; Mac/Linux first per PROJECT.md). Daemon boot (M-A6) is
+    POSIX-only mode check. On Windows, st_mode is synthesized — we emit a
+    one-time structlog warning and skip the mode comparison (per Pitfall 2
+    in RESEARCH; Mac/Linux first per PROJECT.md). Daemon boot (M-A6) is
     the right place to hard-block Windows.
+
+    Also raises AuthVaultSymlinkError if *path* itself is a symlink
+    (T-018-9). This check applies cross-platform — symlink rejection is
+    valid on every OS Python supports, even where mode bits are not.
 
     Raises FileNotFoundError if path doesn't exist (caller decides
     whether that means "first run" or "I/O error").
@@ -165,11 +196,16 @@ def _verify_mode(path: Path) -> None:
                 ),
             )
             _WINDOWS_WARNING_EMITTED = True
-        # Still call os.stat to raise FileNotFoundError when path missing.
-        os.stat(path)
+        # Use lstat so a symlink does not transparently validate target's mode.
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode):
+            raise AuthVaultSymlinkError(path)
         return
 
-    actual = os.stat(path).st_mode & 0o777
+    st = os.lstat(path)
+    if stat.S_ISLNK(st.st_mode):
+        raise AuthVaultSymlinkError(path)
+    actual = st.st_mode & 0o777
     if actual != VAULT_MODE:
         raise AuthVaultPermissionError(path, actual)
 
@@ -197,13 +233,22 @@ def _atomic_write(path: Path, payload: bytes) -> None:
     use tempfile.NamedTemporaryFile — it defaults to system /tmp.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Defense-in-depth: refuse to write into a symlinked parent directory (T-018-9).
+    parent_st = os.lstat(path.parent)
+    if stat.S_ISLNK(parent_st.st_mode):
+        raise AuthVaultSymlinkError(path.parent)
     tmp = path.with_name(path.name + TMP_SUFFIX)
 
-    fd = os.open(
-        tmp,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        VAULT_MODE,
-    )
+    try:
+        fd = os.open(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            VAULT_MODE,
+        )
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise AuthVaultSymlinkError(tmp) from exc
+        raise
     try:
         # Defense-in-depth: kernel already applied mode at creation,
         # but umask on some filesystems / NFS mounts can surprise us.
@@ -284,6 +329,11 @@ def ensure_initialized(path: Path) -> Path:
     if not path.exists():
         save_vault(path, AuthVault())
     else:
+        # Explicit lstat ahead of _verify_mode delegation. T-018-9
+        # belt-and-suspenders — _verify_mode also checks, but the explicit
+        # double-check makes the audit trail unambiguous and cheap.
+        if path.is_symlink():
+            raise AuthVaultSymlinkError(path)
         # File exists — verify mode is 0o600. AuthVaultPermissionError
         # propagates up; we do NOT chmod the offending file.
         _verify_mode(path)
@@ -293,6 +343,7 @@ def ensure_initialized(path: Path) -> Path:
 __all__ = [
     "AuthVault",
     "AuthVaultPermissionError",
+    "AuthVaultSymlinkError",
     "TMP_SUFFIX",
     "VAULT_MODE",
     "ensure_initialized",

@@ -43,9 +43,11 @@ from state_core.auth.base import (
 
 try:
     from state_core.auth.store import (  # type: ignore[import-not-found]
+        TMP_SUFFIX,
         VAULT_MODE,
         AuthVault,
         AuthVaultPermissionError,
+        AuthVaultSymlinkError,
         _atomic_write,
         _verify_mode,  # noqa: F401  (private; tested via load_vault)
         ensure_initialized,
@@ -469,12 +471,159 @@ def test_last_rotation_round_trip(auth_json_path: Path) -> None:
     assert loaded2.last_rotation == {"anthropic": 3}
 
 
-# ── STORE-22 (placeholder) ───────────────────────────────────────────────
-@pytest.mark.skip(
-    reason="symlink TOCTOU mitigation deferred to Phase 022 audit"
-)
-def test_symlink_attack_rejected() -> None:
-    """Placeholder — Phase 022 audit will add `O_NOFOLLOW` defense and
-    `os.lstat`-based symlink rejection. Visible-but-deferred so the gap
-    is traceable in `pytest --collect-only` output."""
-    assert True  # Phase 022 owns this.
+# ── STORE-22 — T-018-9 symlink defense (Phase 022.2) ────────────────────
+#
+# Note on reload-resilience: STORE-17 reloads `state_core.auth.store`. After
+# that, the names imported at the top of this module are stale references to
+# the pre-reload class objects. To stay reload-safe (and remain robust to any
+# future test that reloads the module), each STORE-22 test resolves its
+# symlink-defense surface fresh from sys.modules at call time via _store().
+
+
+def _store():  # type: ignore[no-untyped-def]
+    """Return the current `state_core.auth.store` module from sys.modules.
+
+    Reload-resilient: STORE-17 reloads the module, which would otherwise
+    leave the test-file-level imports pointing at stale class/function
+    objects. Calling this from inside each test guarantees identity
+    matches between `pytest.raises(...)` and the exception raised by the
+    (currently-loaded) module's functions.
+    """
+    return importlib.import_module("state_core.auth.store")
+
+
+def test_symlink_at_vault_path_rejected(
+    auth_json_path: Path, tmp_path: Path
+) -> None:
+    """STORE-22a: a symlink at the vault path is rejected by load_vault.
+
+    Plant a symlink at `auth_json_path` pointing to a benign target;
+    confirm load_vault raises AuthVaultSymlinkError without following
+    the link.
+    """
+    s = _store()
+    target = tmp_path / "elsewhere.json"
+    target.write_bytes(b'{"schema_version": 1}')
+    os.chmod(target, 0o600)
+
+    # Plant the symlink (auth_json_path's parent dir is pre-created by fixture).
+    os.symlink(target, auth_json_path)
+    assert auth_json_path.is_symlink()
+
+    with pytest.raises(s.AuthVaultSymlinkError) as excinfo:
+        s.load_vault(auth_json_path)
+    assert excinfo.value.path == auth_json_path
+
+    # _verify_mode raises the same.
+    with pytest.raises(s.AuthVaultSymlinkError):
+        s._verify_mode(auth_json_path)
+
+
+def test_symlink_at_tmp_path_rejected(
+    auth_json_path: Path, tmp_path: Path
+) -> None:
+    """STORE-22b: a pre-planted symlink at the tmp path is rejected by
+    _atomic_write — O_NOFOLLOW raises ELOOP, translated to AuthVaultSymlinkError.
+
+    Verifies that the link's target file is NOT written to (proves
+    O_NOFOLLOW is doing the work, not just luck).
+    """
+    s = _store()
+    attacker_target = tmp_path / "attacker_owned.dat"
+    attacker_target.write_bytes(b"PRE-ATTACK")
+    os.chmod(attacker_target, 0o600)
+
+    tmp_link = auth_json_path.with_name(auth_json_path.name + s.TMP_SUFFIX)
+    os.symlink(attacker_target, tmp_link)
+    assert tmp_link.is_symlink()
+
+    with pytest.raises(s.AuthVaultSymlinkError):
+        s._atomic_write(auth_json_path, b'{"schema_version": 1}')
+
+    # Verify the link target was NOT written to (O_NOFOLLOW worked).
+    assert attacker_target.read_bytes() == b"PRE-ATTACK"
+
+
+def test_symlink_parent_dir_rejected(tmp_path: Path) -> None:
+    """STORE-22c: a symlinked parent directory is rejected by _atomic_write.
+
+    Defense-in-depth: even if the vault file itself is not a symlink,
+    a symlinked .state/ directory can redirect writes. We lstat the
+    parent and refuse.
+    """
+    s = _store()
+    real_dir = tmp_path / "real_state"
+    real_dir.mkdir()
+    symlinked_state = tmp_path / ".state"
+    os.symlink(real_dir, symlinked_state)
+    assert symlinked_state.is_symlink()
+
+    vault_path = symlinked_state / "auth.json"
+    with pytest.raises(s.AuthVaultSymlinkError) as excinfo:
+        s._atomic_write(vault_path, b'{"schema_version": 1}')
+    assert excinfo.value.path == symlinked_state
+
+    # The symlinked-to directory must NOT contain auth.json.
+    assert not (real_dir / "auth.json").exists()
+
+
+def test_ensure_initialized_rejects_symlink(
+    auth_json_path: Path, tmp_path: Path
+) -> None:
+    """STORE-22d: ensure_initialized on a symlinked vault path raises.
+
+    No auto-fix — the symlink is unchanged after the rejection
+    (mirrors the no-chmod-fix policy from STORE-12).
+    """
+    s = _store()
+    target = tmp_path / "elsewhere.json"
+    target.write_bytes(b'{"schema_version": 1}')
+    os.chmod(target, 0o600)
+
+    os.symlink(target, auth_json_path)
+    assert auth_json_path.is_symlink()
+
+    with pytest.raises(s.AuthVaultSymlinkError):
+        s.ensure_initialized(auth_json_path)
+
+    # No auto-fix: the symlink is still in place.
+    assert auth_json_path.is_symlink()
+
+
+def test_symlink_error_message_hygiene() -> None:
+    """STORE-22e: AuthVaultSymlinkError exposes .path; message is hygienic.
+
+    Mirrors STORE-16's PermissionError hygiene rule. Credentials must
+    NEVER leak through the exception message; the message contains
+    the offending path string only.
+    """
+    s = _store()
+    p = Path("/x/.state/auth.json")
+    exc = s.AuthVaultSymlinkError(p)
+
+    assert exc.path == p
+    msg = str(exc)
+    assert str(p) in msg
+    # Credentials must NEVER leak through the exception message.
+    assert "sk-ant" not in msg
+    assert "sk-ant-oat" not in msg
+    assert "sk-ant-api03" not in msg
+    assert "ya29." not in msg
+
+
+def test_regular_file_still_loads(
+    auth_json_path: Path, oauth_cred: OAuthCredential
+) -> None:
+    """STORE-22f (positive control): symlink defense does NOT regress
+    the happy path. A regular-file vault round-trips cleanly.
+    """
+    s = _store()
+    vault = s.AuthVault(providers={"anthropic": [oauth_cred]})
+    s.save_vault(auth_json_path, vault)
+
+    # Sanity: the file is a regular file, not a symlink.
+    assert not auth_json_path.is_symlink()
+    assert _mode_of(auth_json_path) == 0o600
+
+    loaded = s.load_vault(auth_json_path)
+    assert loaded.providers["anthropic"][0].provider_id == "anthropic"

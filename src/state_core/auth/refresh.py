@@ -44,6 +44,16 @@ Cardinal rules:
      NOT cross-aware, so re-entry from the same coroutine deadlocks
      until the 10 s acquire timeout fires. REFRESH-27 verifies.
 
+  10. Sync vs async lock coexistence — ``with_vault_lock`` (sync) and
+      ``_new_async_lock`` (async) target the SAME ``<vault>.lock``
+      sibling file. They coordinate via the kernel's POSIX advisory
+      lock; do NOT call ``with_vault_lock`` from inside an async
+      coroutine that already holds an AsyncFileLock for the same path
+      (reentrant deadlock; Pitfall 6 generalized). The CLI ops layer
+      (Phase 022.2) uses ``with_vault_lock``; the daemon-driven
+      refresh path (Phase 013) uses ``_new_async_lock``. They never
+      overlap in one process.
+
 See .planning/milestones/v2/phases/013-filelock-guarded-refresh-lock/
 013-RESEARCH.md for full rationale, 9 pitfalls, downstream contracts.
 """
@@ -51,6 +61,8 @@ See .planning/milestones/v2/phases/013-filelock-guarded-refresh-lock/
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from collections.abc import Iterator
 from pathlib import Path
 from time import perf_counter, time as _now
 
@@ -140,6 +152,89 @@ def _new_async_lock(vault_path: Path) -> filelock.AsyncFileLock:
 # path serialize via the kernel's POSIX lock. DO NOT call this from inside
 # a held lock block (reentrant deadlock at the 10s acquire timeout).
 new_async_lock = _new_async_lock
+
+
+def _new_sync_lock(vault_path: Path) -> filelock.FileLock:
+    """Construct a sync FileLock with the same config tuple as _new_async_lock.
+
+    Used by ``with_vault_lock`` for CLI write paths that cannot await an
+    AsyncFileLock (Phase 022.2 / T-018-8 mitigation). The on-disk lockfile
+    is the SAME ``<vault>.lock`` sibling that Phase 013's async refresh path
+    uses — sync and async acquirers coordinate via the kernel's POSIX
+    advisory lock.
+
+    ``thread_local=False`` is explicit (matches ``_new_async_lock``);
+    ``poll_interval`` and ``timeout`` match too. Pitfall 1.
+    """
+    return filelock.FileLock(
+        str(_lock_path_for(vault_path)),
+        timeout=LOCK_TIMEOUT_SECONDS,
+        thread_local=False,
+        poll_interval=0.05,
+    )
+
+
+@contextlib.contextmanager
+def with_vault_lock(
+    vault_path: Path | None = None,
+    *,
+    timeout: float = LOCK_TIMEOUT_SECONDS,
+) -> Iterator[Path]:
+    """Sync filelock wrapper for CLI write paths (T-018-8 mitigation).
+
+    Acquires the same ``<vault>.lock`` sibling file that Phase 013's
+    AsyncFileLock-based ``refresh_credential`` uses. Sync and async
+    acquirers serialize via the kernel's POSIX advisory lock — a CLI
+    ``state auth login`` and a daemon-driven async refresh CANNOT both be
+    inside their critical sections simultaneously.
+
+    Yields the lockfile path so callers can include it in log messages.
+
+    Raises:
+        RefreshLockTimeout: lock could not be acquired within *timeout* seconds.
+
+    Usage::
+
+        with with_vault_lock(vault_path):
+            vault = load_vault(vault_path)
+            # ... mutate ...
+            save_vault(vault_path, vault)
+
+    WARNING (Pitfall 6 generalized, rule 10): each call constructs a fresh
+    FileLock. Do NOT nest ``with with_vault_lock(...)`` blocks for the same
+    *vault_path* — reentrant acquire deadlocks at the timeout (NOT
+    cross-aware). Caller must perform load → mutate → save inside ONE
+    context.
+    """
+    if vault_path is None:
+        vault_path = get_auth_json_path()
+    lock_path = _lock_path_for(vault_path)
+    lock = filelock.FileLock(
+        str(lock_path),
+        timeout=timeout,
+        thread_local=False,
+        poll_interval=0.05,
+    )
+    try:
+        try:
+            with lock:
+                log.debug(
+                    "vault_lock.acquired",
+                    vault_path=str(vault_path),
+                    lock_path=str(lock_path),
+                )
+                yield lock_path
+        except filelock.Timeout as exc:
+            raise RefreshLockTimeout(lock_path) from exc
+    finally:
+        # Mirror the async path's lockfile-touch (read_credential /
+        # refresh_credential finally clauses). filelock 3.29 unlinks the
+        # lockfile on release; re-create it so observability tooling
+        # (REFRESH-22 spirit) can still see its presence.
+        try:
+            lock_path.touch(exist_ok=True)
+        except OSError:
+            pass
 
 
 def _extract_cred(vault: AuthVault, provider_id: str, idx: int) -> Credential:
@@ -329,4 +424,5 @@ __all__ = [
     "new_async_lock",
     "read_credential",
     "refresh_credential",
+    "with_vault_lock",
 ]

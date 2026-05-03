@@ -49,6 +49,7 @@ from state_core.auth.rotation import (
 from state_core.auth.store import (
     AuthVault,
     AuthVaultPermissionError,
+    AuthVaultSymlinkError,
     ensure_initialized,
     get_auth_json_path,
     load_vault,
@@ -74,6 +75,7 @@ __all__ = [
     # Phase 012 — store
     "AuthVault",
     "AuthVaultPermissionError",
+    "AuthVaultSymlinkError",
     "ensure_initialized",
     "get_auth_json_path",
     "load_vault",

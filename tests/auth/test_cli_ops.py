@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, call, patch
@@ -464,3 +465,97 @@ def test_cli_ops_import_succeeds() -> None:
     assert callable(status)
     assert StatusReport is not None
     assert StatusRow is not None
+
+
+# ── T-018-8 — Concurrent-writer regression (Phase 022.2) ─────────────────
+
+
+def test_concurrent_login_no_clobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-018-8 regression: N concurrent login() calls do NOT clobber each other.
+
+    Without the Phase 022.2 vault filelock, two `state auth login` invocations
+    racing on the same vault would interleave their `load_vault → mutate →
+    save_vault` windows, and the second writer would clobber the first
+    writer's append. With the lock, all N writes serialize and all N
+    credentials persist.
+    """
+    vault_path = tmp_path / ".state" / "auth.json"
+    vault_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("STATE_AUTH_JSON", str(vault_path))
+
+    N = 4
+
+    def _do_login(idx: int) -> None:
+        from state_core.auth.cli_ops import login
+        asyncio.run(login("openai", api_key=f"key-{idx}-not-real"))
+
+    # Spawn N threads that each call login() concurrently.
+    with ThreadPoolExecutor(max_workers=N) as pool:
+        futures = [pool.submit(_do_login, i) for i in range(N)]
+        for f in as_completed(futures):
+            # Re-raise any worker exception so the test fails loudly.
+            f.result()
+
+    # Assert: every concurrent writer's credential survived.
+    from state_core.auth.store import load_vault
+    vault = load_vault(vault_path)
+    creds = vault.providers.get("openai", [])
+    assert len(creds) == N, (
+        f"Expected {N} concurrent logins to persist; "
+        f"got {len(creds)} — the vault filelock is not preventing clobber"
+    )
+    observed_keys = {c.key for c in creds}  # type: ignore[attr-defined]
+    expected_keys = {f"key-{i}-not-real" for i in range(N)}
+    assert observed_keys == expected_keys, (
+        f"Expected {expected_keys}; observed {observed_keys}"
+    )
+
+
+def test_concurrent_logout_no_clobber(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T-018-8 regression: N concurrent logout() calls do NOT clobber each other.
+
+    Pre-populate vault with N creds. Each thread removes one specific cred
+    via account_id (prefix12) matching. Without the lock, a stale read
+    could re-introduce a cred that another thread already removed; with
+    the lock, all N removals persist deterministically.
+    """
+    vault_path = tmp_path / ".state" / "auth.json"
+    vault_path.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("STATE_AUTH_JSON", str(vault_path))
+
+    N = 4
+    # Pre-populate vault.
+    creds = [
+        ApiKeyCredential(
+            provider_id="openai",
+            key=f"key-{i}-not-real-padding-1234567890",
+            extras={"_source": "vault"},
+        )
+        for i in range(N)
+    ]
+    _write_vault(vault_path, AuthVault(providers={"openai": creds}))
+
+    def _do_logout(idx: int) -> None:
+        from state_core.auth.cli_ops import logout
+        # Use first-12 chars of the unique key as the account_id matcher.
+        prefix = f"key-{idx}-not"  # 12 chars exactly
+        asyncio.run(logout("openai", account_id=prefix))
+
+    with ThreadPoolExecutor(max_workers=N) as pool:
+        futures = [pool.submit(_do_logout, i) for i in range(N)]
+        for f in as_completed(futures):
+            f.result()
+
+    # Assert: every concurrent removal persisted; vault is empty.
+    from state_core.auth.store import load_vault
+    vault = load_vault(vault_path)
+    remaining = vault.providers.get("openai", [])
+    assert len(remaining) == 0, (
+        f"Expected all {N} concurrent logouts to persist; "
+        f"got {len(remaining)} surviving creds — the vault filelock "
+        f"is not preventing clobber"
+    )
