@@ -1,0 +1,25 @@
+{
+  "capture_date": "2026-05-01",
+  "provider": "github.copilot",
+  "flow": "device_code_exchange",
+  "positive_allowlist": [
+    "authorization",
+    "user-agent",
+    "editor-version",
+    "editor-plugin-version"
+  ],
+  "negative_allowlist": [
+    "x-api-key"
+  ],
+  "headers": {
+    "authorization": "Bearer <REDACTED>",
+    "editor-plugin-version": "copilot.vim/1.16.0",
+    "editor-version": "Neovim/0.6.1",
+    "user-agent": "GithubCopilot/1.155.0"
+  },
+  "url_invariants": {
+    "host": "api.github.com",
+    "path_prefix": "/copilot_internal"
+  },
+  "body_invariants": {}
+}

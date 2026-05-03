@@ -55,6 +55,15 @@ from state_core.auth.store import (
     save_vault,
 )
 
+# Phase 022 — cli_ops public surface
+from state_core.auth.cli_ops import (  # noqa: F401
+    StatusReport,
+    StatusRow,
+    login as auth_login,
+    logout as auth_logout,
+    status as auth_status,
+)
+
 __all__ = [
     # Phase 011 — base
     "ApiKeyCredential",
@@ -93,4 +102,10 @@ __all__ = [
     "iter_active_credentials",
     "mark_rate_limited",
     "select_credential",
+    # Phase 022 — cli_ops public surface (AUTH-12)
+    "StatusReport",
+    "StatusRow",
+    "auth_login",
+    "auth_logout",
+    "auth_status",
 ]

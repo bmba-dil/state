@@ -19,6 +19,10 @@ app.add_typer(db_app)
 events_app = typer.Typer(name="events", help="Event store management commands")
 app.add_typer(events_app)
 
+# Phase 022 — auth sub-app
+from src.state_cli.auth import auth_app  # noqa: E402
+app.add_typer(auth_app)
+
 
 @db_app.command(name="init")
 def db_init() -> None:

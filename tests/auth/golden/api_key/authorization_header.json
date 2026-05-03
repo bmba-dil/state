@@ -1,0 +1,16 @@
+{
+  "capture_date": "2026-05-01",
+  "provider": "api_key",
+  "flow": "authorization_header",
+  "positive_allowlist": [
+    "Authorization"
+  ],
+  "negative_allowlist": [
+    "x-api-key"
+  ],
+  "headers": {
+    "Authorization": "Bearer <REDACTED>"
+  },
+  "url_invariants": {},
+  "body_invariants": {}
+}

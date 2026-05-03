@@ -241,3 +241,42 @@ def test_import_opencode_imports_only_allowed_modules() -> None:
                 root = alias.name.split(".")[0]
                 if root not in allowed_roots:
                     pytest.fail(f"forbidden import root: {alias.name}")
+
+
+# ── Phase 022 — CLI mode-isolation rows ─────────────────────────────────
+
+_REPO_ROOT_022 = Path(__file__).parent.parent.parent
+_CLI_AUTH_PATH = _REPO_ROOT_022 / "src" / "state_cli" / "auth.py"
+_CLI_OPS_PATH = _REPO_ROOT_022 / "src" / "state_core" / "auth" / "cli_ops.py"
+
+
+def test_state_cli_auth_one_way_edge() -> None:
+    """VALIDATION 022-row-A — state_cli/auth.py may import state_core.auth.* but
+    MUST NOT import state_build.* or state_teach.*.
+
+    Wave 0 RED — file does not exist yet.
+    """
+    if not _CLI_AUTH_PATH.exists():
+        pytest.fail(
+            "Wave 0 RED: src/state_cli/auth.py does not exist yet (022-03)"
+        )
+    src = _CLI_AUTH_PATH.read_text()
+    assert "from state_build" not in src, "state_cli.auth imports state_build — mode isolation violation"
+    assert "import state_build" not in src, "state_cli.auth imports state_build — mode isolation violation"
+    assert "from state_teach" not in src, "state_cli.auth imports state_teach — mode isolation violation"
+    assert "import state_teach" not in src, "state_cli.auth imports state_teach — mode isolation violation"
+
+
+def test_cli_ops_no_state_cli_imports() -> None:
+    """VALIDATION 022-row-B — state_core/auth/cli_ops.py MUST NOT import state_cli.*.
+
+    One-way edge: state_cli -> state_core.auth; NOT the reverse.
+    Wave 0 RED — file does not exist yet.
+    """
+    if not _CLI_OPS_PATH.exists():
+        pytest.fail(
+            "Wave 0 RED: src/state_core/auth/cli_ops.py does not exist yet (022-02)"
+        )
+    src = _CLI_OPS_PATH.read_text()
+    assert "from state_cli" not in src, "state_core.auth.cli_ops imports state_cli — reverse edge violation"
+    assert "import state_cli" not in src, "state_core.auth.cli_ops imports state_cli — reverse edge violation"

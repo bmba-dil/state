@@ -1,7 +1,9 @@
-"""Shared fixtures for auth tests (Phase 011 + Phase 012 + Phase 013 + Phase 018 + Phase 019)."""
+"""Shared fixtures for auth tests (Phase 011 + Phase 012 + Phase 013 + Phase 022)."""
 
 from __future__ import annotations
 
+import json
+import re
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
@@ -184,26 +186,101 @@ def mock_auth_method():  # type: ignore[no-untyped-def]
     return instance
 
 
-# ── Phase 018 fixtures ────────────────────────────────────────────────────
+# ── Phase 022 fixtures — golden infrastructure ────────────────────────────
 
-# The 12 canonical provider_ids per RESEARCH §Provider Registry Table.
-# Order is load-bearing for the sk- collision test (longest-prefix-first).
-_PHASE_018_PROVIDER_IDS: tuple[str, ...] = (
-    "anthropic.api_key",
-    "openrouter",
-    "openai",
-    "anyscale",
-    "xai",
-    "groq",
-    "google.ai_studio",
-    "deepseek",
-    "together",
-    "mistral",
-    "cohere",
-    "cerebras",
-)
+GOLDEN_DIR = Path(__file__).parent / "golden"
+
+# Ensure golden directory structure exists (idempotent).
+for _provider in ("anthropic", "google.gemini", "google.antigravity", "github.copilot", "api_key"):
+    (GOLDEN_DIR / _provider).mkdir(parents=True, exist_ok=True)
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--update-goldens",
+        action="store_true",
+        default=False,
+        help="Regenerate golden JSON fixtures in tests/auth/golden/ instead of comparing.",
+    )
+
+
+@pytest.fixture
+def update_goldens(request: pytest.FixtureRequest) -> bool:
+    return bool(request.config.getoption("--update-goldens", default=False))
+
+
+@pytest.fixture
+def golden_load():
+    """Return a loader function: golden_load(provider_id, flow_name) -> dict.
+
+    Returns the parsed JSON dict from tests/auth/golden/<provider>/<flow>.json.
+    The returned dict has keys: positive_allowlist, negative_allowlist,
+    body_invariants, url_invariants, headers (allowlist-filtered snapshot).
+    Raises FileNotFoundError if golden does not exist yet.
+    """
+    def _load(provider_id: str, flow_name: str) -> dict:
+        path = GOLDEN_DIR / provider_id / f"{flow_name}.json"
+        if not path.exists():
+            pytest.fail(
+                f"Golden file missing: {path}. "
+                f"Run pytest --update-goldens to generate it."
+            )
+        return json.loads(path.read_text())
+    return _load
+
+
+_SECRET_SCRUB_RE = re.compile(r"Bearer (sk-ant-|sk-)[A-Za-z0-9_\-]{4,}", re.IGNORECASE)
+
+
+def json_dump_deterministic(
+    data: dict,
+    allowlist_filter: list[str] | None = None,
+) -> str:
+    """Serialize data to deterministic JSON (sorted keys, 2-space indent).
+
+    Scrubs any 'Bearer sk-ant-*' or 'Bearer sk-*' values to 'Bearer <REDACTED>'
+    before serialization. If allowlist_filter is provided, filters dict to
+    only include those keys (case-insensitive header names).
+    """
+    if allowlist_filter is not None and isinstance(data, dict):
+        lower_allow = {k.lower() for k in allowlist_filter}
+        data = {k: v for k, v in data.items() if k.lower() in lower_allow}
+
+    serialized = json.dumps(data, sort_keys=True, indent=2)
+    return _SECRET_SCRUB_RE.sub("Bearer <REDACTED>", serialized)
+
+
+@pytest.fixture
+def fake_oauth_cred():
+    """Return a safe OAuthCredential with no real secret bytes.
+
+    access/refresh are clearly fake tokens that cannot be confused with
+    real sk-ant-* / ya29.* values.
+    expires is set to now+3600 (1 hour from the epoch 0 fixed clock).
+    """
+    from state_core.auth.base import OAuthCredential
+    return OAuthCredential(
+        provider_id="anthropic",
+        access="test-access-token-not-real",
+        refresh="test-refresh-token-not-real",
+        expires=3600.0,
+        account_id="test-account-id",
+        extras={"email_address": "test@example.com", "_source": "vault"},
+    )
+
+
+@pytest.fixture
+def fake_api_key_cred():
+    """Return a safe ApiKeyCredential with no real secret bytes."""
+    from state_core.auth.base import ApiKeyCredential
+    return ApiKeyCredential(
+        provider_id="openai",
+        key="test-api-key-not-real",
+        extras={"_source": "vault"},
+    )
+# Restored fixtures dropped by 022-01
+
+# --- all_provider_ids ---
 @pytest.fixture
 def all_provider_ids() -> tuple[str, ...]:
     """The 12 canonical provider_ids per RESEARCH §Provider Registry Table.
@@ -214,6 +291,8 @@ def all_provider_ids() -> tuple[str, ...]:
     return _PHASE_018_PROVIDER_IDS
 
 
+
+# --- provider_id_factory ---
 @pytest.fixture
 def provider_id_factory() -> Callable[[], Iterator[str]]:
     """Returns a callable that yields the 12 provider_ids on each call.
@@ -228,6 +307,8 @@ def provider_id_factory() -> Callable[[], Iterator[str]]:
     return _factory
 
 
+
+# --- isolated_vault_path ---
 @pytest.fixture
 def isolated_vault_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Per-test .state/auth.json path PLUS STATE_AUTH_JSON env override.
@@ -243,6 +324,8 @@ def isolated_vault_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     return p
 
 
+
+# --- mock_stdin_pipe ---
 @pytest.fixture
 def mock_stdin_pipe(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     """Patch sys.stdin to simulate a non-TTY pipe with a single key line.
@@ -266,6 +349,8 @@ def mock_stdin_pipe(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     return _apply
 
 
+
+# --- mock_api_key_getpass ---
 @pytest.fixture
 def mock_api_key_getpass(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], None]:
     """Patch state_core.auth.providers.api_key.getpass.getpass.
@@ -299,9 +384,8 @@ def mock_api_key_getpass(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], Non
     return _apply
 
 
-# ── Phase 019 fixtures ────────────────────────────────────────────────────
 
-
+# --- _clear_cool_down ---
 @pytest.fixture(autouse=True)
 def _clear_cool_down() -> Iterator[None]:
     """Clear state_core.auth.rotation._COOL_DOWN before AND after each test.
@@ -325,6 +409,56 @@ def _clear_cool_down() -> Iterator[None]:
         _rotation_mod._COOL_DOWN.clear()
     except (ImportError, AttributeError):
         pass
+
+
+
+# --- vault_with_three_oauth ---
+@pytest.fixture
+def vault_with_three_oauth(now_frozen: float):  # type: ignore[no-untyped-def]
+    """In-memory AuthVault with three anthropic OAuth credentials.
+
+    Far-future `expires` ensures freshness; provider_id="anthropic".
+    Use for ROTATE-04, 07, 08, 09, 10, 16, 17.
+    """
+    store = pytest.importorskip("state_core.auth.store")
+    return store.AuthVault(
+        providers={
+            "anthropic": [
+                OAuthCredential(
+                    access=f"sk-ant-oat-TEST-{i}",
+                    refresh=f"rt-TEST-{i}",
+                    expires=now_frozen + 86400.0,
+                    provider_id="anthropic",
+                    account_id=f"acct-TEST-{i}",
+                )
+                for i in range(3)
+            ],
+        },
+        last_rotation={"anthropic": 0},
+    )
+
+
+
+# --- vault_with_three_api_keys ---
+@pytest.fixture
+def vault_with_three_api_keys():  # type: ignore[no-untyped-def]
+    """In-memory AuthVault with three openai ApiKeyCredentials.
+
+    Use for ROTATE-23 hypothesis (api keys never expire — pure rotation).
+    """
+    store = pytest.importorskip("state_core.auth.store")
+    return store.AuthVault(
+        providers={
+            "openai": [
+                ApiKeyCredential(key=f"TEST-key-{i}", provider_id="openai")
+                for i in range(3)
+            ],
+        },
+        last_rotation={"openai": 0},
+    )
+
+
+
 
 
 @pytest.fixture
@@ -358,44 +492,3 @@ async def busy_lock_holder():  # type: ignore[no-untyped-def]
     return _hold
 
 
-@pytest.fixture
-def vault_with_three_oauth(now_frozen: float):  # type: ignore[no-untyped-def]
-    """In-memory AuthVault with three anthropic OAuth credentials.
-
-    Far-future `expires` ensures freshness; provider_id="anthropic".
-    Use for ROTATE-04, 07, 08, 09, 10, 16, 17.
-    """
-    store = pytest.importorskip("state_core.auth.store")
-    return store.AuthVault(
-        providers={
-            "anthropic": [
-                OAuthCredential(
-                    access=f"sk-ant-oat-TEST-{i}",
-                    refresh=f"rt-TEST-{i}",
-                    expires=now_frozen + 86400.0,
-                    provider_id="anthropic",
-                    account_id=f"acct-TEST-{i}",
-                )
-                for i in range(3)
-            ],
-        },
-        last_rotation={"anthropic": 0},
-    )
-
-
-@pytest.fixture
-def vault_with_three_api_keys():  # type: ignore[no-untyped-def]
-    """In-memory AuthVault with three openai ApiKeyCredentials.
-
-    Use for ROTATE-23 hypothesis (api keys never expire — pure rotation).
-    """
-    store = pytest.importorskip("state_core.auth.store")
-    return store.AuthVault(
-        providers={
-            "openai": [
-                ApiKeyCredential(key=f"TEST-key-{i}", provider_id="openai")
-                for i in range(3)
-            ],
-        },
-        last_rotation={"openai": 0},
-    )

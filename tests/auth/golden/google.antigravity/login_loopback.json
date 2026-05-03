@@ -1,0 +1,25 @@
+{
+  "capture_date": "2026-05-01",
+  "provider": "google.antigravity",
+  "flow": "login_loopback",
+  "positive_allowlist": [
+    "authorization",
+    "user-agent",
+    "x-goog-api-client",
+    "client-metadata"
+  ],
+  "negative_allowlist": [
+    "x-api-key"
+  ],
+  "headers": {
+    "authorization": "Bearer <REDACTED>",
+    "client-metadata": "{\"ideType\":\"ANTIGRAVITY\",\"platform\":\"MACOS\",\"pluginType\":\"GEMINI\"}",
+    "user-agent": "antigravity",
+    "x-goog-api-client": "google-cloud-sdk vscode_cloudshelleditor/0.1"
+  },
+  "url_invariants": {
+    "host": "oauth2.googleapis.com",
+    "path_prefix": "/token"
+  },
+  "body_invariants": {}
+}

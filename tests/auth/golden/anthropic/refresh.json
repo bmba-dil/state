@@ -1,0 +1,25 @@
+{
+  "capture_date": "2026-05-01",
+  "provider": "anthropic",
+  "flow": "refresh",
+  "positive_allowlist": [
+    "authorization",
+    "user-agent",
+    "x-app",
+    "anthropic-beta"
+  ],
+  "negative_allowlist": [
+    "x-api-key"
+  ],
+  "headers": {
+    "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05",
+    "authorization": "Bearer <REDACTED>",
+    "user-agent": "claude-cli/2.1.121 (external, cli)",
+    "x-app": "cli"
+  },
+  "url_invariants": {
+    "host": "auth.anthropic.com",
+    "path_prefix": "/oauth"
+  },
+  "body_invariants": {}
+}

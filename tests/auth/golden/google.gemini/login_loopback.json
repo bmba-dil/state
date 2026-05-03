@@ -1,0 +1,19 @@
+{
+  "capture_date": "2026-05-01",
+  "provider": "google.gemini",
+  "flow": "login_loopback",
+  "positive_allowlist": [
+    "authorization"
+  ],
+  "negative_allowlist": [
+    "x-api-key"
+  ],
+  "headers": {
+    "authorization": "Bearer <REDACTED>"
+  },
+  "url_invariants": {
+    "host": "oauth2.googleapis.com",
+    "path_prefix": "/token"
+  },
+  "body_invariants": {}
+}

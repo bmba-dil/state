@@ -70,6 +70,7 @@ namespace_packages = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["src"]
 markers = [
     "e2e: marks tests as end-to-end (deselect with '-m \"not e2e\"')",
     "provider_parity: tests that run against live providers",
