@@ -1,7 +1,6 @@
 """Tests for state_core.providers.model_profile — ModelProfile enum and resolver (PRV-04).
 
-Wave 0 (RED): All tests fail with pytest.fail() until Wave 1 creates
-src/state_core/providers/model_profile.py.
+Wave 1 (GREEN): All tests fully implemented and passing.
 
 Security coverage: T-027-1 (mode isolation), T-027-2 (inherit never returned).
 """
@@ -40,17 +39,49 @@ _PROFILE_OR_NONE = st.one_of(st.none(), st.sampled_from(_ALL_PROFILES))
 
 def test_model_profile_members() -> None:
     """PRV-04: ModelProfile enum has exactly quality, balanced, budget, inherit."""
-    pytest.fail("RED: ModelProfile enum not yet implemented")
+    assert set(ModelProfile) == {
+        ModelProfile.quality,
+        ModelProfile.balanced,
+        ModelProfile.budget,
+        ModelProfile.inherit,
+    }
 
 
 def test_resolved_profile_frozen() -> None:
     """PRV-04: ResolvedProfile is a frozen Pydantic model with required fields."""
-    pytest.fail("RED: ResolvedProfile not yet implemented")
+    import pydantic_core
+
+    rp = ResolvedProfile(
+        profile=ModelProfile.balanced,
+        model="claude-sonnet-4-6",
+        temperature=0.5,
+    )
+    assert rp.profile == ModelProfile.balanced
+    assert rp.model == "claude-sonnet-4-6"
+    assert rp.temperature == 0.5
+
+    # Frozen: assignment raises ValidationError
+    with pytest.raises(pydantic_core.ValidationError):
+        rp.temperature = 0.9  # type: ignore[misc]
+
+    # extra="forbid": unknown fields raise ValidationError
+    with pytest.raises(pydantic_core.ValidationError):
+        ResolvedProfile(
+            profile=ModelProfile.balanced,
+            model="claude-sonnet-4-6",
+            temperature=0.5,
+            unknown_field="bad",  # type: ignore[call-arg]
+        )
 
 
 def test_defaults_coverage() -> None:
     """PRV-04: _DEFAULTS covers exactly the three non-inherit profiles."""
-    pytest.fail("RED: _DEFAULTS not yet implemented")
+    assert set(_DEFAULTS.keys()) == {
+        ModelProfile.quality,
+        ModelProfile.balanced,
+        ModelProfile.budget,
+    }
+    assert ModelProfile.inherit not in _DEFAULTS
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +98,8 @@ def test_defaults_coverage() -> None:
 )
 def test_resolve_never_returns_inherit(step, slice_, phase, arc, global_) -> None:
     """Hypothesis: resolve_profile() should never return profile=inherit."""
-    pytest.fail("RED: resolve_profile() not yet implemented")
+    resolved = resolve_profile(step, slice_, phase, arc, global_profile=global_)
+    assert resolved.profile != ModelProfile.inherit
 
 
 @given(
@@ -77,7 +109,14 @@ def test_resolve_never_returns_inherit(step, slice_, phase, arc, global_) -> Non
 )
 def test_step_non_inherit_wins_over_all(non_inherit) -> None:
     """Hypothesis: step-level non-inherit profile beats all outer scopes."""
-    pytest.fail("RED: resolve_profile() not yet implemented")
+    resolved = resolve_profile(
+        step_profile=non_inherit,
+        slice_profile=ModelProfile.quality,
+        phase_profile=ModelProfile.balanced,
+        arc_profile=ModelProfile.budget,
+        global_profile=ModelProfile.quality,
+    )
+    assert resolved.profile == non_inherit
 
 
 # ---------------------------------------------------------------------------
@@ -87,32 +126,68 @@ def test_step_non_inherit_wins_over_all(non_inherit) -> None:
 
 def test_phase_profile_applies_when_step_inherit() -> None:
     """Phase profile wins when step/slice are inherit."""
-    pytest.fail("RED: resolve_profile() phase-level precedence not yet implemented")
+    resolved = resolve_profile(
+        step_profile=ModelProfile.inherit,
+        slice_profile=ModelProfile.inherit,
+        phase_profile=ModelProfile.quality,
+    )
+    assert resolved.profile == ModelProfile.quality
+    assert resolved.temperature == _DEFAULTS[ModelProfile.quality].temperature
 
 
 def test_arc_profile_applies_when_inner_inherit() -> None:
     """Arc profile wins when step/slice/phase are inherit."""
-    pytest.fail("RED: resolve_profile() arc-level precedence not yet implemented")
+    resolved = resolve_profile(
+        step_profile=ModelProfile.inherit,
+        slice_profile=ModelProfile.inherit,
+        phase_profile=ModelProfile.inherit,
+        arc_profile=ModelProfile.quality,
+    )
+    assert resolved.profile == ModelProfile.quality
 
 
 def test_all_inherit_falls_back_to_balanced() -> None:
     """All None/inherit inputs -> balanced (project safe default)."""
-    pytest.fail("RED: resolve_profile() fallback-to-balanced not yet implemented")
+    resolved = resolve_profile(
+        step_profile=ModelProfile.inherit,
+        slice_profile=ModelProfile.inherit,
+        phase_profile=None,
+        arc_profile=None,
+        global_profile=ModelProfile.inherit,
+    )
+    assert resolved.profile == ModelProfile.balanced
+    assert resolved == _DEFAULTS[ModelProfile.balanced]
 
 
 def test_global_profile_override() -> None:
     """global_profile override is respected when all scopes inherit."""
-    pytest.fail("RED: resolve_profile() global_profile not yet implemented")
+    resolved = resolve_profile(
+        step_profile=None,
+        slice_profile=None,
+        phase_profile=None,
+        arc_profile=None,
+        global_profile=ModelProfile.budget,
+    )
+    assert resolved.profile == ModelProfile.budget
+    assert resolved == _DEFAULTS[ModelProfile.budget]
 
 
 def test_overrides_applied() -> None:
     """resolve_profile(overrides={'temperature': 0.9}) applies the field override."""
-    pytest.fail("RED: resolve_profile() overrides not yet implemented")
+    resolved = resolve_profile(
+        step_profile=ModelProfile.balanced,
+        overrides={"temperature": 0.9},
+    )
+    assert resolved.temperature == 0.9
+    assert resolved.profile == ModelProfile.balanced
 
 
 def test_invalid_override_raises() -> None:
     """resolve_profile(overrides={'temperature': 'warm'}) raises Pydantic ValidationError."""
-    pytest.fail("RED: resolve_profile() override validation not yet implemented")
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        resolve_profile(overrides={"temperature": "warm"})
 
 
 # ---------------------------------------------------------------------------
@@ -122,17 +197,24 @@ def test_invalid_override_raises() -> None:
 
 def test_build_chat_params_camelcase_keys() -> None:
     """build_chat_params() MUST use camelCase keys (topP, maxOutputTokens) for the TS hook interface."""
-    pytest.fail("RED: build_chat_params() not yet implemented")
+    params = build_chat_params(_DEFAULTS[ModelProfile.balanced])
+    assert "topP" in params
+    assert "maxOutputTokens" in params
+    assert "top_p" not in params
+    assert "max_output_tokens" not in params
 
 
 def test_quality_profile_includes_thinking_budget() -> None:
     """Quality profile output.options['thinking_budget_tokens'] == 4000."""
-    pytest.fail("RED: build_chat_params() thinking_budget not yet implemented")
+    params = build_chat_params(_DEFAULTS[ModelProfile.quality])
+    assert "thinking_budget_tokens" in params["options"]
+    assert params["options"]["thinking_budget_tokens"] == 4000  # type: ignore[index]
 
 
 def test_balanced_profile_empty_options() -> None:
     """Balanced profile output['options'] == {}."""
-    pytest.fail("RED: build_chat_params() balanced profile not yet implemented")
+    params = build_chat_params(_DEFAULTS[ModelProfile.balanced])
+    assert params["options"] == {}
 
 
 # ---------------------------------------------------------------------------
@@ -156,10 +238,12 @@ def test_no_mode_silo_import() -> None:
 
 def test_global_profile_config_defaults() -> None:
     """GlobalProfileConfig() default_profile == balanced."""
-    pytest.fail("RED: GlobalProfileConfig not yet implemented")
+    cfg = GlobalProfileConfig()
+    assert cfg.default_profile == ModelProfile.balanced
 
 
 def test_global_profile_config_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """STATE_DEFAULT_PROFILE=quality env var sets default_profile=quality."""
     monkeypatch.setenv("STATE_DEFAULT_PROFILE", "quality")
-    pytest.fail("RED: GlobalProfileConfig env override not yet implemented")
+    cfg = GlobalProfileConfig()
+    assert cfg.default_profile == ModelProfile.quality
