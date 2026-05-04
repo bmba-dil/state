@@ -2,9 +2,9 @@
 
 **Milestone:** v6
 **Phase range:** 050–059
-**Status:** Not started
-**Phases complete:** 0 / 10
-**Last activity:** 2026-04-22 — Migrated to milestone-scoped layout
+**Status:** In progress
+**Phases complete:** 1 / 10
+**Last activity:** 2026-05-04 — Phase 050 completed (HTTP server + JSON-RPC router)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Phase | Slug | Status |
 |-------|------|--------|
-| 050 | starlette-http-server-unix-socket | Not started |
+| 050 | starlette-http-server-unix-socket | Complete |
 | 051 | pid-file-start-time-ns | Not started |
 | 052 | unix-socket-path | Not started |
 | 053 | mode-enforcement-http-middleware | Not started |
