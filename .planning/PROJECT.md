@@ -231,4 +231,4 @@ This document evolves at phase transitions and milestone boundaries.
 - VALIDATION.md not authored for the three gap-closure phases (acceptable per `plan-phase` Step 5.5).
 
 ---
-*Last updated: 2026-05-03 — Phase 025 complete: `state_core.providers.anthropic_client` (AnthropicClient) + `state_core.providers.errors` (shared hierarchy extracted from litellm_client) satisfy PRV-02 (direct SDK escape hatch), PRV-08 (extended thinking passthrough), PRV-09 (cache-control passthrough). 18 new tests (822 total). 4/4 security threats closed (T-025-1..4). Phase 026 (oauth-stealth-bypass-guard) is next.*
+*Last updated: 2026-05-03 after v2 milestone completion — all 5 auth methods + multi-cred + redactor shipped; v3 (Provider Routing + Model Profiles) is now the active milestone.*

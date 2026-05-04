@@ -7,55 +7,55 @@
 
 ## Phases
 
-#### Phase 023: Shared `httpx.AsyncClient` with connection pool + proxy/TLS config
+#### Phase 023 — Shared `httpx.AsyncClient` with connection pool + proxy/TLS config
 **Goal:** Single daemon-owned client, dep-injected via `Deps`.
 **Depends on:** 001
 **Requirements:** PRV-06
 **Parallelizable:** yes
 
-#### Phase 024: litellm wrapper (`state_core.providers.litellm_client`)
+#### Phase 024 — litellm wrapper (`state_core.providers.litellm_client`)
 **Goal:** `acompletion` with `client=shared_httpx`, streaming normalization, error taxonomy.
 **Depends on:** 023
 **Requirements:** PRV-01, PRV-07
 **Parallelizable:** yes with 025
 
-#### Phase 025: Direct Anthropic SDK escape hatch
+#### Phase 025 — Direct Anthropic SDK escape hatch
 **Goal:** `anthropic.AsyncAnthropic(http_client=shared_httpx)` with stealth headers when OAuth cred; extended thinking blocks + fine-grained cache-control preserved.
 **Depends on:** 023, 014
 **Requirements:** PRV-02, PRV-08, PRV-09
 **Parallelizable:** yes with 024
 
-#### Phase 026: OAuth stealth bypass guard (PRV-03)
+#### Phase 026 — OAuth stealth bypass guard (PRV-03)
 **Goal:** `ProviderRouter.select()` — if cred is `sk-ant-oat*`, route MUST be direct SDK; litellm path raises if invoked.
 **Depends on:** 024, 025
 **Requirements:** PRV-03
 **Parallelizable:** no
 
-#### Phase 027: Model-profile resolver (quality/balanced/budget/inherit)
+#### Phase 027 — Model-profile resolver (quality/balanced/budget/inherit)
 **Goal:** Per-Arc/Phase/Slice/Step override, inheritance chain, resolver used by `chat.params` hook.
 **Depends on:** 024
 **Requirements:** PRV-04
 **Parallelizable:** yes
 
-#### Phase 028: Cost accounting per request (event emission + aggregation)
+#### Phase 028 — Cost accounting per request (event emission + aggregation)
 **Goal:** Emit `state.provider.request`/`state.provider.response` with token/cost; aggregator reads events → per-scope rollup.
 **Depends on:** 024, 004
 **Requirements:** PRV-05
 **Parallelizable:** yes
 
-#### Phase 029: Thinking-budget tag propagation
+#### Phase 029 — Thinking-budget tag propagation
 **Goal:** `thinking.budget_tokens` flows through extended-thinking path; regression test with capture.
 **Depends on:** 025
 **Requirements:** PRV-08
 **Parallelizable:** yes
 
-#### Phase 030: Cache-control marker end-to-end preservation
+#### Phase 030 — Cache-control marker end-to-end preservation
 **Goal:** `cache_control: ephemeral` markers preserved client → provider → response accounting; verifier.
 **Depends on:** 025, 028
 **Requirements:** PRV-09
 **Parallelizable:** no (integration)
 
-#### Phase 031: Provider parity matrix tests (available-provider scope)
+#### Phase 031 — Provider parity matrix tests (available-provider scope)
 **Goal:** Hypothesis-driven 10-prompt matrix across the **providers user has live credentials for**; normalized output snapshot diff. **Live coverage limited by available auth** — providers without local creds are deferred to a documented release-time smoke gate (mirrors v2 OAuth smoke pattern).
 
 **In-scope (live, executed in CI):**
