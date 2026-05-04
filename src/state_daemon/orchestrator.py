@@ -1,6 +1,14 @@
-"""Daemon startup orchestrator — enforces redactor → import → repair → migrate → reconciler ordering."""
+"""Daemon startup orchestrator — enforces redactor → import → repair → migrate → reconciler ordering.
+
+Step 4 (Phase 050) starts the HTTP server on a unix domain socket,
+wiring the JSON-RPC 2.0 router so downstream phases can register handlers.
+"""
 
 from __future__ import annotations
+
+import asyncio
+import os
+import signal
 
 import litellm
 import structlog
@@ -14,11 +22,21 @@ from state_core.observability import assert_redactor_attached, install
 from state_core.reconciler import StartupReconciler
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.router import JsonRpcRouter
+from src.state_daemon.server import DaemonServer
+
 log = structlog.get_logger(__name__)
+
+# Phase 050 default socket path — finalized in Phase 052.
+# In the project root (where .state/ lives).
+_DEFAULT_SOCKET_PATH = ".state/daemon.sock"
+
+# Module-level server reference for graceful shutdown via signal handlers.
+_server: DaemonServer | None = None
 
 
 async def startup() -> None:
-    """Run the full startup sequence: redactor → import → repair → migrate → reconciler.
+    """Run the full startup sequence: redactor → import → repair → migrate → reconciler → HTTP server.
 
     Step 0 (Phase 020 / AUTH-10) installs the root-logger token
     redactor and self-checks that it is attached. If the redactor
@@ -44,7 +62,14 @@ async def startup() -> None:
     Step 3 creates a ``StartupReconciler`` and calls ``start()``, which
     performs an immediate reconciliation sweep of unsent events before
     starting the periodic background sweep loop.
+
+    Step 4 (Phase 050) boots the HTTP server on a unix domain socket and
+    registers SIGTERM/SIGINT handlers for graceful shutdown.  The server
+    runs as a background task — startup() returns after binding so the
+    caller can keep the event loop alive.
     """
+    global _server
+
     # Step 0 (Phase 020 / AUTH-10): install + verify redactor BEFORE any other I/O.
     # Failure raises RedactorNotAttached which is fatal — the daemon process
     # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
@@ -95,4 +120,43 @@ async def startup() -> None:
     reconciler = StartupReconciler(db=store, mirror=mirror)
     await reconciler.start()
 
-    log.info("startup: complete")
+    # Step 4 (Phase 050): Start HTTP server on unix domain socket.
+    # Socket path is a temporary default; Phase 052 will finalize it.
+    # The JsonRpcRouter starts empty — downstream phases call add_method().
+    log.info("startup: starting HTTP server")
+    router = JsonRpcRouter()
+    socket_path = os.environ.get("STATE_DAEMON_SOCKET", _DEFAULT_SOCKET_PATH)
+    _server = DaemonServer(socket_path, router)
+    await _server.start()
+
+    # Register signal handlers for graceful shutdown.
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, _schedule_shutdown)
+        except NotImplementedError:
+            # Signal handlers not supported on this platform (e.g. Windows
+            # without win32 support) — graceful shutdown via other mechanisms.
+            pass
+
+    log.info("startup: complete", socket_path=socket_path)
+
+
+def _schedule_shutdown() -> None:
+    """Schedule graceful server shutdown from a signal handler.
+
+    Must be a plain function (not a coroutine) because asyncio signal
+    handlers are called synchronously from the event loop.
+    """
+    if _server is not None:
+        log.info("daemon.shutdown.signal_received")
+        asyncio.create_task(_shutdown_server())
+
+
+async def _shutdown_server() -> None:
+    """Stop the HTTP server and clean up."""
+    global _server
+    if _server is not None:
+        await _server.stop()
+        _server = None
+        log.info("daemon.shutdown.complete")
