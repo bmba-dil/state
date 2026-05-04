@@ -198,3 +198,175 @@ async def test_connection_after_stop_fails(socket_path: str, echo_router) -> Non
 
     with pytest.raises(OSError):
         await asyncio.open_unix_connection(socket_path)
+
+
+# ---------------------------------------------------------------------------
+# Tests: JsonRpcRouter — JSON-RPC 2.0 routing, errors, notifications
+# ---------------------------------------------------------------------------
+
+
+async def _call_router(method: str, path: str, headers: dict[str, str], body: bytes) -> bytes:
+    """Shortcut to invoke JsonRpcRouter's __call__."""
+    from src.state_daemon.router import JsonRpcRouter
+
+    r = JsonRpcRouter()
+
+    async def _ping(params: object) -> str:
+        return "pong"
+
+    async def _echo(params: object) -> object:
+        return params
+
+    r.add_method("ping", _ping)
+    r.add_method("echo", _echo)
+    return await r(method, path, headers, body)
+
+
+def _jsonrpc_request(method: str, params: object = None, req_id: int | None = 1) -> bytes:
+    """Build a JSON-RPC 2.0 request body."""
+    import json
+
+    payload: dict[str, object] = {"jsonrpc": "2.0", "method": method}
+    if params is not None:
+        payload["params"] = params
+    if req_id is not None:
+        payload["id"] = req_id
+    return json.dumps(payload).encode()
+
+
+# --- Valid routing ---
+
+
+async def test_router_valid_ping() -> None:
+    """Valid JSON-RPC 'ping' method returns success response."""
+    body = await _call_router(
+        "POST", "/", {"content-type": "application/json"},
+        _jsonrpc_request("ping"),
+    )
+    import json
+
+    resp = json.loads(body)
+    assert resp["jsonrpc"] == "2.0"
+    assert resp["result"] == "pong"
+    assert resp["id"] == 1
+
+
+async def test_router_valid_echo() -> None:
+    """Valid JSON-RPC 'echo' method returns the params."""
+    body = await _call_router(
+        "POST", "/", {"content-type": "application/json"},
+        _jsonrpc_request("echo", params={"hello": "world"}),
+    )
+    import json
+
+    resp = json.loads(body)
+    assert resp["jsonrpc"] == "2.0"
+    assert resp["result"] == {"hello": "world"}
+    assert resp["id"] == 1
+
+
+# --- Notifications ---
+
+
+async def test_router_notification_no_response() -> None:
+    """JSON-RPC notification (id=null) returns empty body."""
+    body = await _call_router(
+        "POST", "/", {"content-type": "application/json"},
+        _jsonrpc_request("ping", req_id=None),
+    )
+    assert body == b""
+
+
+async def test_router_notification_missing_id() -> None:
+    """JSON-RPC notification (no 'id' key) returns empty body."""
+    import json
+
+    body = await _call_router(
+        "POST",
+        "/",
+        {"content-type": "application/json"},
+        json.dumps({"jsonrpc": "2.0", "method": "ping"}).encode(),
+    )
+    assert body == b""
+
+
+# --- Error codes (parameterized) ---
+
+
+@pytest.mark.parametrize(
+    "body_bytes,expected_code,expected_substr",
+    [
+        # -32700 Parse error: malformed JSON
+        (b"not json", -32700, "Parse error"),
+        # -32700 Parse error: empty body
+        (b"", -32700, "Parse error"),
+        # -32600 Invalid Request: jsonrpc version missing
+        (b'{"method": "ping", "id": 1}', -32600, "Invalid Request"),
+        # -32600 Invalid Request: not a JSON object (array)
+        (b"[1, 2, 3]", -32600, "Invalid Request"),
+        # -32601 Method not found
+        (b'{"jsonrpc": "2.0", "method": "nonexistent", "id": 1}', -32601, "Method not found"),
+    ],
+)
+async def test_router_error_codes(
+    body_bytes: bytes, expected_code: int, expected_substr: str
+) -> None:
+    """JSON-RPC errors return proper codes and messages."""
+    import json
+
+    body = await _call_router(
+        "POST", "/", {"content-type": "application/json"}, body_bytes
+    )
+    resp = json.loads(body)
+    assert resp["jsonrpc"] == "2.0"
+    assert resp["error"]["code"] == expected_code
+    assert expected_substr in resp["error"]["message"]
+
+
+# --- Internal error ---
+
+
+async def test_router_handler_exception_returns_internal_error() -> None:
+    """A handler that raises produces -32603 Internal error."""
+    import json
+    from src.state_daemon.router import JsonRpcRouter
+
+    router = JsonRpcRouter()
+
+    async def _crash(_params: object) -> object:
+        raise RuntimeError("boom")
+
+    router.add_method("crash", _crash)
+
+    body = await router(
+        "POST", "/", {"content-type": "application/json"},
+        _jsonrpc_request("crash"),
+    )
+    resp = json.loads(body)
+    assert resp["jsonrpc"] == "2.0"
+    assert resp["error"]["code"] == -32603
+    assert "Internal error" in resp["error"]["message"]
+
+
+# --- Handler registration ---
+
+
+async def test_router_add_method_registers_handler() -> None:
+    """add_method() registers a callable that gets dispatched."""
+    import json
+    from src.state_daemon.router import JsonRpcRouter
+
+    router = JsonRpcRouter()
+
+    async def _double(params: object) -> int:
+        assert isinstance(params, int)
+        return params * 2
+
+    router.add_method("double", _double)
+
+    body = await router(
+        "POST", "/", {"content-type": "application/json"},
+        _jsonrpc_request("double", params=21),
+    )
+    resp = json.loads(body)
+    assert resp["result"] == 42
