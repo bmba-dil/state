@@ -41,6 +41,53 @@ class Node(BaseModel):
     status: Literal["idle", "pending", "in_progress", "done", "blocked", "failed"] = "idle"
 
 
+# -- Node registry -----------------------------------------------------------
+
+
+class NodeRegistry:
+    """In-memory registry of all DAG nodes keyed by node ID.
+
+    Provides O(1) lookup, upsert, and removal.  Raises ValueError on duplicate
+    registration to prevent accidental overwrites — later phases can add explicit
+    update methods when status transitions are needed.
+    """
+
+    def __init__(self) -> None:
+        self._nodes: dict[str, Node] = {}
+
+    def register(self, node: Node) -> None:
+        """Register a node. Raises ValueError if node.id already present."""
+        if node.id in self._nodes:
+            raise ValueError(f"Node '{node.id}' already registered")
+        self._nodes[node.id] = node
+
+    def get(self, node_id: str) -> Node:
+        """Retrieve a node by ID. Raises KeyError if not found."""
+        if node_id not in self._nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        return self._nodes[node_id]
+
+    def contains(self, node_id: str) -> bool:
+        """Return True if node_id is registered."""
+        return node_id in self._nodes
+
+    def remove(self, node_id: str) -> None:
+        """Remove a node by ID. Raises KeyError if not found."""
+        if node_id not in self._nodes:
+            raise KeyError(f"Node '{node_id}' not found")
+        del self._nodes[node_id]
+
+    def all_nodes(self) -> list[Node]:
+        """Return a list of all registered nodes."""
+        return list(self._nodes.values())
+
+    def __len__(self) -> int:
+        return len(self._nodes)
+
+    def __contains__(self, node_id: str) -> bool:
+        return node_id in self._nodes
+
+
 # -- DAG Scheduler skeleton (phases 042-049) -----------------------------------
 
 
