@@ -1,28 +1,13 @@
 # src/state_core/providers/thinking_budget.py
-"""Thinking-budget tag propagation adapter (PRV-08, Phase 029).
+"""Bridge: ResolvedProfile.thinking_budget_tokens → ThinkingConfigParam for AnthropicClient.
 
-Bridges ResolvedProfile.thinking_budget_tokens to the ThinkingConfigParam
-TypedDict required by AnthropicClient.create(thinking=...).
-
-Design rationale:
-- model_profile.py has a constrained import policy (no SDK deps).
-- anthropic_client.py accepts ThinkingConfigParam directly (no ResolvedProfile dep).
-- This module is the bridge between the two, with pre-flight constraint validation.
-
-CALLER RESPONSIBILITY: The result of build_thinking_param() must only be passed
-to AnthropicClient.create(thinking=...). Do NOT pass to LitellmClient.acompletion()
-— litellm raises UnsupportedParamsError for the thinking= kwarg.
-Gate at call site: if isinstance(client, AnthropicClient): thinking=build_thinking_param(...)
-
-Note on model compatibility: this module always returns type="enabled". For
-claude-opus-4-6 and claude-mythos-preview, the anthropic SDK warns that
-type="adaptive" is preferred. This is intentional for Phase 029 scope —
-the quality profile uses claude-opus-4-7 which does not trigger this warning.
-If the project adopts a newer quality model, update the return type here.
+NOTE: Only pass result to AnthropicClient.create(thinking=...). LitellmClient raises
+UnsupportedParamsError for thinking= kwarg — gate at call site.
 """
 from __future__ import annotations
 
 import structlog
+from anthropic.types.thinking_config_enabled_param import ThinkingConfigEnabledParam
 from anthropic.types.thinking_config_param import ThinkingConfigParam
 
 from state_core.providers.errors import ProviderBadRequestError
@@ -73,4 +58,4 @@ def build_thinking_param(
         budget_tokens=budget,
         max_tokens=max_tokens,
     )
-    return {"type": "enabled", "budget_tokens": budget}
+    return ThinkingConfigEnabledParam(type="enabled", budget_tokens=budget)
