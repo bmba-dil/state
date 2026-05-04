@@ -27,6 +27,7 @@ AggregateType = Literal[
     "decision",
     "auth",
     "mode",
+    "provider",  # Phase 028: cost accounting
 ]
 """Aggregate discriminator -- maps events to their owning aggregate."""
 
@@ -90,6 +91,12 @@ AUTH_EVENT_TYPES = Literal[
     "state.auth.refreshed",
     "state.auth.rotated",
     "state.auth.imported",
+]
+
+# Provider
+PROVIDER_EVENT_TYPES = Literal[
+    "state.provider.request",
+    "state.provider.response",
 ]
 
 # -- ULID validation -------------------------------------------------------------
@@ -367,6 +374,54 @@ class AuthImportedData(BaseModel):
     cred_kind: Literal["oauth", "api_key"]
     """Variant of the imported credential. Mirrors the discriminator on
     state_core.auth.base.Credential."""
+
+
+class ProviderRequestData(BaseModel):
+    """Payload for state.provider.request events (pre-call).
+
+    Emitted by ProviderCostEmitter before each inference call.
+    request_id (ULID) correlates this event to its response event.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    model: str
+    """litellm model string or Anthropic model ID (e.g. 'claude-sonnet-4-6')."""
+    scope_type: str
+    """Scope level: 'step' | 'slice' | 'phase' | 'arc'."""
+    scope_id: str
+    """Scope instance ID, e.g. 'step-17.3' or 'arc-01'."""
+    request_id: str
+    """ULID -- correlates this request event to the matching response event."""
+    prompt_tokens_estimate: int | None = None
+    """Optional pre-call token estimate. None when not available."""
+
+
+class ProviderResponseData(BaseModel):
+    """Payload for state.provider.response events (post-call).
+
+    Emitted by ProviderCostEmitter after each completed (or failed) inference call.
+    cost_usd is None -- not 0.0 -- when the model is not in litellm's cost map.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    model: str
+    scope_type: str
+    scope_id: str
+    request_id: str
+    """Same ULID as ProviderRequestData -- the correlation key."""
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
+    cost_usd: float | None
+    """None when model is not in litellm cost map. Never 0.0 for unknown models."""
+    latency_ms: int
+    """Wall-clock duration of the inference call in milliseconds (time.monotonic)."""
+    cache_read_tokens: int = 0
+    """Cache read hits: usage._cache_read_input_tokens (litellm) or cache_read_input_tokens (Anthropic SDK)."""
+    cache_creation_tokens: int = 0
+    """Cache writes: usage._cache_creation_input_tokens (litellm) or cache_creation_input_tokens (Anthropic SDK)."""
+    error: str | None = None
+    """Exception type name, set only on failed calls (e.g. 'ProviderTransientError'). None on success."""
 
 
 # -- Typed event models (discriminated unions) ------------------------------------

@@ -20,7 +20,8 @@
     "use_worktrees": true,
     "security_enforcement": true,
     "summary_strict": true,
-    "_auto_chain_active": false
+    "_auto_chain_active": false,
+    "regression_gate": "scoped"
   },
   "git": {
     "branching_strategy": "phase"

@@ -23,6 +23,10 @@ app.add_typer(events_app)
 from src.state_cli.auth import auth_app  # noqa: E402
 app.add_typer(auth_app)
 
+# Phase 040 — snapshot sub-app
+from src.state_cli.snapshot import app as snapshot_app  # noqa: E402
+app.add_typer(snapshot_app)
+
 
 @db_app.command(name="init")
 def db_init() -> None:

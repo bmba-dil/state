@@ -4,7 +4,7 @@ milestone: v3
 milestone_name: Provider Routing + Model Profiles
 current_phase: "023"
 status: v3 active — phase 023 up next; v2 (Auth Coverage) shipped & tagged 2026-05-03
-last_updated: "2026-05-03T01:05:00.000Z"
+last_updated: "2026-05-04T21:33:35.551Z"
 ---
 
 # STATE: state
