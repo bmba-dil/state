@@ -370,3 +370,125 @@ async def test_router_add_method_registers_handler() -> None:
     )
     resp = json.loads(body)
     assert resp["result"] == 42
+
+
+# ---------------------------------------------------------------------------
+# Tests: Server + JsonRpcRouter integration (Task 050.3)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def integration_socket_path() -> str:
+    """Temp socket path for server+router integration tests."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield str(Path(tmpdir) / "int-daemon.sock")
+
+
+async def test_server_with_jsonrpc_router(integration_socket_path: str) -> None:
+    """Wire DaemonServer with JsonRpcRouter — POST routes through JSON-RPC."""
+    import json
+
+    from src.state_daemon.router import JsonRpcRouter
+    from src.state_daemon.server import DaemonServer
+
+    router = JsonRpcRouter()
+
+    async def _add(params: object) -> int:
+        assert isinstance(params, dict)
+        return params["a"] + params["b"]
+
+    async def _greet(params: object) -> str:
+        assert isinstance(params, dict)
+        return f'Hello, {params["name"]}!'
+
+    router.add_method("add", _add)
+    router.add_method("greet", _greet)
+
+    srv = DaemonServer(integration_socket_path, router)
+    await srv.start()
+
+    try:
+        # Test valid JSON-RPC call
+        reader, writer = await asyncio.open_unix_connection(integration_socket_path)
+        writer.write(
+            _raw_request(
+                "POST",
+                "/",
+                {"Content-Type": "application/json"},
+                json.dumps(
+                    {"jsonrpc": "2.0", "method": "add", "params": {"a": 10, "b": 32}, "id": 1}
+                ).encode(),
+            )
+        )
+        await writer.drain()
+        status, _, resp_body = await _read_response(reader)
+        assert status == 200
+        data = json.loads(resp_body)
+        assert data["result"] == 42
+        assert data["id"] == 1
+        writer.close()
+        await writer.wait_closed()
+
+        # Test notification (no response)
+        reader, writer = await asyncio.open_unix_connection(integration_socket_path)
+        writer.write(
+            _raw_request(
+                "POST",
+                "/",
+                {"Content-Type": "application/json"},
+                json.dumps(
+                    {"jsonrpc": "2.0", "method": "greet", "params": {"name": "World"}}
+                ).encode(),
+            )
+        )
+        await writer.drain()
+        status, _, resp_body = await _read_response(reader)
+        assert status == 204
+        assert resp_body == b""
+        writer.close()
+        await writer.wait_closed()
+
+        # Test method not found
+        reader, writer = await asyncio.open_unix_connection(integration_socket_path)
+        writer.write(
+            _raw_request(
+                "POST",
+                "/",
+                {"Content-Type": "application/json"},
+                json.dumps(
+                    {"jsonrpc": "2.0", "method": "nonexistent", "id": 2}
+                ).encode(),
+            )
+        )
+        await writer.drain()
+        status, _, resp_body = await _read_response(reader)
+        assert status == 200
+        data = json.loads(resp_body)
+        assert data["error"]["code"] == -32601
+        writer.close()
+        await writer.wait_closed()
+
+    finally:
+        await srv.stop()
+
+
+async def test_health_endpoint_works_with_router(integration_socket_path: str) -> None:
+    """GET /health still works when server has a JsonRpcRouter installed."""
+    from src.state_daemon.router import JsonRpcRouter
+    from src.state_daemon.server import DaemonServer
+
+    router = JsonRpcRouter()
+    srv = DaemonServer(integration_socket_path, router)
+    await srv.start()
+
+    try:
+        reader, writer = await asyncio.open_unix_connection(integration_socket_path)
+        writer.write(_raw_request("GET", "/health"))
+        await writer.drain()
+        status, _, body = await _read_response(reader)
+        assert status == 200
+        assert __import__("json").loads(body) == {"status": "ok"}
+        writer.close()
+        await writer.wait_closed()
+    finally:
+        await srv.stop()
