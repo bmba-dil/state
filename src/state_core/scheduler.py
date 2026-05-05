@@ -400,22 +400,103 @@ def _critical_path_nodes(
 ) -> set[str]:
     """Compute nodes on the critical path using CPM with DP on topological order.
 
+    Soft edges are excluded by default; only ``blocks`` and ``data`` edges
+    contribute to path length.
+
+    Algorithm:
+      1. Filter edges to allowed kinds.
+      2. Topological sort.
+      3. Forward pass (DP): longest distance from any root to each node.
+      4. Backward pass (DP): longest distance from each node to any sink.
+      5. Node is critical iff forward[node] + backward[node] == max_forward + 1.
+
+    Complexity: O(V + E).
+
     Args:
         nodes: All DAG nodes.
         edges: All DAG edges.
-        edge_kinds: Edge kinds to include in path computation.  Defaults to
-            ``{"blocks", "data"}`` — soft edges are excluded.
+        edge_kinds: Edge kinds to include.  Defaults to ``{"blocks", "data"}``.
 
     Returns:
-        Set of node IDs on the critical path (longest chains through the DAG).
+        Set of node IDs on the critical path.
     """
-    raise NotImplementedError
+    if edge_kinds is None:
+        edge_kinds = {"blocks", "data"}
+
+    if not nodes:
+        return set()
+
+    node_ids = {n.id for n in nodes}
+    node_map = {n.id: n for n in nodes}
+
+    # Build adjacency and in-degree restricted to allowed kinds
+    adj: dict[str, list[str]] = {n.id: [] for n in nodes}
+    in_deg: dict[str, int] = {n.id: 0 for n in nodes}
+    rev_adj: dict[str, list[str]] = {n.id: [] for n in nodes}
+    out_deg: dict[str, int] = {n.id: 0 for n in nodes}
+
+    for edge in edges:
+        if edge.kind not in edge_kinds:
+            continue
+        if edge.source_node not in node_ids or edge.target_node not in node_ids:
+            continue  # edge references unknown node — skip gracefully
+        adj[edge.source_node].append(edge.target_node)
+        in_deg[edge.target_node] += 1
+        rev_adj[edge.target_node].append(edge.source_node)
+        out_deg[edge.source_node] += 1
+
+    # Topological sort (Kahn's, but we need deterministic order — use topo_sort)
+    try:
+        sorted_nodes = topo_sort(
+            [e for e in edges if e.kind in edge_kinds], nodes
+        )
+    except ValueError:
+        # Cycle in edge-kind-filtered subgraph — fallback: treat all as critical
+        return node_ids
+
+    order = [n.id for n in sorted_nodes]
+
+    # Forward DP: longest distance from any root to each node
+    forward: dict[str, int] = {nid: 0 for nid in node_ids}
+    for nid in order:
+        for neighbor in adj.get(nid, []):
+            if forward[nid] + 1 > forward[neighbor]:
+                forward[neighbor] = forward[nid] + 1
+
+    max_forward = max(forward.values()) if forward else 0
+
+    # Backward DP: longest distance from each node to any sink
+    backward: dict[str, int] = {nid: 0 for nid in node_ids}
+    for nid in reversed(order):
+        for pred in rev_adj.get(nid, []):
+            if backward[nid] + 1 > backward[pred]:
+                backward[pred] = backward[nid] + 1
+
+    # Critical path: forward + backward == max_forward
+    # (forward/backward count edges, not nodes — the node itself sits
+    # at the midpoint and is not double-counted.)
+    critical: set[str] = set()
+    for nid in node_ids:
+        if forward[nid] + backward[nid] == max_forward:
+            critical.add(nid)
+
+    # Ensure single-node / no-edge graphs still return something
+    if not critical:
+        critical = node_ids
+
+    return critical
 
 
 def detect_priority_inversion(
     nodes: list[Node], edges: list[Edge]
 ) -> list[dict[str, Any]]:
     """Detect frontier nodes blocked only by soft edges on the critical path.
+
+    Algorithm:
+      1. Compute frontier via the existing ``frontier()`` function.
+      2. Compute critical path nodes via ``_critical_path_nodes()``.
+      3. For each frontier node, find unfulfilled soft edges (source NOT done).
+      4. Flag only nodes that are on the critical path AND have such soft edges.
 
     Args:
         nodes: All DAG nodes.
@@ -425,13 +506,62 @@ def detect_priority_inversion(
         List of dicts with keys ``node_id``, ``soft_edges``, ``critical_path``.
         Empty list if no priority inversion detected.
     """
-    raise NotImplementedError
+    # Edge case: empty input
+    if not nodes:
+        return []
+
+    node_map = {n.id: n for n in nodes}
+
+    # Compute frontier (ignores soft edges)
+    frontier_nodes = frontier(nodes, edges)
+
+    # Compute critical path (excludes soft edges)
+    critical = _critical_path_nodes(nodes, edges)
+
+    results: list[dict[str, Any]] = []
+    for node in frontier_nodes:
+        # Find soft edges targeting this node where source is NOT done
+        soft_blocking: list[str] = []
+        for edge in edges:
+            if edge.target_node != node.id:
+                continue
+            if edge.kind != "soft":
+                continue
+            source = node_map.get(edge.source_node)
+            if source is None:
+                continue  # unknown source — skip gracefully
+            if source.status != "done":
+                soft_blocking.append(edge.source_node)
+
+        # Only flag if on critical path AND has unfulfilled soft edges
+        if soft_blocking and node.id in critical:
+            results.append({
+                "node_id": node.id,
+                "soft_edges": soft_blocking,
+                "critical_path": True,
+            })
+
+    return results
 
 
 def detect_silent_deadlock(
     nodes: list[Node], edges: list[Edge]
 ) -> dict[str, Any] | None:
-    """Detect when frontier is empty and ALL in-progress nodes are blocked.
+    """Detect when frontier is empty and ALL in-progress nodes are stuck.
+
+    A deadlock occurs when:
+      - The frontier is empty (no dispatchable work).
+      - At least one node is in_progress.
+      - EVERY in_progress node is blocked on missing or descoped predecessors
+        (i.e., has no reachable predecessor that could still complete).
+
+    Algorithm:
+      1. Compute frontier.  Non-empty → return None.
+      2. Find nodes with status ``"in_progress"``.  None → return None.
+      3. Build set of known node IDs for membership testing.
+      4. For each in_progress node, examine its blocking (blocks, data) edges.
+      5. If ALL in_progress nodes are stuck (no reachable non-done predecessor),
+         return deadlock payload.  Otherwise return None.
 
     Args:
         nodes: All DAG nodes.
@@ -441,7 +571,113 @@ def detect_silent_deadlock(
         Dict with keys ``deadlocked_nodes``, ``missing_predecessors``,
         ``descoped_predecessors`` if deadlock detected; ``None`` otherwise.
     """
-    raise NotImplementedError
+    # Edge case: empty
+    if not nodes:
+        return None
+
+    # 1. Frontier must be empty.  Add shadow "failed" nodes for edges
+    #    with missing source nodes so frontier() sees them as blocking
+    #    predecessors (missing sources can never complete).
+    node_map = {n.id: n for n in nodes}
+    node_id_set = set(node_map.keys())
+
+    # Collect missing source IDs referenced by edges
+    missing_sources: set[str] = set()
+    for edge in edges:
+        if edge.source_node not in node_id_set:
+            missing_sources.add(edge.source_node)
+
+    # Build extended node list with shadow failed nodes for missing sources
+    shadow_nodes = list(nodes)
+    for ms in missing_sources:
+        shadow_nodes.append(Node(id=ms, kind="step", status="failed"))
+
+    f = frontier(shadow_nodes, edges)
+    # Exclude shadow nodes from frontier result (they're synthetic)
+    f = [n for n in f if n.id not in missing_sources and n.status != "blocked"]
+    if f:
+        return None
+
+    # 2. Must have in_progress nodes
+    in_progress = [n for n in nodes if n.status == "in_progress"]
+    if not in_progress:
+        return None
+
+    # 3. Determine if ALL in_progress nodes are stuck
+    deadlocked: list[str] = []
+    missing_all: list[str] = []
+    descoped_all: list[str] = []
+
+    for node in in_progress:
+        # Find blocking edges (blocks, data) targeting this node
+        blocking_edges = [
+            e for e in edges
+            if e.target_node == node.id and e.kind in ("blocks", "data")
+        ]
+
+        if not blocking_edges:
+            # No blocking edges → node is not stuck on predecessors
+            # (it's in progress and doesn't need anything)
+            return None  # not ALL stuck
+
+        has_reachable = False
+        node_missing: list[str] = []
+        node_descoped: list[str] = []
+
+        for edge in blocking_edges:
+            src_id = edge.source_node
+
+            if src_id not in node_id_set:
+                # Source not in node list → missing
+                node_missing.append(src_id)
+                continue
+
+            src_status = node_map[src_id].status
+
+            if src_status in ("failed", "blocked"):
+                # Descoped (terminal failure states)
+                node_descoped.append(src_id)
+            elif src_status == "done":
+                # Done — satisfied, not a problem
+                continue
+            else:
+                # idle, pending, in_progress — reachable, could still complete
+                has_reachable = True
+
+        # This node is stuck iff it has at least one missing/descoped
+        # predecessor AND no reachable predecessor could satisfy it.
+        if (node_missing or node_descoped) and not has_reachable:
+            deadlocked.append(node.id)
+            missing_all.extend(node_missing)
+            descoped_all.extend(node_descoped)
+        else:
+            # At least one in_progress node is NOT stuck → no deadlock
+            return None
+
+    # 4. ALL in_progress nodes are stuck → deadlock
+    if not deadlocked:
+        return None
+
+    # Deduplicate predecessor lists while preserving order
+    seen_missing: set[str] = set()
+    uniq_missing: list[str] = []
+    for m in missing_all:
+        if m not in seen_missing:
+            seen_missing.add(m)
+            uniq_missing.append(m)
+
+    seen_descoped: set[str] = set()
+    uniq_descoped: list[str] = []
+    for d in descoped_all:
+        if d not in seen_descoped:
+            seen_descoped.add(d)
+            uniq_descoped.append(d)
+
+    return {
+        "deadlocked_nodes": deadlocked,
+        "missing_predecessors": uniq_missing,
+        "descoped_predecessors": uniq_descoped,
+    }
 
 
 # -- DAG Scheduler skeleton (phases 042-049) -----------------------------------
