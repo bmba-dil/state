@@ -24,7 +24,56 @@ import { setupToast } from "./tui/toast.js";
  * All side effects are cleaned up via api.lifecycle.onDispose.
  */
 function createTuiPlugin(): TuiPlugin {
-  return async (api) => {
+  return async (api, _options, meta) => {
+    // ── 0. First-run auto-install ──────────────────────────────────────────
+    if (meta.state === "first") {
+      // Auto-register the plugin itself using TuiPluginInstallOptions API
+      api.plugins.install("@state/opencode-plugin", { global: false })
+        .then((result) => {
+          log({
+            source: "@state/opencode-plugin/tui",
+            event: "tui.install.plugin",
+            state: meta.state,
+            result,
+          });
+        })
+        .catch((err) => {
+          log({
+            source: "@state/opencode-plugin/tui",
+            event: "tui.install.plugin.error",
+            error: String(err),
+          });
+        });
+
+      // Auto-register MCP servers
+      for (const name of ["state-build", "state-teach"] as const) {
+        api.client.mcp.add({
+          name,
+          config: {
+            type: "local",
+            command: [name],
+            enabled: true,
+          },
+        })
+          .then((response) => {
+            log({
+              source: "@state/opencode-plugin/tui",
+              event: "tui.install.mcp",
+              mcp: name,
+              response: response.data,
+            });
+          })
+          .catch((err) => {
+            log({
+              source: "@state/opencode-plugin/tui",
+              event: "tui.install.mcp.error",
+              mcp: name,
+              error: String(err),
+            });
+          });
+      }
+    }
+
     // ── 1. Install custom theme ──────────────────────────────────────────
     const themeURL = new URL("./theme.json", import.meta.url);
     await api.theme.install(themeURL.pathname);
@@ -89,6 +138,8 @@ function createTuiPlugin(): TuiPlugin {
     setupToast(api);
   };
 }
+
+export { createTuiPlugin };
 
 export const TuiPluginModule: TuiPluginModuleType = {
   id: "@state/opencode-plugin/tui",
