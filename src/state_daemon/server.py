@@ -3,6 +3,10 @@
 Binds to a unix domain socket and accepts HTTP/1.1 connections.
 Routes POST requests through a pluggable router callable; handles
 GET /health directly.  Content-Type validation rejects non-JSON POSTs.
+
+GET /events/subscribe is delegated to a pluggable SSE handler that
+manages the stream lifecycle — the handler receives the reader/writer
+and keeps the connection open for the duration of the SSE session.
 """
 
 from __future__ import annotations
@@ -20,6 +24,15 @@ log = structlog.get_logger(__name__)
 # (e.g. 400/403 on mode enforcement rejection).  Plain bytes get 200/204.
 Router = Callable[[str, str, dict[str, str], bytes], Awaitable[bytes | tuple[int, bytes]]]
 
+# SSE handler callable signature: (reader, writer, path, headers) -> None
+# The handler owns the connection lifecycle — it writes SSE headers, streams
+# events, and closes the writer when done.  The server does not write anything
+# after delegating to this handler.
+SseHandler = Callable[
+    [asyncio.StreamReader, asyncio.StreamWriter, str, dict[str, str]],
+    Awaitable[None],
+]
+
 _HTTP_STATUS_TEXTS: dict[int, str] = {
     200: "OK",
     204: "No Content",
@@ -36,11 +49,21 @@ class DaemonServer:
 
     Accepts connections, parses HTTP/1.x requests, and routes them
     through a pluggable router callable.  Handles GET /health directly.
+
+    GET /events/subscribe is delegated to an optional SSE handler that
+    manages the stream lifecycle (headers, event streaming, heartbeat,
+    client cleanup).
     """
 
-    def __init__(self, socket_path: str, router: Router) -> None:
+    def __init__(
+        self,
+        socket_path: str,
+        router: Router,
+        sse_handler: SseHandler | None = None,
+    ) -> None:
         self._socket_path = socket_path
         self._router = router
+        self._sse_handler = sse_handler
         self._server: asyncio.Server | None = None
 
     async def start(self) -> None:
@@ -106,6 +129,24 @@ class DaemonServer:
                 )
                 await writer.drain()
                 return
+
+            # --- GET /events/subscribe — SSE stream (Phase 054) ---
+            if method == "GET" and path.startswith("/events/subscribe"):
+                if self._sse_handler is not None:
+                    await self._sse_handler(reader, writer, path, headers)
+                    # SSE handler owns the stream lifecycle — it writes
+                    # headers, streams events, and closes the writer.
+                    return
+                else:
+                    writer.write(
+                        _http_response(
+                            501,
+                            [("Content-Type", "text/plain")],
+                            b"SSE not configured",
+                        )
+                    )
+                    await writer.drain()
+                    return
 
             # --- Content-Type validation for POST ---
             if method == "POST":

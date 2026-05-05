@@ -19,6 +19,7 @@ import asyncio
 import dataclasses
 import json
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import structlog
 
@@ -26,6 +27,9 @@ log = structlog.get_logger(__name__)
 
 # Heartbeat interval in seconds — prevents proxy/load-balancer timeouts.
 HEARTBEAT_INTERVAL = 30
+
+# Valid mode values for SSE query-param filtering.
+_VALID_SSE_MODES: frozenset[str] = frozenset({"build", "teach", "kernel"})
 
 
 @dataclasses.dataclass(eq=False)
@@ -179,3 +183,167 @@ def format_heartbeat() -> str:
     on idle connections.
     """
     return ": heartbeat\n\n"
+
+
+# ---------------------------------------------------------------------------
+# SSE HTTP endpoint handler (Task 054.2)
+# ---------------------------------------------------------------------------
+
+# SSE response headers sent once when the connection is established.
+SSE_HEADERS = (
+    "HTTP/1.1 200 OK\r\n"
+    "Content-Type: text/event-stream\r\n"
+    "Cache-Control: no-cache\r\n"
+    "Connection: keep-alive\r\n"
+    "\r\n"
+).encode()
+
+
+class SseEndpointHandler:
+    """Callable SSE handler registered with DaemonServer for GET /events/subscribe.
+
+    Parses query parameters (``?mode=``, ``?from=``), registers the client
+    with the provided ``SseClientManager``, writes SSE headers, and enters
+    a stream loop that reads formatted SSE lines from the client's queue
+    and writes them to the HTTP socket.
+
+    Heartbeats are sent every ``HEARTBEAT_INTERVAL`` seconds to prevent
+    proxy/load-balancer timeouts.  On client disconnect or stream error,
+    the client is removed from the manager and the writer is closed.
+    """
+
+    def __init__(self, client_manager: SseClientManager) -> None:
+        self._client_manager = client_manager
+
+    async def __call__(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        path: str,
+        headers: dict[str, str],
+    ) -> None:
+        """Handle an SSE subscription request.
+
+        Args:
+            reader: The HTTP request stream reader (unused after headers).
+            writer: The HTTP response stream writer — kept open for the
+                duration of the SSE session.
+            path: The full request path including query string
+                (e.g. ``/events/subscribe?mode=build&from=01XYZ``).
+            headers: The request headers dict (lowercase keys).
+        """
+        # --- Parse query parameters ---
+        parsed = urlparse(path)
+        qs = parse_qs(parsed.query)
+
+        mode_filter: str | None = None
+        raw_mode = qs.get("mode", [None])[0]
+        if raw_mode is not None:
+            if raw_mode in _VALID_SSE_MODES:
+                mode_filter = raw_mode
+            else:
+                # Invalid mode — reject with 400.
+                writer.write(
+                    b"HTTP/1.1 400 Bad Request\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    b"Content-Length: 24\r\n"
+                    b"\r\n"
+                    b"Invalid mode parameter\r\n"
+                )
+                await writer.drain()
+                writer.close()
+                await writer.wait_closed()
+                return
+
+        from_ulid: str | None = qs.get("from", [None])[0]
+
+        # --- Register client ---
+        client = self._client_manager.add_client(
+            mode_filter=mode_filter,
+            from_ulid=from_ulid,
+        )
+
+        # --- Write SSE headers ---
+        writer.write(SSE_HEADERS)
+        await writer.drain()
+
+        log.info(
+            "sse.stream_started",
+            mode_filter=mode_filter,
+            from_ulid=from_ulid,
+        )
+
+        # --- Stream loop ---
+        heartbeat_task: asyncio.Task[None] | None = None
+
+        try:
+            # Start heartbeat task.
+            heartbeat_task = asyncio.create_task(
+                _heartbeat_loop(writer),
+            )
+
+            while True:
+                # Check if the writer is closing or reader is at EOF — client disconnected.
+                if writer.is_closing() or reader.at_eof():
+                    break
+
+                try:
+                    # Read from the client's queue with a timeout so we can
+                    # periodically check for writer closure.
+                    msg = await asyncio.wait_for(
+                        client.queue.get(),
+                        timeout=1.0,
+                    )
+                    writer.write(msg.encode())
+                    await writer.drain()
+                except asyncio.TimeoutError:
+                    # No events within the poll window — normal.  The heartbeat
+                    # task handles keepalives independently.  Loop back to
+                    # check for writer closure.
+                    pass
+                except asyncio.CancelledError:
+                    break
+        except (
+            ConnectionResetError,
+            BrokenPipeError,
+            ConnectionError,
+        ):
+            log.debug("sse.client_disconnected")
+        except Exception:
+            log.exception("sse.stream_error")
+        finally:
+            # --- Cleanup ---
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+            self._client_manager.remove_client(client)
+
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+            log.info("sse.stream_ended")
+
+
+async def _heartbeat_loop(writer: asyncio.StreamWriter) -> None:
+    """Send SSE heartbeat comments every ``HEARTBEAT_INTERVAL`` seconds.
+
+    Runs as a background task for the duration of a single SSE connection.
+    """
+    hb = format_heartbeat().encode()
+    while True:
+        await asyncio.sleep(HEARTBEAT_INTERVAL)
+        try:
+            writer.write(hb)
+            await writer.drain()
+        except (ConnectionResetError, BrokenPipeError, ConnectionError):
+            break
+        except Exception:
+            log.exception("sse.heartbeat_error")
+            break
