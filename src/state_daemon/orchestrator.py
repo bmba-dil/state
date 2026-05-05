@@ -24,6 +24,7 @@ from state_core.reconciler import StartupReconciler
 from state_core.scheduler import DAGScheduler, Edge, Node
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.auth_manager import AuthRefreshLoop, AuthStatusHandler
 from src.state_daemon.logging import configure_daemon_logging
 from src.state_daemon.middleware import ModeMiddleware, load_mode_config
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
@@ -36,6 +37,9 @@ log = structlog.get_logger(__name__)
 
 # Module-level server reference for graceful shutdown via signal handlers.
 _server: DaemonServer | None = None
+
+# Module-level auth refresh loop reference for graceful shutdown.
+_auth_refresh: AuthRefreshLoop | None = None
 
 # Pid file path — set during startup so the shutdown handler can clean it up.
 _pid_path: str | None = None
@@ -218,6 +222,18 @@ async def startup() -> None:
     # Persist the resolved socket path for worker discovery (Phase 061).
     write_socket_path(socket_path)
 
+    # Step 5 (Phase 059): Wire auth manager — status endpoint + background refresh.
+    # Workers query /auth/status over HTTP; they never read auth.json directly.
+    log.info("startup: wiring auth manager")
+    auth_status = AuthStatusHandler()
+    _server.add_get_handler("/auth/status", auth_status.handle)
+    log.info("startup: auth status endpoint registered at /auth/status")
+
+    global _auth_refresh
+    _auth_refresh = AuthRefreshLoop()
+    await _auth_refresh.start()
+    log.info("startup: auth refresh loop started")
+
     # Register signal handlers for graceful shutdown.
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -243,9 +259,17 @@ def _schedule_shutdown() -> None:
 
 
 async def _shutdown_server() -> None:
-    """Stop the HTTP server and clean up."""
+    """Stop the HTTP server, auth refresh loop, and clean up."""
     global _server
+    global _auth_refresh
     global _pid_path
+
+    # Stop the auth refresh loop first (no-op if not started).
+    if _auth_refresh is not None:
+        await _auth_refresh.stop()
+        _auth_refresh = None
+        log.info("daemon.shutdown.auth_refresh_stopped")
+
     if _server is not None:
         await _server.stop()
         _server = None
