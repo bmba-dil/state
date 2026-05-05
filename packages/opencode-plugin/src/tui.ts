@@ -7,6 +7,7 @@ import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
 import { setupBuildProgress } from "./tui/build-progress.js";
 import { setupTeachConcept } from "./tui/teach-concept.js";
 import { setupStatusline, renderStatusline } from "./tui/statusline.js";
+import { setupToast } from "./tui/toast.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -18,6 +19,7 @@ import { setupStatusline, renderStatusline } from "./tui/statusline.js";
  * 3. Wires BuildProgress event subscriptions (Phase 082)
  * 4. Wires TeachConcept event subscriptions (Phase 083)
  * 5. Wires Statusline event subscriptions for footer slots (Phase 084)
+ * 6. Wires Toast notification handler (Phase 085)
  *
  * All side effects are cleaned up via api.lifecycle.onDispose.
  */
@@ -81,6 +83,10 @@ function createTuiPlugin(): TuiPlugin {
     // Phase 084: Statusline — subscribes to daemon SSE cost/status events
     // for sidebar_footer and home_footer rendering.
     setupStatusline(api);
+
+    // Phase 085: Toast — subscribes to daemon SSE events (step ended, step failed,
+    // server connected, session error), maps to toast notifications with de-dup.
+    setupToast(api);
   };
 }
 
