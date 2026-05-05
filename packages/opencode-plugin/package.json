@@ -7,7 +7,7 @@
   "scripts": {
     "build": "tsc",
     "bundle": "bun build src/index.ts --outdir=dist --format=esm --target=bun --external @opencode-ai/plugin --external @opencode-ai/sdk --external effect --external zod --external @opentui/core --external @opentui/solid --external solid-js",
-    "dist": "tsc && bun run bundle",
+    "dist": "tsc && bun run bundle && cp src/theme.json dist/",
     "typecheck": "tsc --noEmit",
     "dev": "tsc --watch"
   },
