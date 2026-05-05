@@ -6,6 +6,7 @@ import { log } from "./logger.js";
 import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
 import { setupBuildProgress } from "./tui/build-progress.js";
 import { setupTeachConcept } from "./tui/teach-concept.js";
+import { setupStatusline, renderStatusline } from "./tui/statusline.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -16,6 +17,7 @@ import { setupTeachConcept } from "./tui/teach-concept.js";
  *    (phases 081–088 replace these with real components)
  * 3. Wires BuildProgress event subscriptions (Phase 082)
  * 4. Wires TeachConcept event subscriptions (Phase 083)
+ * 5. Wires Statusline event subscriptions for footer slots (Phase 084)
  *
  * All side effects are cleaned up via api.lifecycle.onDispose.
  */
@@ -52,11 +54,11 @@ function createTuiPlugin(): TuiPlugin {
         },
         sidebar_footer(_ctx, _props) {
           // Phase 084: Statusline (mode · scope · provider · cost)
-          return "";
+          return renderStatusline() as unknown as string;
         },
         home_footer(_ctx, _props) {
           // Phase 084: Statusline (home view variant)
-          return "";
+          return renderStatusline() as unknown as string;
         },
         session_prompt_right(_ctx, _props) {
           // Phase 087: PromptHint (model · cost · Step N.m)
@@ -75,6 +77,10 @@ function createTuiPlugin(): TuiPlugin {
     // Phase 083: TeachConcept — subscribes to daemon SSE for connectivity heartbeat.
     // State is updated by event handlers; renderTeachConcept() reads it each frame.
     setupTeachConcept(api);
+
+    // Phase 084: Statusline — subscribes to daemon SSE cost/status events
+    // for sidebar_footer and home_footer rendering.
+    setupStatusline(api);
   };
 }
 
