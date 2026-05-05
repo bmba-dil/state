@@ -685,13 +685,91 @@ class TestIntegration:
 class TestValidateDaemonPath:
     """validate_daemon_path() — daemon subtree enforcement (layer 2 of 6)."""
 
-    def test_validate_daemon_path_default_permissive(self) -> None:
-        """Without load_mode_config(), validate_daemon_path() uses 'both' default.
+    def test_build_path_allowed_in_build_mode(self) -> None:
+        """A path under .state/build/ is allowed when mode=build."""
+        from src.state_core.schema import validate_subtree_path
 
-        This test imports validate_daemon_path from the daemon middleware.
-        Since no load_mode_config() has been called, get_current_mode()
-        returns 'both' — which allows all paths.
-        """
+        validate_subtree_path(".state/build/events.sqlite", "build")
+
+    def test_build_path_rejected_in_teach_mode(self) -> None:
+        """A path under .state/build/ is rejected when mode=teach."""
+        from src.state_core.schema import validate_subtree_path
+
+        with pytest.raises(ValueError, match="teach"):
+            validate_subtree_path(".state/build/events.sqlite", "teach")
+
+    def test_teach_path_allowed_in_teach_mode(self) -> None:
+        """A path under .state/teach/ is allowed when mode=teach."""
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(".state/teach/concepts.db", "teach")
+
+    def test_teach_path_rejected_in_build_mode(self) -> None:
+        """A path under .state/teach/ is rejected when mode=build."""
+        from src.state_core.schema import validate_subtree_path
+
+        with pytest.raises(ValueError, match="build"):
+            validate_subtree_path(".state/teach/concepts.db", "build")
+
+    def test_shared_root_allowed_in_build_mode(self) -> None:
+        """Shared root files (.state/events.sqlite) are always allowed."""
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(".state/events.sqlite", "build")
+        validate_subtree_path(".state/mode.json", "build")
+
+    def test_shared_root_allowed_in_teach_mode(self) -> None:
+        """Shared root files are always allowed even in teach mode."""
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(".state/events.sqlite", "teach")
+        validate_subtree_path(".state/mode.json", "teach")
+
+    def test_exact_dir_name_rejected(self) -> None:
+        """.state/build (no trailing /) is treated as the build subtree."""
+        from src.state_core.schema import validate_subtree_path
+
+        with pytest.raises(ValueError):
+            validate_subtree_path(".state/build", "teach")
+
+    def test_path_input_accepted(self) -> None:
+        """validate_subtree_path accepts pathlib.Path input."""
+        from pathlib import Path as Pt
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(Pt(".state/build/foo"), "build")
+        with pytest.raises(ValueError):
+            validate_subtree_path(Pt(".state/build/foo"), "teach")
+
+    def test_both_mode_allows_all(self) -> None:
+        """Both mode allows both subtrees."""
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(".state/build/foo", "both")
+        validate_subtree_path(".state/teach/bar", "both")
+
+    def test_both_mode_allows_shared_root(self) -> None:
+        """Both mode allows shared root entries too."""
+        from src.state_core.schema import validate_subtree_path
+
+        validate_subtree_path(".state/events.sqlite", "both")
+        validate_subtree_path(".state/mode.json", "both")
+
+    def test_middleware_validate_path_method(self) -> None:
+        """ModeMiddleware.validate_path() uses the middleware's config."""
+        from src.state_core.schema import ModeConfig as Mc
+        from src.state_daemon.middleware import ModeMiddleware
+
+        async def _noop(method, path, headers, body):
+            return b""
+
+        mw = ModeMiddleware(_noop, Mc(mode="build"))
+        mw.validate_path(".state/build/foo")
+        with pytest.raises(ValueError):
+            mw.validate_path(".state/teach/bar")
+
+    def test_unloaded_config_permissive(self) -> None:
+        """Without load_mode_config(), validate_daemon_path() uses 'both' default."""
         # Reset cached config to simulate fresh daemon boot
         import src.state_daemon.middleware as mod
         mod._config = None
@@ -699,7 +777,5 @@ class TestValidateDaemonPath:
         from src.state_daemon.middleware import validate_daemon_path
 
         # Default "both" mode allows both subtrees
-        validate_daemon_path(".state/build/events.sqlite")
-        validate_daemon_path(".state/teach/concepts.db")
-        validate_daemon_path(".state/mode.json")
-        validate_daemon_path(".state/events.sqlite")
+        validate_daemon_path(".state/build/foo")
+        validate_daemon_path(".state/teach/bar")
