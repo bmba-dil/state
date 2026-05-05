@@ -4,7 +4,7 @@
 **Phase range:** 097–105
 **Status:** Not started
 **Phases complete:** 0 / 9
-**Last activity:** 2026-04-22 — Migrated to milestone-scoped layout
+**Last activity:** 2026-05-05 — Phase 097 planned (2 plans)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Phase | Slug | Status |
 |-------|------|--------|
-| 097 | state-mode-json-schema-validator | Not started |
+| 097 | state-mode-json-schema-validator | Planned (2 plans) |
 | 098 | directory-presence-signal | Not started |
 | 099 | mcp-registration-toggle | Not started |
 | 100 | plugin-hook-mode-gate | Not started |

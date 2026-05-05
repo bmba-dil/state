@@ -1172,6 +1172,11 @@ Tier 4 ends at v27 shipped — this is v1 release.
 **Depends on:** 002
 **Requirements:** MODE-01
 **Parallelizable:** yes
+**Plans:** 2 plans
+
+Plans:
+- [ ] 097-01-PLAN.md — Canonical ModeConfig + validator in schema.py
+- [ ] 097-02-PLAN.md — CLI `state mode init` command
 
 #### Phase 098 — Directory-presence signal (`.state/build/` vs `.state/teach/`)
 **Goal:** Daemon refuses writes into the wrong subtree; `state mode init` bootstraps structure.
