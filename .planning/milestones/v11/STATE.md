@@ -16,7 +16,7 @@
 | 098 | directory-presence-signal | Not started |
 | 099 | mcp-registration-toggle | Not started |
 | 100 | plugin-hook-mode-gate | Not started |
-| 101 | daemon-http-mode-middleware | Not started |
+| 101 | daemon-http-mode-middleware | Planned (1 plan) |
 | 102 | python-import-graph-lint | Not started |
 | 103 | cli-state-mode-init-build | Not started |
 | 104 | mode-activation-event | Not started |

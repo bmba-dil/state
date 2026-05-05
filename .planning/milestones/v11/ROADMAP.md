@@ -37,9 +37,13 @@ Plans:
 
 #### Phase 100 — Plugin hook mode gate (refinement of 069/P3/P10)
 **Goal:** `command.execute.before` rejects `/state:build:*` when mode=teach; `tool.execute.before` rejects `mcp__state-teach__*` when mode=build.
-**Depends on:** 070, 077
+**Depends on:** 070, 077, 099
 **Requirements:** MODE-04
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 100-01-PLAN.md — Cached mode reader + hook updates (command + tool mode gates)
 
 #### Phase 101 — Daemon HTTP mode middleware (canonical gate)
 **Goal:** Already partially in 053; extend with event-type-level validation (reject `state.concept.*` when mode=build).
@@ -47,6 +51,10 @@ Plans:
 **Requirements:** MODE-05
 **Parallelizable:** no
 **P0 pitfall:** P0-11
+**Plans:** 1 plan
+
+Plans:
+- [ ] 101-01-PLAN.md — Event-type prefix sets + extraction helper + middleware validation + tests
 
 #### Phase 102 — Python import-graph lint (CI)
 **Goal:** Ruff plugin or custom script; fails if `state.build.*` imports `state.teach.*` or vice versa.
