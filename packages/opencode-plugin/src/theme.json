@@ -1,0 +1,16 @@
+{
+  "name": "@state/opencode-plugin",
+  "mode": "dark",
+  "text": "#E2E8F0",
+  "textMuted": "#64748B",
+  "error": "#EF4444",
+  "warning": "#F59E0B",
+  "success": "#10B981",
+  "info": "#3B82F6",
+  "border": "#334155",
+  "borderActive": "#6366F1",
+  "background": "#0F172A",
+  "backgroundPanel": "#1E293B",
+  "backgroundElement": "#33415599",
+  "accent": "#6366F1"
+}
