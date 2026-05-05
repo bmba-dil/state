@@ -22,8 +22,9 @@
 **Parallelizable:** yes with 050
 **P0 pitfall:** P0-15
 
-#### Phase 052 — Unix socket path (`$XDG_RUNTIME_DIR/state-<hash>.sock` / tmp fallback)
+#### Phase 052 — Unix socket path (`$XDG_RUNTIME_DIR/state-<hash>.sock` / tmp fallback) ✅
 **Goal:** Project-hash-based socket name; fallback when `$XDG_RUNTIME_DIR` missing (macOS).
+**Status:** Complete (2026-05-04)
 **Depends on:** 050
 **Requirements:** DAE-04
 **Parallelizable:** yes
