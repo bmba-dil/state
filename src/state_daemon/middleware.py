@@ -18,7 +18,7 @@ from collections.abc import Callable, Awaitable
 
 import structlog
 from pydantic import ValidationError
-from src.state_core.schema import ModeConfig
+from src.state_core.schema import ALL_RECOGNISED_MODES, ModeConfig
 
 log = structlog.get_logger(__name__)
 
@@ -95,7 +95,8 @@ def get_current_mode() -> str:
 # Mode validation helpers
 # ---------------------------------------------------------------------------
 
-_VALID_MODES: frozenset[str] = frozenset({"build", "teach", "both", "kernel"})
+# Re-exported from schema.py for backwards compatibility within this module.
+_VALID_MODES = ALL_RECOGNISED_MODES
 
 _READ_METHODS: frozenset[str] = frozenset({"GET", "HEAD"})
 

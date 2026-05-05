@@ -12,6 +12,7 @@ import typer
 
 from src.state_core.migrations import migrate as _migrate
 from src.state_core.projector import Projector as _Projector
+from src.state_core.schema import RUNTIME_MODES
 
 app = typer.Typer(name="state", help="state: agentic state-machine workflow engine")
 
@@ -70,7 +71,8 @@ async def _do_rebuild_projections() -> None:
     typer.echo(f"Projections rebuilt: {count} events processed.")
 
 
-VALID_MODES: typing.Final[set[str]] = {"build", "teach", "kernel"}
+# Re-exported from schema.py for backwards compatibility within this module.
+VALID_MODES = RUNTIME_MODES
 
 
 def _validate_mode(value: str | None) -> str | None:

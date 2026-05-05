@@ -17,6 +17,17 @@ from ulid import ULID
 Mode = Literal["build", "teach", "kernel"]
 """Execution mode discriminator -- every event carries exactly one."""
 
+# Canonical mode sets — single source of truth for all modules.
+# Import these rather than defining independent local copies.
+PERSISTABLE_MODES: frozenset[str] = frozenset({"build", "teach", "both"})
+"""Modes that can be stored in ``.state/mode.json`` (``kernel`` is internal-only)."""
+
+RUNTIME_MODES: frozenset[str] = frozenset({"build", "teach", "kernel"})
+"""Modes valid for CLI filtering and event-mode values (``both`` is config-only)."""
+
+ALL_RECOGNISED_MODES: frozenset[str] = PERSISTABLE_MODES | RUNTIME_MODES
+"""Union of persistable and runtime modes — used by header-validation middleware."""
+
 AggregateType = Literal[
     "arc",
     "phase",
