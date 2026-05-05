@@ -143,15 +143,26 @@ describe("renderBuildProgress", () => {
 // ── BUILD_PROGRESS_STATE initial values ────────────────────────────
 
 describe("BUILD_PROGRESS_STATE defaults", () => {
+  // Reset state to factory defaults before each test — previous tests
+  // in other describe blocks mutate the module-level state.
+  function resetState(): void {
+    BUILD_PROGRESS_STATE.connection = "unreachable";
+    BUILD_PROGRESS_STATE.sessionStatus = null;
+    BUILD_PROGRESS_STATE.sessionID = null;
+  }
+
   it('has connection "unreachable" on module load', () => {
+    resetState();
     expect(BUILD_PROGRESS_STATE.connection).toBe("unreachable");
   });
 
   it("has sessionStatus null on module load", () => {
+    resetState();
     expect(BUILD_PROGRESS_STATE.sessionStatus).toBeNull();
   });
 
   it("has sessionID null on module load", () => {
+    resetState();
     expect(BUILD_PROGRESS_STATE.sessionID).toBeNull();
   });
 });
