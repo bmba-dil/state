@@ -7,6 +7,7 @@ import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
 import { setupBuildProgress } from "./tui/build-progress.js";
 import { setupTeachConcept } from "./tui/teach-concept.js";
 import { setupStatusline, renderStatusline } from "./tui/statusline.js";
+import { setupPromptHint, renderPromptHint } from "./tui/prompt-hint.js";
 import { setupToast } from "./tui/toast.js";
 
 /**
@@ -112,8 +113,8 @@ function createTuiPlugin(): TuiPlugin {
           return renderStatusline() as unknown as string;
         },
         session_prompt_right(_ctx, _props) {
-          // Phase 087: PromptHint (model · cost · Step N.m)
-          return "";
+          // Phase 087: PromptHint (model · cost · Step N)
+          return renderPromptHint() as unknown as string;
         },
       },
     };
@@ -132,6 +133,9 @@ function createTuiPlugin(): TuiPlugin {
     // Phase 084: Statusline — subscribes to daemon SSE cost/status events
     // for sidebar_footer and home_footer rendering.
     setupStatusline(api);
+
+    // Phase 087: PromptHint — subscribes to model/cost events for session_prompt_right
+    setupPromptHint(api);
 
     // Phase 085: Toast — subscribes to daemon SSE events (step ended, step failed,
     // server connected, session error), maps to toast notifications with de-dup.
