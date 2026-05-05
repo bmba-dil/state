@@ -27,6 +27,7 @@ from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
 from src.state_daemon.socket import resolve_socket_path, write_socket_path
+from src.state_daemon.sse import SseBus, SseClientManager, SseEndpointHandler
 
 log = structlog.get_logger(__name__)
 
@@ -131,6 +132,16 @@ async def startup() -> None:
     reconciler = StartupReconciler(db=store, mirror=mirror)
     await reconciler.start()
 
+    # Step 3.5 (Phase 054): Create SSE broadcast bus and wire post-commit
+    # callback so every state.* event appended to the event store is
+    # automatically fanned out to all connected SSE subscribers.
+    log.info("startup: initializing SSE bus")
+    sse_client_manager = SseClientManager()
+    sse_bus = SseBus(sse_client_manager)
+    store.add_post_commit_callback(sse_bus.on_event)
+    sse_handler = SseEndpointHandler(sse_client_manager)
+    log.info("startup: SSE bus wired to event store post-commit")
+
     # Step 4 (Phase 050 / 052): Resolve deterministic socket path, start
     # HTTP server, and persist the path for worker/client discovery.
     # The JsonRpcRouter starts empty — downstream phases call add_method().
@@ -148,7 +159,7 @@ async def startup() -> None:
     middleware = ModeMiddleware(router, mode_config)
     log.info("startup: mode middleware enabled", active_mode=mode_config.mode)
 
-    _server = DaemonServer(socket_path, middleware)
+    _server = DaemonServer(socket_path, middleware, sse_handler=sse_handler)
     try:
         await _server.start()
     except OSError as exc:

@@ -642,3 +642,87 @@ class TestSseBus:
                 await writer.wait_closed()
             finally:
                 await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Task 054.4 — Full daemon orchestrator wiring integration test
+# ---------------------------------------------------------------------------
+
+
+class TestSseOrchestratorWiring:
+    """Integration test: orchestrator-wired SSE bus with event store."""
+
+    @pytest.mark.asyncio
+    async def test_daemon_wiring_sse_receives_event(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Full wiring: SseBus -> event store post-commit -> SSE endpoint -> client receives."""
+        import shutil
+        import tempfile
+
+        from src.state_daemon.sse import SseBus, SseClientManager, SseEndpointHandler
+        from src.state_daemon.server import DaemonServer
+        from src.state_core.events import SqliteEventStore
+        from src.state_core.migrations import migrate
+
+        # Set up isolated test database
+        db_path = tmp_path / ".state" / "events.sqlite"
+        monkeypatch.setenv("STATE_DB_PATH", str(db_path))
+
+        migrations_src = Path.cwd() / ".state" / "migrations"
+        migrations_dst = tmp_path / ".state" / "migrations"
+        if migrations_src.exists():
+            shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+        await migrate()
+
+        # Wire exactly as the orchestrator would: store -> sse_bus -> client_manager -> sse_handler -> server
+        store = SqliteEventStore()
+        sse_client_manager = SseClientManager()
+        sse_bus = SseBus(sse_client_manager)
+        store.add_post_commit_callback(sse_bus.on_event)
+        sse_handler = SseEndpointHandler(sse_client_manager)
+
+        async def _router(method: str, path: str, headers: dict[str, str], body: bytes) -> bytes:
+            return b"{}"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = str(Path(tmpdir) / "daemon-wiring.sock")
+            server = DaemonServer(socket_path, _router, sse_handler=sse_handler)
+            await server.start()
+
+            try:
+                assert sse_client_manager.client_count == 0
+
+                # Connect an SSE client
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                writer.write(_raw_request("GET", "/events/subscribe"))
+                await writer.drain()
+
+                # Read past headers
+                await asyncio.wait_for(reader.readline(), timeout=2.0)
+                while True:
+                    line = await asyncio.wait_for(reader.readline(), timeout=2.0)
+                    if line in (b"\r\n", b"\n", b""):
+                        break
+
+                assert sse_client_manager.client_count == 1
+
+                # Write event via store — post-commit callback triggers SSE broadcast
+                event_id = await store.append(
+                    "step",
+                    "step-daemon-wired",
+                    "state.step.completed",
+                    {"status": "ok", "phase": 54},
+                    mode="build",
+                )
+
+                # SSE client should receive the event
+                evt = await _read_sse_event(reader, timeout=3.0)
+                assert evt["event"] == "state.step.completed"
+                data = json.loads(evt["data"])
+                assert data["status"] == "ok"
+                assert data["phase"] == 54
+
+                writer.close()
+                await writer.wait_closed()
+            finally:
+                await server.stop()
