@@ -12,7 +12,7 @@ import typer
 
 from src.state_core.migrations import migrate as _migrate
 from src.state_core.projector import Projector as _Projector
-from src.state_core.schema import RUNTIME_MODES
+from src.state_core.schema import BUILD_SUBTREE, RUNTIME_MODES, TEACH_SUBTREE
 
 app = typer.Typer(name="state", help="state: agentic state-machine workflow engine")
 
@@ -272,5 +272,14 @@ def mode_init(
     with open(mode_path, "w", encoding="utf-8") as f:
         json.dump({"mode": cfg.mode}, f)
     os.chmod(mode_path, 0o600)
+
+    # Create mode-specific subtrees — the 2nd layer of 6-layer defense-in-depth.
+    # These directories serve as a physical, non-bypassable signal of the
+    # active mode.  Later layers (daemon middleware, import-graph lint) use
+    # their presence as an enforcement gate.
+    if cfg.mode in ("build", "both"):
+        (state_dir / BUILD_SUBTREE.removeprefix(".state/")).mkdir(parents=True, exist_ok=True)
+    if cfg.mode in ("teach", "both"):
+        (state_dir / TEACH_SUBTREE.removeprefix(".state/")).mkdir(parents=True, exist_ok=True)
 
     typer.echo(f"Mode initialised to '{cfg.mode}' ({mode_path})")
