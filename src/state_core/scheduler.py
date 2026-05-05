@@ -352,6 +352,43 @@ def detect_cycles(edges: list[Edge]) -> list[list[str]]:
     return cycles
 
 
+# -- P0-16 Watchdog -------------------------------------------------------------
+
+
+class SwallowedCancelledError(Exception):
+    """Raised by the scheduler watchdog when a swallowed CancelledError
+    is detected in a TaskGroup exception group (P0-16 defence).
+
+    The __cause__ chain preserves the original CancelledError for forensics.
+    """
+
+
+def _inspect_for_cancelled(exc: BaseException) -> None:
+    """Recursively inspect exception group tree for swallowed CancelledError.
+
+    Python's asyncio.TaskGroup can silently drop CancelledError from
+    ExceptionGroup contents when other exceptions are present
+    (CPython #116720). This inspector walks the entire exception group
+    tree and raises SwallowedCancelledError if ANY CancelledError is
+    found — failing loud instead of silently deadlocking the scheduler.
+
+    Args:
+        exc: The exception to inspect (may be a leaf exception or group).
+
+    Raises:
+        SwallowedCancelledError: If a CancelledError is found anywhere
+            in the exception tree.
+    """
+    if isinstance(exc, asyncio.CancelledError):
+        raise SwallowedCancelledError(
+            "Watchdog detected swallowed CancelledError in "
+            "asyncio.TaskGroup exception group"
+        ) from exc
+    if isinstance(exc, (ExceptionGroup, BaseExceptionGroup)):
+        for sub_exc in exc.exceptions:
+            _inspect_for_cancelled(sub_exc)
+
+
 # -- DAG Scheduler skeleton (phases 042-049) -----------------------------------
 
 
@@ -362,7 +399,7 @@ class DAGScheduler:
     1. Compute frontier() — all unblocked nodes
     2. Group by Slice (via _slice_key)
     3. Sort steps within each Slice (via _parse_sort_key)
-    4. Dispatch up to concurrency_cap Slices concurrently (via asyncio.gather)
+     4. Dispatch up to concurrency_cap Slices concurrently (via asyncio.TaskGroup)
     5. Steps within a Slice execute sequentially
     6. Return dispatched node IDs
     """
@@ -413,10 +450,17 @@ class DAGScheduler:
                 dispatched.append(node.id)
                 await self._executor(node)
 
-        # Concurrent dispatch across Slices
-        await asyncio.gather(
-            *(_run_slice(slice_nodes) for _, slice_nodes in slice_entries)
-        )
+        # Concurrent dispatch across Slices — uses TaskGroup for
+        # exception-group awareness (P0-16 defence).
+        try:
+            async with asyncio.TaskGroup() as tg:
+                for _, slice_nodes in slice_entries:
+                    tg.create_task(_run_slice(slice_nodes))
+        except BaseExceptionGroup as eg:
+            # P0-16 defence: inspect for swallowed CancelledError
+            # before re-raising.
+            _inspect_for_cancelled(eg)
+            raise
 
         return dispatched
 
