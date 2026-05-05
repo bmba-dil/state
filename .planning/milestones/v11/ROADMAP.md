@@ -92,6 +92,10 @@ Plans:
 **Depends on:** 097..P8
 **Requirements:** (verifier; TST-08)
 **Parallelizable:** no (final)
+**Plans:** 1 plan
+
+Plans:
+- [ ] 105-01-PLAN.md — Consolidated 6-layer regression suite (schema + subtree + middleware + import-lint + MCP + hooks)
 
 ---
 
