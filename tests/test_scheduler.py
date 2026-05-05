@@ -801,3 +801,278 @@ class TestDispatcher:
             assert config.concurrency_cap == 4
         finally:
             os.unlink(path)
+
+
+# -- Critical Path tests (DAG-05 helper) ---------------------------------------
+
+
+class TestCriticalPath:
+    """Tests for _critical_path_nodes — CPM-based critical path computation."""
+
+    def test_linear_chain_all_critical(self) -> None:
+        """A→B→C: all three nodes on critical path."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="blocks"),
+        ]
+        critical = _critical_path_nodes([a, b, c], edges)
+        assert critical == {"a", "b", "c"}
+
+    def test_diamond_all_critical(self) -> None:
+        """A→B→D, A→C→D (parallel B/C): all four critical."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        d = Node(id="d", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="blocks"),
+            Edge(source_node="c", target_node="d", kind="blocks"),
+        ]
+        critical = _critical_path_nodes([a, b, c, d], edges)
+        assert critical == {"a", "b", "c", "d"}
+
+    def test_fork_longest_path_only(self) -> None:
+        """A→B→D, A→C (short branch): only A, B, D critical, C not."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        d = Node(id="d", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="blocks"),
+            Edge(source_node="a", target_node="c", kind="blocks"),
+        ]
+        critical = _critical_path_nodes([a, b, c, d], edges)
+        assert critical == {"a", "b", "d"}
+        assert "c" not in critical
+
+    def test_soft_edges_excluded(self) -> None:
+        """A→soft→B→blocks→C: soft edge excluded from critical path."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="soft"),
+            Edge(source_node="b", target_node="c", kind="blocks"),
+        ]
+        critical = _critical_path_nodes([a, b, c], edges)
+        # With soft excluded, only B→C is a blocks edge.
+        # B (in=0), C (in=1 from B): both on the longest blocks-only path.
+        assert critical == {"b", "c"}
+        assert "a" not in critical
+
+    def test_single_node(self) -> None:
+        """One node with no edges → that node is critical."""
+        n = Node(id="only", kind="step")
+        critical = _critical_path_nodes([n], [])
+        assert critical == {"only"}
+
+
+# -- Priority Inversion Detection tests (DAG-05) ------------------------------
+
+
+class TestPriorityInversionDetection:
+    """Tests for detect_priority_inversion — critical-path nodes with unfulfilled soft edges."""
+
+    def test_critical_path_node_blocked_by_soft_edge(self) -> None:
+        """C in frontier, soft B→C (B not done), C critical → detected."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="soft"),
+        ]
+        result = detect_priority_inversion([a, b, c], edges)
+        assert len(result) == 1
+        assert result[0]["node_id"] == "c"
+        assert result[0]["soft_edges"] == ["b"]
+        assert result[0]["critical_path"] is True
+
+    def test_soft_edge_source_done_no_detection(self) -> None:
+        """Same DAG but B done → no priority inversion."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="done")
+        c = Node(id="c", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="soft"),
+        ]
+        result = detect_priority_inversion([a, b, c], edges)
+        assert result == []
+
+    def test_non_critical_path_node_not_detected(self) -> None:
+        """Node on non-critical path with soft edge → not flagged.
+        
+        DAG: A(done)→B(done)→C(idle) [3 nodes, longest path]
+             A(done)→D(idle)             [2 nodes, short path]
+             C→soft→D
+        Frontier: C (A,B done), D (A done, C→soft ignored).
+        D has soft edge from C (idle, not done). D NOT on critical path.
+        """
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="done")
+        c_node = Node(id="c", kind="step", status="idle")
+        d = Node(id="d", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="blocks"),  # A→B→C (3 nodes)
+            Edge(source_node="a", target_node="d", kind="blocks"),  # A→D (2 nodes)
+            Edge(source_node="c", target_node="d", kind="soft"),    # C→D soft
+        ]
+        result = detect_priority_inversion([a, b, c_node, d], edges)
+        assert result == []
+
+    def test_multiple_soft_edges(self) -> None:
+        """Node with 2 unfulfilled soft edges → both listed."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        d = Node(id="d", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="d", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="soft"),
+            Edge(source_node="c", target_node="d", kind="soft"),
+        ]
+        result = detect_priority_inversion([a, b, c, d], edges)
+        assert len(result) == 1
+        assert result[0]["node_id"] == "d"
+        assert set(result[0]["soft_edges"]) == {"b", "c"}
+        assert result[0]["critical_path"] is True
+
+    def test_no_soft_edges_no_detection(self) -> None:
+        """Frontier node with no soft edges → not detected."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+        ]
+        result = detect_priority_inversion([a, b], edges)
+        assert result == []
+
+    def test_blocked_by_blocks_edge_not_in_frontier(self) -> None:
+        """Node blocked by blocks edge (not soft) → not in frontier → no detection."""
+        a = Node(id="a", kind="step", status="idle")
+        b = Node(id="b", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+        ]
+        result = detect_priority_inversion([a, b], edges)
+        # B is blocked by A (blocks edge) → B not in frontier
+        # A is in frontier, no soft edges → not detected
+        assert result == []
+
+
+# -- Silent Deadlock Detection tests (DAG-06) ---------------------------------
+
+
+class TestSilentDeadlockDetection:
+    """Tests for detect_silent_deadlock — empty frontier + all in-progress stuck."""
+
+    def test_empty_frontier_in_progress_missing_predecessor(self) -> None:
+        """Frontier empty, X in_progress, X has blocks edge from missing Y → deadlock."""
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="y", target_node="x", kind="blocks"),
+        ]
+        result = detect_silent_deadlock([x], edges)
+        assert result is not None
+        assert result["deadlocked_nodes"] == ["x"]
+        assert result["missing_predecessors"] == ["y"]
+        assert result["descoped_predecessors"] == []
+
+    def test_empty_frontier_in_progress_descoped_failed(self) -> None:
+        """Frontier empty, X in_progress, X has data edge from Z (status=failed) → deadlock."""
+        z = Node(id="z", kind="step", status="failed")
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="z", target_node="x", kind="data"),
+        ]
+        result = detect_silent_deadlock([z, x], edges)
+        assert result is not None
+        assert result["deadlocked_nodes"] == ["x"]
+        assert result["missing_predecessors"] == []
+        assert result["descoped_predecessors"] == ["z"]
+
+    def test_empty_frontier_in_progress_descoped_blocked(self) -> None:
+        """Frontier empty, X in_progress, X has blocks edge from Z (status=blocked) → deadlock."""
+        z = Node(id="z", kind="step", status="blocked")
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="z", target_node="x", kind="blocks"),
+        ]
+        result = detect_silent_deadlock([z, x], edges)
+        assert result is not None
+        assert result["deadlocked_nodes"] == ["x"]
+        assert result["descoped_predecessors"] == ["z"]
+
+    def test_frontier_not_empty_no_deadlock(self) -> None:
+        """Frontier NOT empty → no deadlock (dispatchable work exists)."""
+        a = Node(id="a", kind="step", status="idle")  # frontier
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="ghost", target_node="x", kind="blocks"),
+        ]
+        result = detect_silent_deadlock([a, x], edges)
+        assert result is None
+
+    def test_frontier_empty_no_in_progress_nodes_no_deadlock(self) -> None:
+        """No in_progress nodes, frontier empty → no deadlock."""
+        a = Node(id="a", kind="step", status="done")
+        result = detect_silent_deadlock([a], [])
+        assert result is None
+
+    def test_frontier_empty_in_progress_legitimate_wait(self) -> None:
+        """X in_progress, predecessor idle (reachable) → no deadlock (legitimate wait)."""
+        y = Node(id="y", kind="step", status="idle")  # reachable, not done yet
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="y", target_node="x", kind="blocks"),
+        ]
+        result = detect_silent_deadlock([y, x], edges)
+        assert result is None
+
+    def test_frontier_empty_mixed_in_progress_not_all_stuck(self) -> None:
+        """Two in_progress: one stuck (missing), one legit (predecessor idle) → no deadlock."""
+        y = Node(id="y", kind="step", status="idle")  # reachable
+        x1 = Node(id="x1", kind="step", status="in_progress")  # stuck: missing
+        x2 = Node(id="x2", kind="step", status="in_progress")  # legit: y idle
+        edges = [
+            Edge(source_node="ghost", target_node="x1", kind="blocks"),  # missing
+            Edge(source_node="y", target_node="x2", kind="blocks"),      # reachable
+        ]
+        result = detect_silent_deadlock([y, x1, x2], edges)
+        assert result is None  # not ALL in-progress stuck
+
+    def test_all_nodes_done_no_deadlock(self) -> None:
+        """All nodes done → frontier empty but no in_progress → no deadlock."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="done")
+        result = detect_silent_deadlock([a, b], [])
+        assert result is None
+
+    def test_empty_node_list_no_deadlock(self) -> None:
+        """Empty node list → no deadlock."""
+        result = detect_silent_deadlock([], [])
+        assert result is None
+
+    def test_in_progress_with_missing_and_descoped_predecessors(self) -> None:
+        """In-progress node has both missing AND descoped predecessors → both reported."""
+        z = Node(id="z", kind="step", status="failed")
+        x = Node(id="x", kind="step", status="in_progress")
+        y = Node(id="y", kind="step", status="done")  # satisfied
+        edges = [
+            Edge(source_node="ghost", target_node="x", kind="blocks"),  # missing
+            Edge(source_node="z", target_node="x", kind="data"),       # descoped
+            Edge(source_node="y", target_node="x", kind="blocks"),     # done (satisfied)
+        ]
+        result = detect_silent_deadlock([z, x, y], edges)
+        assert result is not None
+        assert result["deadlocked_nodes"] == ["x"]
+        assert set(result["missing_predecessors"]) == {"ghost"}
+        assert set(result["descoped_predecessors"]) == {"z"}
