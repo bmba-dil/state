@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -376,3 +377,122 @@ class TestEdgeCases:
         after = asyncio.run(_count())
 
         assert before == after
+
+
+# ── Mode init command tests ────────────────────────────────────────────────
+
+
+class TestModeInit:
+    """state mode init command."""
+
+    def test_init_build_creates_mode_json(self, tmp_path: Path) -> None:
+        """mode init build creates .state/mode.json with 0600 permissions."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            mode_json = tmp_path / ".state" / "mode.json"
+            assert mode_json.exists()
+            content = json.loads(mode_json.read_text())
+            assert content == {"mode": "build"}
+            # Verify chmod 0600
+            perms = mode_json.stat().st_mode & 0o777
+            assert perms == 0o600, f"Expected 0o600, got {oct(perms)}"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_teach(self, tmp_path: Path) -> None:
+        """mode init teach creates .state/mode.json with mode=teach."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "teach"])
+            assert result.exit_code == 0
+            mode_json = tmp_path / ".state" / "mode.json"
+            content = json.loads(mode_json.read_text())
+            assert content == {"mode": "teach"}
+            perms = mode_json.stat().st_mode & 0o777
+            assert perms == 0o600
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_both(self, tmp_path: Path) -> None:
+        """mode init both creates .state/mode.json with mode=both."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "both"])
+            assert result.exit_code == 0
+            mode_json = tmp_path / ".state" / "mode.json"
+            content = json.loads(mode_json.read_text())
+            assert content == {"mode": "both"}
+            perms = mode_json.stat().st_mode & 0o777
+            assert perms == 0o600
+        finally:
+            os.chdir(old_cwd)
+
+    def test_rejects_invalid_mode(self, tmp_path: Path) -> None:
+        """mode init with an invalid mode exits with non-zero code."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "invalid"])
+            assert result.exit_code != 0
+            # No .state/mode.json should be created
+            mode_json = tmp_path / ".state" / "mode.json"
+            assert not mode_json.exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_rejects_kernel_mode(self, tmp_path: Path) -> None:
+        """mode init kernel is rejected — kernel is not persistable."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "kernel"])
+            assert result.exit_code != 0
+            # No .state/mode.json should be created
+            mode_json = tmp_path / ".state" / "mode.json"
+            assert not mode_json.exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_creates_dot_state_dir_if_missing(self, tmp_path: Path) -> None:
+        """.state/ directory is auto-created if missing."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            # The autouse _isolate_db fixture may have created .state/.
+            # Remove it to test auto-creation from scratch.
+            state_dir = tmp_path / ".state"
+            if state_dir.exists():
+                shutil.rmtree(state_dir)
+            assert not state_dir.exists()
+
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            assert state_dir.is_dir()
+            mode_json = state_dir / "mode.json"
+            assert mode_json.exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_overwrites_existing_mode_json(self, tmp_path: Path) -> None:
+        """Re-running mode init overwrites existing .state/mode.json."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            # Pre-create .state/mode.json with build mode
+            state_dir = tmp_path / ".state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            mode_json = state_dir / "mode.json"
+            mode_json.write_text(json.dumps({"mode": "build"}))
+
+            # Re-init with teach
+            result = runner.invoke(app, ["mode", "init", "teach"])
+            assert result.exit_code == 0
+            content = json.loads(mode_json.read_text())
+            assert content == {"mode": "teach"}
+        finally:
+            os.chdir(old_cwd)

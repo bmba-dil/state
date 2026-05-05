@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import typing
+from pathlib import Path
 
 import typer
 
@@ -34,6 +36,10 @@ app.add_typer(dag_app)
 # Phase 055 — daemon sub-app
 from src.state_daemon.cli import app as daemon_app  # noqa: E402
 app.add_typer(daemon_app)
+
+# Phase 097 — mode sub-app
+mode_app = typer.Typer(name="mode", help="Mode management commands")
+app.add_typer(mode_app)
 
 
 @db_app.command(name="init")
@@ -219,3 +225,51 @@ async def _do_export(
             line = json.dumps(ev, sort_keys=True, separators=(",", ":"))
             sys.stdout.write(line + "\n")
             count += 1
+
+
+# ── Mode management ────────────────────────────────────────────────────────
+
+
+@mode_app.command(name="init")
+def mode_init(
+    mode: str = typer.Argument(..., help="Mode to initialise: build, teach, or both"),
+) -> None:
+    """Create .state/mode.json with the specified mode.
+
+    This is a first-time setup command. It creates the .state/ directory
+    if needed and writes a mode.json file with strict 0600 permissions.
+
+    Valid modes: build, teach, both
+    Internal-only mode "kernel" is NOT accepted by this command.
+    """
+    from src.state_core.schema import validate_mode_config
+
+    # Validate the mode before touching the filesystem.
+    # validate_mode_config raises ValueError on invalid input,
+    # which is caught and surfaced as a user-facing error.
+    try:
+        cfg = validate_mode_config({"mode": mode})
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    # Determine project root: walk up from cwd to find .state/ directory.
+    # If .state/ doesn't exist anywhere upward, use cwd.
+    project_root = Path.cwd()
+    current = project_root
+    while current != current.parent:
+        if (current / ".state").is_dir():
+            project_root = current
+            break
+        current = current.parent
+
+    # Create .state/ directory and mode.json with 0600 permissions
+    state_dir = project_root / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    mode_path = state_dir / "mode.json"
+    with open(mode_path, "w", encoding="utf-8") as f:
+        json.dump({"mode": cfg.mode}, f)
+    os.chmod(mode_path, 0o600)
+
+    typer.echo(f"Mode initialised to '{cfg.mode}' ({mode_path})")
