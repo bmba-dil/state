@@ -496,3 +496,101 @@ class TestModeInit:
             assert content == {"mode": "teach"}
         finally:
             os.chdir(old_cwd)
+
+    # -- Subtree creation tests (Phase 098-01) ---------------------------------
+
+    def test_init_build_creates_subtree(self, tmp_path: Path) -> None:
+        """mode init build creates .state/build/ directory."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            build_dir = tmp_path / ".state" / "build"
+            assert build_dir.is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_teach_creates_subtree_no_build_pollution(self, tmp_path: Path) -> None:
+        """mode init teach creates .state/teach/ but NOT .state/build/."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "teach"])
+            assert result.exit_code == 0
+            teach_dir = tmp_path / ".state" / "teach"
+            build_dir = tmp_path / ".state" / "build"
+            assert teach_dir.is_dir()
+            assert not build_dir.exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_both_creates_both_subtrees(self, tmp_path: Path) -> None:
+        """mode init both creates both .state/build/ and .state/teach/."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "both"])
+            assert result.exit_code == 0
+            build_dir = tmp_path / ".state" / "build"
+            teach_dir = tmp_path / ".state" / "teach"
+            assert build_dir.is_dir()
+            assert teach_dir.is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_build_preserves_mode_json(self, tmp_path: Path) -> None:
+        """mode init build still creates .state/mode.json (existing behavior)."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            mode_json = tmp_path / ".state" / "mode.json"
+            build_dir = tmp_path / ".state" / "build"
+            assert mode_json.exists()
+            assert build_dir.is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_init_build_no_teach_subtree(self, tmp_path: Path) -> None:
+        """mode init build does NOT create .state/teach/."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            teach_dir = tmp_path / ".state" / "teach"
+            assert not teach_dir.exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_reinit_preserves_subtree(self, tmp_path: Path) -> None:
+        """Re-running mode init is idempotent for subtrees."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            build_dir = tmp_path / ".state" / "build"
+            assert build_dir.is_dir()
+            # Re-run with same mode
+            result = runner.invoke(app, ["mode", "init", "build"])
+            assert result.exit_code == 0
+            assert build_dir.is_dir()  # still exists
+        finally:
+            os.chdir(old_cwd)
+
+    def test_rejects_kernel_no_subtrees(self, tmp_path: Path) -> None:
+        """mode init kernel is rejected and creates no subtrees."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "init", "kernel"])
+            assert result.exit_code != 0
+            build_dir = tmp_path / ".state" / "build"
+            teach_dir = tmp_path / ".state" / "teach"
+            assert not build_dir.exists()
+            assert not teach_dir.exists()
+        finally:
+            os.chdir(old_cwd)
