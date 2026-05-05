@@ -15,28 +15,12 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable, Awaitable
-from typing import Literal
 
 import structlog
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
+from src.state_core.schema import ModeConfig
 
 log = structlog.get_logger(__name__)
-
-# ---------------------------------------------------------------------------
-# Mode configuration model
-# ---------------------------------------------------------------------------
-
-
-class ModeConfig(BaseModel):
-    """Persisted mode configuration from ``.state/mode.json``.
-
-    Only ``build``, ``teach``, and ``both`` are storable modes.
-    ``kernel`` is an internal-only mode (valid for ``is_valid_mode()``
-    but not persistable).
-    """
-
-    mode: Literal["build", "teach", "both"]
-
 
 # ---------------------------------------------------------------------------
 # Cached mode config — loaded once at daemon startup

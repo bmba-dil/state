@@ -17,6 +17,8 @@ from pathlib import Path
 
 import pytest
 
+from src.state_core.schema import ModeConfig
+
 
 # ---------------------------------------------------------------------------
 # Helpers — copied pattern from test_daemon_server.py
@@ -78,28 +80,24 @@ class TestModeConfig:
 
     def test_modeconfig_default_model(self) -> None:
         """ModeConfig can be constructed with a valid mode."""
-        from src.state_daemon.middleware import ModeConfig
 
         cfg = ModeConfig(mode="build")
         assert cfg.mode == "build"
 
     def test_modeconfig_invalid_mode_raises(self) -> None:
         """ModeConfig rejects unsupported modes."""
-        from src.state_daemon.middleware import ModeConfig
 
         with pytest.raises(Exception):  # pydantic ValidationError
             ModeConfig(mode="invalid")
 
     def test_modeconfig_both_mode_allowed(self) -> None:
         """ModeConfig accepts 'both' as a valid mode."""
-        from src.state_daemon.middleware import ModeConfig
 
         cfg = ModeConfig(mode="both")
         assert cfg.mode == "both"
 
     def test_modeconfig_teach_mode_allowed(self) -> None:
         """ModeConfig accepts 'teach' as a valid mode."""
-        from src.state_daemon.middleware import ModeConfig
 
         cfg = ModeConfig(mode="teach")
         assert cfg.mode == "teach"
@@ -110,7 +108,6 @@ class TestLoadModeConfig:
 
     def test_load_existing_valid_config(self) -> None:
         """load_mode_config() reads and validates an existing mode.json."""
-        from src.state_daemon.middleware import ModeConfig
 
         # Reset cache to isolate test
         import src.state_daemon.middleware as mod
@@ -253,7 +250,7 @@ class TestModeMiddleware:
 
     async def test_missing_mode_header_returns_400(self) -> None:
         """Missing X-State-Mode header returns HTTP 400."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -267,7 +264,7 @@ class TestModeMiddleware:
 
     async def test_empty_mode_header_returns_400(self) -> None:
         """Empty X-State-Mode header returns HTTP 400."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -280,7 +277,7 @@ class TestModeMiddleware:
 
     async def test_invalid_mode_header_returns_400(self) -> None:
         """Invalid X-State-Mode value returns HTTP 400."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -297,7 +294,7 @@ class TestModeMiddleware:
 
     async def test_mode_both_allows_build_request(self) -> None:
         """Active mode 'both' passes through build requests."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="both")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -308,7 +305,7 @@ class TestModeMiddleware:
 
     async def test_mode_both_allows_teach_request(self) -> None:
         """Active mode 'both' passes through teach requests."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="both")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -322,7 +319,7 @@ class TestModeMiddleware:
 
     async def test_kernel_mode_always_allowed_even_on_mismatch(self) -> None:
         """Kernel mode bypasses mode enforcement entirely."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -337,7 +334,7 @@ class TestModeMiddleware:
 
     async def test_mode_match_allows_write(self) -> None:
         """When request mode matches active mode, writes are allowed."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -347,7 +344,7 @@ class TestModeMiddleware:
 
     async def test_mode_match_teach_allows_write(self) -> None:
         """Teach mode match passes through writes."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="teach")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -361,7 +358,7 @@ class TestModeMiddleware:
 
     async def test_mismatch_get_is_allowed(self) -> None:
         """GET request with mismatched mode still passes through."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -371,7 +368,7 @@ class TestModeMiddleware:
 
     async def test_mismatch_head_is_allowed(self) -> None:
         """HEAD request with mismatched mode still passes through."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -381,7 +378,7 @@ class TestModeMiddleware:
 
     async def test_mismatch_post_health_is_read(self) -> None:
         """POST /health is treated as a read operation, allowed even on mismatch."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -395,7 +392,7 @@ class TestModeMiddleware:
 
     async def test_cross_mode_write_rejected_403(self) -> None:
         """POST with mismatched mode is rejected with HTTP 403."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -411,7 +408,7 @@ class TestModeMiddleware:
 
     async def test_cross_mode_put_rejected_403(self) -> None:
         """PUT with mismatched mode is rejected with 403."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -424,7 +421,7 @@ class TestModeMiddleware:
 
     async def test_cross_mode_patch_rejected_403(self) -> None:
         """PATCH with mismatched mode is rejected with 403."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -436,7 +433,7 @@ class TestModeMiddleware:
 
     async def test_cross_mode_delete_rejected_403(self) -> None:
         """DELETE with mismatched mode is rejected with 403."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -452,7 +449,7 @@ class TestModeMiddleware:
 
     async def test_rejection_payload_contains_all_fields(self) -> None:
         """403 rejection includes error, request_mode, and active_mode."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -470,7 +467,7 @@ class TestModeMiddleware:
 
     async def test_400_rejection_payload(self) -> None:
         """400 rejection includes error, request_mode, and active_mode."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
 
         cfg = ModeConfig(mode="build")
         mw = ModeMiddleware(_make_echo_router(), cfg)
@@ -518,7 +515,7 @@ class TestIntegration:
 
     async def test_matching_mode_allows_rpc_call(self, integration_socket_path: str) -> None:
         """Build-mode RPC with build header passes through middleware."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
         from src.state_daemon.server import DaemonServer
 
         cfg = ModeConfig(mode="build")
@@ -552,7 +549,7 @@ class TestIntegration:
 
     async def test_cross_mode_write_rejected_by_server(self, integration_socket_path: str) -> None:
         """POST with mismatched mode header gets 403 from server."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
         from src.state_daemon.server import DaemonServer
 
         cfg = ModeConfig(mode="build")
@@ -586,7 +583,7 @@ class TestIntegration:
 
     async def test_read_with_mismatched_mode_passes_through(self, integration_socket_path: str) -> None:
         """GET /health with mismatched mode still succeeds."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
         from src.state_daemon.server import DaemonServer
 
         cfg = ModeConfig(mode="build")
@@ -616,7 +613,7 @@ class TestIntegration:
 
     async def test_missing_header_returns_400(self, integration_socket_path: str) -> None:
         """No X-State-Mode header returns 400."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
         from src.state_daemon.server import DaemonServer
 
         cfg = ModeConfig(mode="build")
@@ -647,7 +644,7 @@ class TestIntegration:
 
     async def test_teach_mode_allows_teach_rpc(self, integration_socket_path: str) -> None:
         """Teach-mode RPC with teach header passes through."""
-        from src.state_daemon.middleware import ModeConfig, ModeMiddleware
+        from src.state_daemon.middleware import ModeMiddleware
         from src.state_daemon.server import DaemonServer
 
         cfg = ModeConfig(mode="teach")
