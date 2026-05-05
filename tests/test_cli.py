@@ -594,3 +594,215 @@ class TestModeInit:
             assert not teach_dir.exists()
         finally:
             os.chdir(old_cwd)
+
+
+# ── Mode set command tests ─────────────────────────────────────────────────
+
+
+class TestModeSet:
+    """state mode set command."""
+
+    def test_set_build_creates_mode_json(self, tmp_path: Path) -> None:
+        """mode set build creates .state/mode.json with 0600 permissions."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            # Pre-create .state/ dir (mode set requires existing project;
+            # _isolate_db fixture may have already created it)
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "build"])
+            assert result.exit_code == 0
+            mode_json = tmp_path / ".state" / "mode.json"
+            assert mode_json.exists()
+            content = json.loads(mode_json.read_text())
+            assert content == {"mode": "build"}
+            perms = mode_json.stat().st_mode & 0o777
+            assert perms == 0o600, f"Expected 0o600, got {oct(perms)}"
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_teach(self, tmp_path: Path) -> None:
+        """mode set teach creates .state/mode.json with mode=teach."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "teach"])
+            assert result.exit_code == 0
+            content = json.loads(
+                (tmp_path / ".state" / "mode.json").read_text()
+            )
+            assert content == {"mode": "teach"}
+            perms = (tmp_path / ".state" / "mode.json").stat().st_mode & 0o777
+            assert perms == 0o600
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_both(self, tmp_path: Path) -> None:
+        """mode set both creates .state/mode.json with mode=both."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "both"])
+            assert result.exit_code == 0
+            content = json.loads(
+                (tmp_path / ".state" / "mode.json").read_text()
+            )
+            assert content == {"mode": "both"}
+            perms = (tmp_path / ".state" / "mode.json").stat().st_mode & 0o777
+            assert perms == 0o600
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_rejects_invalid_mode(self, tmp_path: Path) -> None:
+        """mode set with invalid mode exits non-zero."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "invalid"])
+            assert result.exit_code != 0
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_rejects_kernel_mode(self, tmp_path: Path) -> None:
+        """mode set kernel is rejected — kernel not persistable."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "kernel"])
+            assert result.exit_code != 0
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_creates_build_subtree(self, tmp_path: Path) -> None:
+        """mode set build creates .state/build/ directory."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "build"])
+            assert result.exit_code == 0
+            assert (tmp_path / ".state" / "build").is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_teach_creates_teach_subtree_no_build(self, tmp_path: Path) -> None:
+        """mode set teach creates .state/teach/ but not .state/build/."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "teach"])
+            assert result.exit_code == 0
+            assert (tmp_path / ".state" / "teach").is_dir()
+            assert not (tmp_path / ".state" / "build").exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_both_creates_both_subtrees(self, tmp_path: Path) -> None:
+        """mode set both creates .state/build/ and .state/teach/."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "both"])
+            assert result.exit_code == 0
+            assert (tmp_path / ".state" / "build").is_dir()
+            assert (tmp_path / ".state" / "teach").is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_overwrites_existing_mode(self, tmp_path: Path) -> None:
+        """mode set overwrites existing mode.json (build→teach transition)."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            state_dir = tmp_path / ".state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            # Pre-create build mode.json
+            (state_dir / "mode.json").write_text(json.dumps({"mode": "build"}))
+            # Switch to teach
+            result = runner.invoke(app, ["mode", "set", "teach"])
+            assert result.exit_code == 0
+            content = json.loads((state_dir / "mode.json").read_text())
+            assert content == {"mode": "teach"}
+            # .state/teach/ should now exist
+            assert (state_dir / "teach").is_dir()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_idempotent(self, tmp_path: Path) -> None:
+        """mode set with same mode twice exits 0 both times."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result1 = runner.invoke(app, ["mode", "set", "build"])
+            assert result1.exit_code == 0
+            result2 = runner.invoke(app, ["mode", "set", "build"])
+            assert result2.exit_code == 0
+            content = json.loads(
+                (tmp_path / ".state" / "mode.json").read_text()
+            )
+            assert content == {"mode": "build"}
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_sends_sighup_to_daemon(self, tmp_path: Path, monkeypatch) -> None:
+        """mode set sends SIGHUP to daemon pid when daemon is running."""
+        import signal as _signal
+
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            state_dir = tmp_path / ".state"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            # Write a fake daemon pid file
+            fake_pid = 99999
+            (state_dir / "daemon.pid").write_text(
+                json.dumps({"pid": fake_pid, "start_time_ns": 1})
+            )
+
+            # Mock os.kill so we can assert SIGHUP was sent
+            kill_calls: list[tuple[int, int]] = []
+            def _fake_kill(pid: int, sig: int) -> None:
+                kill_calls.append((pid, sig))
+
+            monkeypatch.setattr(os, "kill", _fake_kill)
+
+            result = runner.invoke(app, ["mode", "set", "build"])
+            assert result.exit_code == 0
+
+            # Should have two kill calls: kill(pid, 0) for check, kill(pid, SIGHUP)
+            assert len(kill_calls) >= 1
+            # The last call must be SIGHUP to the fake pid
+            assert kill_calls[-1] == (fake_pid, _signal.SIGHUP)
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_no_sighup_without_daemon(self, tmp_path: Path) -> None:
+        """mode set succeeds without error when daemon pid file is absent."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            (tmp_path / ".state").mkdir(parents=True, exist_ok=True)
+            result = runner.invoke(app, ["mode", "set", "build"])
+            assert result.exit_code == 0
+            assert (tmp_path / ".state" / "mode.json").exists()
+        finally:
+            os.chdir(old_cwd)
+
+    def test_set_creates_state_dir_if_missing(self, tmp_path: Path) -> None:
+        """mode set auto-creates .state/ directory if missing."""
+        old_cwd = os.getcwd()
+        try:
+            os.chdir(str(tmp_path))
+            result = runner.invoke(app, ["mode", "set", "build"])
+            assert result.exit_code == 0
+            assert (tmp_path / ".state").is_dir()
+            assert (tmp_path / ".state" / "mode.json").exists()
+        finally:
+            os.chdir(old_cwd)
