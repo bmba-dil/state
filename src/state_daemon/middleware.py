@@ -8,6 +8,9 @@ defense-in-depth for mode isolation.
 Reads ``.state/mode.json`` from the project root; rejects
 cross-mode write operations with HTTP 403 before they reach
 any JSON-RPC handler.
+
+Also provides ``validate_daemon_path()`` for filesystem-level subtree
+enforcement — the 2nd of 6 mode-isolation defense layers.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from collections.abc import Callable, Awaitable
 
 import structlog
 from pydantic import ValidationError
-from src.state_core.schema import ALL_RECOGNISED_MODES, ModeConfig
+from src.state_core.schema import ALL_RECOGNISED_MODES, ModeConfig, validate_subtree_path
 
 log = structlog.get_logger(__name__)
 
@@ -112,6 +115,34 @@ def is_valid_mode(mode: str) -> bool:
     return mode in _VALID_MODES
 
 
+def validate_daemon_path(path: str | Path) -> None:
+    """Validate that *path* is within the daemon's active-mode subtree.
+
+    Reads the active mode from the cached ``ModeConfig`` (loaded at daemon
+    startup via ``load_mode_config()``).  Delegates to
+    ``state_core.schema.validate_subtree_path()`` for the actual prefix check.
+
+    Call this BEFORE any daemon write operation that touches a mode-specific
+    file.  The call is a hard gate — if it raises ``ValueError``, the write
+    MUST be aborted and the request rejected with a 403.
+
+    Paths in the ``.state/`` root (``mode.json``, ``events.sqlite``, etc.)
+    are always allowed — they are shared kernel files.
+
+    Args:
+        path: A filesystem path (string or ``pathlib.Path``).
+
+    Raises:
+        ValueError: If *path* crosses into the wrong subtree for the
+                    currently active daemon mode.
+                    Also raises if ``get_current_mode()`` returns an
+                    unrecognised value (e.g., empty string or a stale
+                    corrupted config).
+    """
+    active_mode = get_current_mode()
+    validate_subtree_path(path, active_mode)
+
+
 def _is_read_operation(method: str, path: str) -> bool:
     """Heuristic: determine if a request is read-only.
 
@@ -201,6 +232,18 @@ class ModeMiddleware:
 
         # Mismatch + write — reject
         return _reject(403, "cross_mode_rejected", request_mode=request_mode, active_mode=active_mode)
+
+    def validate_path(self, path: str | Path) -> None:
+        """Validate a filesystem path against this middleware's mode config.
+
+        Convenience method for JSON-RPC handlers to call before performing
+        file writes.  Delegates to ``validate_subtree_path()`` using the
+        same ``ModeConfig`` instance the middleware was constructed with.
+
+        Raises:
+            ValueError: If *path* crosses into the wrong subtree.
+        """
+        validate_subtree_path(path, self._config.mode)
 
 
 # ---------------------------------------------------------------------------

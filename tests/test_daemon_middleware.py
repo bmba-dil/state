@@ -692,6 +692,10 @@ class TestValidateDaemonPath:
         Since no load_mode_config() has been called, get_current_mode()
         returns 'both' — which allows all paths.
         """
+        # Reset cached config to simulate fresh daemon boot
+        import src.state_daemon.middleware as mod
+        mod._config = None
+
         from src.state_daemon.middleware import validate_daemon_path
 
         # Default "both" mode allows both subtrees
