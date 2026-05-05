@@ -2,9 +2,9 @@
 
 **Milestone:** v13
 **Phase range:** 115–123
-**Status:** Not started
-**Phases complete:** 0 / 9
-**Last activity:** 2026-04-22 — Migrated to milestone-scoped layout
+**Status:** In progress
+**Phases complete:** 1 / 9
+**Last activity:** 2026-05-05 — Phase 115 MCP server scaffold completed (a39c7c6, b8f19b1)
 
 ---
 
@@ -12,7 +12,7 @@
 
 | Phase | Slug | Status |
 |-------|------|--------|
-| 115 | mcp-server-scaffold | Not started |
+| 115 | mcp-server-scaffold | Done (115-01) |
 | 116 | 15-skeleton-tools-80-token | Not started |
 | 117 | opencode-question-tool-binding-wrapper | Not started |
 | 118 | observation-schema | Not started |
