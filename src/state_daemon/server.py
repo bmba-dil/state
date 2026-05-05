@@ -12,10 +12,13 @@ and keeps the connection open for the duration of the SSE session.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import Callable, Awaitable
 
 import structlog
+
+from state_core.version import HEADER_NAME, check_version_compat
 
 log = structlog.get_logger(__name__)
 
@@ -40,6 +43,7 @@ _HTTP_STATUS_TEXTS: dict[int, str] = {
     403: "Forbidden",
     405: "Method Not Allowed",
     415: "Unsupported Media Type",
+    426: "Upgrade Required",
     500: "Internal Server Error",
 }
 
@@ -131,6 +135,28 @@ class DaemonServer:
                 if ": " in decoded:
                     key, _, value = decoded.partition(": ")
                     headers[key.lower()] = value
+
+            # --- Version handshake (WRK-13) ---
+            # Validate X-State-Plugin-Version on worker-specific endpoints:
+            # POST /hook/* (hook forwarding) and GET /events/subscribe (SSE).
+            # Internal daemon API (POST /) and GET /health are exempt.
+            _worker_endpoint = (
+                (method == "POST" and path.startswith("/hook/"))
+                or (method == "GET" and path.startswith("/events/subscribe"))
+            )
+            if _worker_endpoint:
+                ok, msg = check_version_compat(headers.get(HEADER_NAME))
+                if not ok:
+                    body = _json_error(msg)
+                    writer.write(
+                        _http_response(
+                            426,
+                            [("Content-Type", "application/json")],
+                            body,
+                        )
+                    )
+                    await writer.drain()
+                    return
 
             # --- Read body ---
             content_length = int(headers.get("content-length", "0"))
@@ -264,6 +290,11 @@ class DaemonServer:
             os.unlink(self._socket_path)
         except FileNotFoundError:
             pass
+
+
+def _json_error(message: str) -> bytes:
+    """Build a JSON error body."""
+    return json.dumps({"error": message}).encode()
 
 
 def _http_response(

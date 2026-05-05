@@ -492,3 +492,84 @@ async def test_health_endpoint_works_with_router(integration_socket_path: str) -
         await writer.wait_closed()
     finally:
         await srv.stop()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Version handshake (Phase 064 / WRK-13)
+# ---------------------------------------------------------------------------
+
+
+async def test_post_missing_version_header_returns_426(server, socket_path: str) -> None:
+    """POST /hook/* without X-State-Plugin-Version returns 426 Upgrade Required."""
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    writer.write(
+        _raw_request(
+            "POST",
+            "/hook/test.hook",
+            {"Content-Type": "application/json"},
+            b'{"test": true}',
+        )
+    )
+    await writer.drain()
+    status, _, body = await _read_response(reader)
+    assert status == 426
+    data = __import__("json").loads(body)
+    assert "error" in data
+    writer.close()
+    await writer.wait_closed()
+
+
+async def test_post_incompatible_version_returns_426(server, socket_path: str) -> None:
+    """POST /hook/* with incompatible X-State-Plugin-Version returns 426."""
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    writer.write(
+        _raw_request(
+            "POST",
+            "/hook/test.hook",
+            {
+                "Content-Type": "application/json",
+                "X-State-Plugin-Version": "0.2.0",
+            },
+            b'{"test": true}',
+        )
+    )
+    await writer.drain()
+    status, _, body = await _read_response(reader)
+    assert status == 426
+    data = __import__("json").loads(body)
+    assert "incompatible" in data["error"].lower()
+    writer.close()
+    await writer.wait_closed()
+
+
+async def test_post_compatible_version_routes(server, socket_path: str) -> None:
+    """POST /hook/* with compatible X-State-Plugin-Version routes normally."""
+    body = b'{"hello": "world"}'
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    writer.write(
+        _raw_request(
+            "POST",
+            "/hook/test.hook",
+            {
+                "Content-Type": "application/json",
+                "X-State-Plugin-Version": "0.1.0",
+            },
+            body,
+        )
+    )
+    await writer.drain()
+    status, _, resp_body = await _read_response(reader)
+    assert status == 200
+    writer.close()
+    await writer.wait_closed()
+
+
+async def test_health_no_version_header_ok(server, socket_path: str) -> None:
+    """GET /health without version header still returns 200 (backward compat)."""
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    writer.write(_raw_request("GET", "/health"))
+    await writer.drain()
+    status, _, _ = await _read_response(reader)
+    assert status == 200
+    writer.close()
+    await writer.wait_closed()
