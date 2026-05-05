@@ -27,7 +27,7 @@ from state_core.sync_mirror import SyncEventMirror
 
 from src.state_daemon.auth_manager import AuthRefreshLoop, AuthStatusHandler
 from src.state_daemon.logging import configure_daemon_logging
-from src.state_daemon.middleware import ModeMiddleware, load_mode_config
+from src.state_daemon.middleware import ModeMiddleware, load_mode_config, get_current_mode
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.recovery import CrashRecovery, InFlightStep
 from src.state_daemon.router import JsonRpcRouter
@@ -42,6 +42,9 @@ _server: DaemonServer | None = None
 
 # Module-level auth refresh loop reference for graceful shutdown.
 _auth_refresh: AuthRefreshLoop | None = None
+
+# Event store reference — set during startup so the SIGHUP handler can emit events.
+_event_store: SqliteEventStore | None = None
 
 # Pid file path — set during startup so the shutdown handler can clean it up.
 _pid_path: str | None = None
@@ -121,6 +124,8 @@ async def startup() -> None:
     log.info("startup: shared httpx client created", max_connections=100)
 
     store = SqliteEventStore()
+    global _event_store
+    _event_store = store
     mirror = SyncEventMirror()
 
     # Step 0.5 (Phase 021 / AUTH-11): first-run import from opencode auth.json.
@@ -323,9 +328,11 @@ async def _build_in_flight_steps(step_ids: list[str]) -> list[InFlightStep]:
 def _schedule_mode_reload() -> None:
     """Schedule mode config reload from a SIGHUP signal handler.
 
-    Re-reads .state/mode.json and logs the new mode.  The global
-    _config in middleware.py is updated so all subsequent requests
-    use the new mode — no daemon restart needed.
+    Re-reads .state/mode.json and, if the mode actually changed,
+    emits a state.mode.activated event through the event store
+    so SSE subscribers (plugin, workers) can hot-reload their
+    MCP registrations.  No event is emitted when the mode is
+    unchanged (no-op SIGHUP).
 
     Must be a plain function because asyncio signal handlers are
     called synchronously from the event loop.
@@ -333,12 +340,63 @@ def _schedule_mode_reload() -> None:
     if _project_root is not None:
         log.info("daemon.reload.signal_received", signal="SIGHUP")
         try:
+            old_mode = get_current_mode()
             new_config = load_mode_config(_project_root)
-            log.info("daemon.reload.complete", new_mode=new_config.mode)
+            new_mode = new_config.mode
+            if old_mode != new_mode:
+                log.info(
+                    "daemon.reload.mode_changed",
+                    old_mode=old_mode,
+                    new_mode=new_mode,
+                )
+                if _event_store is not None:
+                    asyncio.create_task(_emit_mode_event(old_mode, new_mode))
+                else:
+                    log.warning(
+                        "daemon.reload.no_event_store",
+                        old_mode=old_mode,
+                        new_mode=new_mode,
+                    )
+            else:
+                log.debug(
+                    "daemon.reload.mode_unchanged",
+                    mode=new_mode,
+                )
         except Exception as exc:
             log.error("daemon.reload.failed", error=str(exc))
     else:
         log.warning("daemon.reload.no_project_root", signal="SIGHUP")
+
+
+async def _emit_mode_event(old_mode: str, new_mode: str) -> None:
+    """Emit state.mode.activated event through the event store.
+
+    This is called as a background task from the SIGHUP handler
+    when the mode changes. SSE fan-out is automatic via the
+    post-commit callback wired to SseBus in startup().
+
+    Args:
+        old_mode: The mode before the change (from get_current_mode()).
+        new_mode: The mode after the change (from the reloaded ModeConfig).
+    """
+    global _event_store
+    if _event_store is None:
+        log.warning("daemon.mode_event.no_store")
+        return
+    from src.state_core.schema import ModeActivatedData
+    data = ModeActivatedData(old_mode=old_mode, new_mode=new_mode)
+    await _event_store.append(
+        aggregate_type="mode",
+        aggregate_id=f"mode-{new_mode}",
+        event_type="state.mode.activated",
+        data=data.model_dump(),
+        mode="kernel",
+    )
+    log.info(
+        "daemon.mode_event.emitted",
+        old_mode=old_mode,
+        new_mode=new_mode,
+    )
 
 
 def _schedule_shutdown() -> None:

@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -1183,16 +1184,32 @@ class TestModeReload:
 class TestModeActivatedEvent:
     """Tests for state.mode.activated event emission via _emit_mode_event()."""
 
+    async def _setup_store(self, tmp_path: Path, monkeypatch) -> "SqliteEventStore":
+        """Create an isolated event store with migrations applied.
+
+        Returns a SqliteEventStore ready for appending and reading events.
+        """
+        from src.state_core.events import SqliteEventStore
+        from src.state_core.migrations import migrate
+
+        db_path = str(tmp_path / ".state" / "events.sqlite")
+        monkeypatch.setenv("STATE_DB_PATH", db_path)
+
+        # Copy migrations to temp dir so migrate() can find them
+        migrations_src = Path.cwd() / ".state" / "migrations"
+        migrations_dst = tmp_path / ".state" / "migrations"
+        if migrations_src.exists():
+            shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+        # Run migrations to create the events table
+        await migrate()
+
+        return SqliteEventStore()
+
     @pytest.mark.asyncio
     async def test_emit_mode_event_writes_to_store(self, tmp_path: Path, monkeypatch) -> None:
         """_emit_mode_event() appends a state.mode.activated event to the store."""
-        from src.state_core.events import SqliteEventStore
-
-        # Use temp directory for isolated SQLite
-        db_path = str(tmp_path / "events.sqlite")
-        monkeypatch.setenv("STATE_DB_PATH", db_path)
-
-        store = SqliteEventStore()
+        store = await self._setup_store(tmp_path, monkeypatch)
 
         # Patch the module-level _event_store so _emit_mode_event can use it
         import src.state_daemon.orchestrator as orch
@@ -1219,12 +1236,7 @@ class TestModeActivatedEvent:
     @pytest.mark.asyncio
     async def test_emit_mode_event_aggregate_id_per_new_mode(self, tmp_path: Path, monkeypatch) -> None:
         """aggregate_id follows the pattern 'mode-{new_mode}'."""
-        from src.state_core.events import SqliteEventStore
-
-        db_path = str(tmp_path / "events.sqlite")
-        monkeypatch.setenv("STATE_DB_PATH", db_path)
-
-        store = SqliteEventStore()
+        store = await self._setup_store(tmp_path, monkeypatch)
 
         import src.state_daemon.orchestrator as orch
         orch._event_store = store
@@ -1240,12 +1252,7 @@ class TestModeActivatedEvent:
     @pytest.mark.asyncio
     async def test_emit_mode_event_mode_is_kernel(self, tmp_path: Path, monkeypatch) -> None:
         """Event is emitted with mode='kernel' for cross-mode visibility."""
-        from src.state_core.events import SqliteEventStore
-
-        db_path = str(tmp_path / "events.sqlite")
-        monkeypatch.setenv("STATE_DB_PATH", db_path)
-
-        store = SqliteEventStore()
+        store = await self._setup_store(tmp_path, monkeypatch)
 
         import src.state_daemon.orchestrator as orch
         orch._event_store = store
@@ -1268,12 +1275,7 @@ class TestModeActivatedEvent:
     @pytest.mark.asyncio
     async def test_emit_mode_event_preserves_fields(self, tmp_path: Path, monkeypatch) -> None:
         """_emit_mode_event() preserves all required fields in the event."""
-        from src.state_core.events import SqliteEventStore
-
-        db_path = str(tmp_path / "events.sqlite")
-        monkeypatch.setenv("STATE_DB_PATH", db_path)
-
-        store = SqliteEventStore()
+        store = await self._setup_store(tmp_path, monkeypatch)
 
         import src.state_daemon.orchestrator as orch
         orch._event_store = store
