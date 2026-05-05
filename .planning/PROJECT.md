@@ -32,6 +32,7 @@ concurrency model.
 - ✓ **State daemon with always-on user service, unix-socket HTTP server, SSE event bus, mode-enforcement middleware, pid-file, crash recovery, and launchd/systemd unit installer** — v6 (2026-05-04): 10 phases, 250+ tests, DAE-01/DAE-03..DAE-09 satisfied, P0-15 closed.
 - ✓ **Provider routing via litellm with direct-Anthropic SDK escape hatch, OAuth stealth bypass guard, model profiles, cost accounting, thinking budget** — v3 (2026-05-04): 7 phases (023-029), 14 plans, 494 tests, 6/9 requirements satisfied (PRV-03/PRV-06/PRV-07 via implementation, PRV-09/PRV-10 deferred in 030/031).
 - ✓ **Per-Slice worktree with opencode-HTTP + pygit2 fallback, transactional bootstrap, orphan GC, Step/Slice snapshots, prefix-only revert CLI** — v4 (2026-05-04): 9 phases (032-040), 55 tests, 9/9 requirements satisfied.
+- ✓ **Opencode plugin server hooks (10/11) — `@state/opencode-plugin` TS package with chat.message, tool.execute.before/after, permission.ask, chat.system.transform, session.compacting, chat.params+headers, command.execute.before, shell.env hooks; bundled via bun build** — v8 (2026-05-05): 12 phases (068-079), 10/11 HOOK requirements satisfied (HOOK-05 event hook deferred — not in opencode Hooks type v1.14.35).
 
 ### Active
 
@@ -41,8 +42,8 @@ concurrency model.
       extended thinking and fine-grained cache control — v3 shipped (030/031 deferred)
 - [ ] Two independent MCP servers: `state-build` and `state-teach`, registered
       independently in opencode
-- [ ] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
-      hook shim and TUI extensions (sidebar, routes, dialogs)
+- [~] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
+      hook shim and TUI extensions (sidebar, routes, dialogs) — server hooks shipped v8; TUI pending in v9
 - [ ] Four-tier planning hierarchy: **Arc → Phase → Slice → Step**, with the
       full discuss/plan/execute/verify cycle at Step level
 - [x] Per-Slice worktree isolation for concurrent work (opencode worktree

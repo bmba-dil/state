@@ -1,5 +1,25 @@
 # MILESTONES: state
 
+## v8 Plugin Server Hooks (Shipped: 2026-05-05)
+
+**Phases completed:** 0 phases, 0 plans, 0 tasks
+
+**Key accomplishments:**
+
+- (none recorded)
+
+---
+
+## v7 Per-Session Worker (Shipped: 2026-05-05)
+
+**Phases completed:** 0 phases, 0 plans, 0 tasks
+
+**Key accomplishments:**
+
+- (none recorded)
+
+---
+
 ## v5 DAG Scheduler (Shipped: 2026-05-05)
 
 **Phases completed:** 0 phases, 0 plans, 0 tasks
