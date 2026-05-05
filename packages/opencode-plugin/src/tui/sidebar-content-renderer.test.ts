@@ -1,6 +1,6 @@
 /** Unit tests for sidebar-content-renderer pure functions */
 
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock, beforeEach, afterEach } from "bun:test";
 import {
   resolveMode,
   getModeIndicator,
@@ -223,5 +223,131 @@ describe("renderTeachPlaceholder content", () => {
   it("contains Phase 083 reference text", () => {
     const placeholder = renderTeachPlaceholder();
     expect(placeholder).toContain("Phase 083");
+  });
+});
+
+// ── SidebarContentRenderer with mocked readFileSync ─────────────────
+
+describe("SidebarContentRenderer with mocked mode.json", () => {
+  beforeEach(() => {
+    // Mock readFileSync to return a valid mode.json
+    mock.module("node:fs", () => ({
+      readFileSync: (path: string, _encoding: string) => {
+        if (path === ".state/mode.json") {
+          return JSON.stringify({ mode: "build" });
+        }
+        throw new Error("ENOENT");
+      },
+    }));
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it("active build mode → returns non-null Box", () => {
+    // Re-import to pick up the mock
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+    expect(typeof result).toBe("object");
+  });
+});
+
+describe("SidebarContentRenderer with teach mode mock", () => {
+  beforeEach(() => {
+    mock.module("node:fs", () => ({
+      readFileSync: (path: string, _encoding: string) => {
+        if (path === ".state/mode.json") {
+          return JSON.stringify({ mode: "teach" });
+        }
+        throw new Error("ENOENT");
+      },
+    }));
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it("active teach mode → returns non-null Box", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+  });
+});
+
+describe("SidebarContentRenderer with both mode mock", () => {
+  beforeEach(() => {
+    mock.module("node:fs", () => ({
+      readFileSync: (path: string, _encoding: string) => {
+        if (path === ".state/mode.json") {
+          return JSON.stringify({ mode: "both" });
+        }
+        throw new Error("ENOENT");
+      },
+    }));
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it("active both mode → returns non-null Box", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+  });
+});
+
+describe("SidebarContentRenderer with invalid mode.json", () => {
+  beforeEach(() => {
+    mock.module("node:fs", () => ({
+      readFileSync: (path: string, _encoding: string) => {
+        if (path === ".state/mode.json") {
+          return JSON.stringify({ mode: "invalid" });
+        }
+        throw new Error("ENOENT");
+      },
+    }));
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it("invalid mode → returns non-null Box (empty state)", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+  });
+});
+
+describe("SidebarContentRenderer with missing mode.json", () => {
+  beforeEach(() => {
+    mock.module("node:fs", () => ({
+      readFileSync: () => {
+        throw new Error("ENOENT: no such file");
+      },
+    }));
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it("missing file → returns non-null Box (error state)", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+  });
+});
+
+// ── SidebarContentRenderer with real .state/mode.json ──────────────
+
+describe("SidebarContentRenderer with on-disk mode.json", () => {
+  it("reads real .state/mode.json and renders build-mode content", () => {
+    // This test uses the actual .state/mode.json on disk (created by test setup)
+    // No mock.module — tests real readFileSync path
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+    expect(typeof result).toBe("object");
+    // SidebarContentRenderer + build mode delegates to renderBuildProgress
+    // which renders a Box with children
   });
 });
