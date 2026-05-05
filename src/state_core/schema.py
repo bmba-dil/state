@@ -6,7 +6,9 @@ ARCHITECTURE.md section 5.3. Every model uses extra="forbid" for strictness.
 
 from __future__ import annotations
 
+import os
 import re
+from pathlib import Path
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -27,6 +29,15 @@ RUNTIME_MODES: frozenset[str] = frozenset({"build", "teach", "kernel"})
 
 ALL_RECOGNISED_MODES: frozenset[str] = PERSISTABLE_MODES | RUNTIME_MODES
 """Union of persistable and runtime modes — used by header-validation middleware."""
+
+BUILD_SUBTREE: str = ".state/build"
+"""Canonical build-mode subtree directory."""
+
+TEACH_SUBTREE: str = ".state/teach"
+"""Canonical teach-mode subtree directory."""
+
+SUBTREE_DIRS: dict[str, str] = {"build": BUILD_SUBTREE, "teach": TEACH_SUBTREE}
+"""Mapping from persistable mode value to its subtree directory."""
 
 AggregateType = Literal[
     "arc",
@@ -152,6 +163,53 @@ def validate_mode_config(data: dict[str, object]) -> ModeConfig:
         return ModeConfig(**data)
     except ValidationError as exc:
         raise ValueError(f"Invalid mode config: {exc}") from exc
+
+
+def validate_subtree_path(path: str | Path, mode: str) -> None:
+    """Validate that *path* is within the allowed subtree for *mode*.
+
+    When *mode* is ``"build"``, the path must NOT start with ``.state/teach``.
+    When *mode* is ``"teach"``, the path must NOT start with ``.state/build``.
+    When *mode* is ``"both"``, all paths are allowed.
+
+    Paths in the ``.state/`` root (e.g. ``.state/mode.json``,
+    ``.state/events.sqlite``) are always allowed — they are shared
+    kernel-level files, not mode-specific.
+
+    Args:
+        path: A filesystem path (string or ``pathlib.Path``).
+        mode: The active mode (``"build"``, ``"teach"``, or ``"both"``).
+
+    Raises:
+        ValueError: If *mode* is unrecognised or *path* crosses into
+                    the wrong subtree.
+    """
+    # Normalize path: convert Path → str, replace OS separators, strip leading ./
+    path_str = str(Path(path)).replace(os.sep, "/")
+    if path_str.startswith("./"):
+        path_str = path_str[2:]
+
+    if mode not in ("build", "teach", "both"):
+        raise ValueError(f"Unrecognised mode: {mode!r}")
+
+    if mode == "both":
+        return  # no restriction — both subtrees are accessible
+
+    # Shared .state/ root files (not in any subtree) are always allowed.
+    # Examples: .state/mode.json, .state/events.sqlite, .state/auth.json
+    if path_str.startswith(".state/") and not path_str.startswith(".state/build") and not path_str.startswith(".state/teach"):
+        return
+
+    # Subtree boundary enforcement
+    if mode == "build" and (path_str.startswith(".state/teach/") or path_str == ".state/teach"):
+        raise ValueError(
+            f"Path {path_str!r} is in teach subtree but mode is build"
+        )
+
+    if mode == "teach" and (path_str.startswith(".state/build/") or path_str == ".state/build"):
+        raise ValueError(
+            f"Path {path_str!r} is in build subtree but mode is teach"
+        )
 
 
 # -- ULID validation -------------------------------------------------------------
