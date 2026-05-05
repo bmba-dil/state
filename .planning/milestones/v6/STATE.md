@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v3
-milestone_name: — Provider Routing + Model Profiles
-status: complete
-last_updated: "2026-05-04T12:25:00.000Z"
-last_activity: 2026-05-05 — Phase 058 completed (cli-state-daemon-start-stop)
+milestone: v6
+milestone_name: State Daemon (HTTP + SSE + Mode Middleware)
+status: shipped
+last_updated: "2026-05-04T23:00:00.000Z"
+last_activity: 2026-05-04 — All 10 phases (050–059) complete. Audit passed.
 ---
 
 # STATE: v6 — State Daemon (HTTP + SSE + Mode Middleware)

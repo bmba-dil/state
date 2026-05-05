@@ -6,7 +6,7 @@ import asyncio
 import tomllib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -387,6 +387,61 @@ def _inspect_for_cancelled(exc: BaseException) -> None:
     if isinstance(exc, (ExceptionGroup, BaseExceptionGroup)):
         for sub_exc in exc.exceptions:
             _inspect_for_cancelled(sub_exc)
+
+
+# -- Critical Path Method (CPM) ---------------------------------------------
+
+
+def _critical_path_nodes(
+    nodes: list[Node],
+    edges: list[Edge],
+    *,
+    edge_kinds: set[EdgeKind] | None = None,
+) -> set[str]:
+    """Compute nodes on the critical path using CPM with DP on topological order.
+
+    Args:
+        nodes: All DAG nodes.
+        edges: All DAG edges.
+        edge_kinds: Edge kinds to include in path computation.  Defaults to
+            ``{"blocks", "data"}`` — soft edges are excluded.
+
+    Returns:
+        Set of node IDs on the critical path (longest chains through the DAG).
+    """
+    raise NotImplementedError
+
+
+def detect_priority_inversion(
+    nodes: list[Node], edges: list[Edge]
+) -> list[dict[str, Any]]:
+    """Detect frontier nodes blocked only by soft edges on the critical path.
+
+    Args:
+        nodes: All DAG nodes.
+        edges: All DAG edges.
+
+    Returns:
+        List of dicts with keys ``node_id``, ``soft_edges``, ``critical_path``.
+        Empty list if no priority inversion detected.
+    """
+    raise NotImplementedError
+
+
+def detect_silent_deadlock(
+    nodes: list[Node], edges: list[Edge]
+) -> dict[str, Any] | None:
+    """Detect when frontier is empty and ALL in-progress nodes are blocked.
+
+    Args:
+        nodes: All DAG nodes.
+        edges: All DAG edges.
+
+    Returns:
+        Dict with keys ``deadlocked_nodes``, ``missing_predecessors``,
+        ``descoped_predecessors`` if deadlock detected; ``None`` otherwise.
+    """
+    raise NotImplementedError
 
 
 # -- DAG Scheduler skeleton (phases 042-049) -----------------------------------

@@ -1,10 +1,19 @@
+---
+gsd_state_version: 1.0
+milestone: v3
+milestone_name: — Provider Routing + Model Profiles
+status: planning
+last_updated: "2026-05-05T02:03:27.617Z"
+last_activity: 2026-05-05
+---
+
 # STATE: v5 — DAG Scheduler
 
 **Milestone:** v5
 **Phase range:** 041–049
-**Status:** Not started
+**Status:** Ready to plan
 **Phases complete:** 0 / 9
-**Last activity:** 2026-04-22 — Migrated to milestone-scoped layout
+**Last activity:** 2026-05-05
 
 ---
 

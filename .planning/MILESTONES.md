@@ -1,5 +1,24 @@
 # MILESTONES: state
 
+## v6 State Daemon (Shipped: 2026-05-04)
+
+**Phases completed:** 10 phases, 10 plans
+**Commits:** 27 (daemon dir) | **Lines of Python (daemon):** ~3,443 | **Tests:** ~250
+
+**Key accomplishments:**
+
+- Unix socket HTTP server with JSON-RPC 2.0 router and pluggable route handlers
+- Platform-aware pid-file with stale process detection (P0-15 closed)
+- Mode-enforcement HTTP middleware — canonical gate for build/teach isolation (6th defense-in-depth layer)
+- SSE event broadcast bus with multi-client fan-out and mode filtering
+- launchd plist + systemd user unit generator with `state daemon install|uninstall` CLI
+- Crash recovery replaying event log, rebuilding projections, and detecting in-flight Steps
+- Full daemon lifecycle CLI: start/stop/restart/status/logs
+- Auth credential refresh loop + round-robin manager + GET /auth/status (token-safe)
+- DAE-01, DAE-03..DAE-09 satisfied (DAE-02 deferred to v7)
+
+---
+
 ## v2 Auth Coverage (Shipped: 2026-05-03)
 
 **Phases completed:** 15 phases, 46 plans, 4 tasks
@@ -90,11 +109,11 @@
 | Milestone | Phases done | Status |
 |---|---|---|
 | v1 Event Store Foundation | 11/11 | **Complete** — Shipped 2026-04-26, merged to `main` 2026-04-28 |
-| v2 Auth Coverage (5 Methods + Multi-Cred) | 0/12 | **Active** — Phase 011 next |
+| v2 Auth Coverage (5 Methods + Multi-Cred) | 15/15 | **Complete** — Shipped 2026-05-03 |
 | v3 Provider Routing + Model Profiles | 0/9 | Not started |
 | v4 Worktree + Snapshot Service | 0/9 | Not started |
 | v5 DAG Scheduler | 0/9 | Not started |
-| v6 State Daemon (HTTP + SSE + Mode Middleware) | 0/10 | Not started |
+| v6 State Daemon (HTTP + SSE + Mode Middleware) | 10/10 | **Complete** — Shipped 2026-05-04 |
 | v7 Per-Session Worker | 0/8 | Not started |
 | v8 Plugin Server Hooks (all 9) | 0/12 | Not started |
 | v9 Plugin TUI Bundle | 0/9 | Not started |
@@ -116,6 +135,6 @@
 | v25 Migration & Import | 0/8 | Not started |
 | v26 Portability Shims | 0/8 | Not started |
 | v27 Release & Packaging | 0/10 | Not started |
-| **TOTAL** | **11/256** | — |
+| **TOTAL** | **36/256** | — |
 
 *See `_archived/ROADMAP.md` for the pre-migration monolithic roadmap including DAG, tier boundaries, and revision history.*
