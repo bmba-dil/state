@@ -735,6 +735,18 @@ class SchedulerDeadlockEvent(EventEnvelope):
     data: SchedulerDeadlockData  # type: ignore[assignment]
 
 
+class ProviderRequestEvent(EventEnvelope):
+    type: Literal["state.provider.request"] = "state.provider.request"
+    aggregate_type: Literal["provider"] = "provider"
+    data: ProviderRequestData  # type: ignore[assignment]
+
+
+class ProviderResponseEvent(EventEnvelope):
+    type: Literal["state.provider.response"] = "state.provider.response"
+    aggregate_type: Literal["provider"] = "provider"
+    data: ProviderResponseData  # type: ignore[assignment]
+
+
 # -- Aggregate discriminated unions ------------------------------------------------
 
 
@@ -794,8 +806,13 @@ SchedulerEvent = Annotated[
     Field(discriminator="type"),
 ]
 
+ProviderEvent = Annotated[
+    ProviderRequestEvent | ProviderResponseEvent,
+    Field(discriminator="type"),
+]
+
 AnyStateEvent = Annotated[
-    ArcEvent | PhaseEvent | SliceEvent | StepEvent | ConceptEvent | DrillEvent | DecisionEvent | AuthEvent | ModeEvent | SchedulerEvent,
+    ArcEvent | PhaseEvent | SliceEvent | StepEvent | ConceptEvent | DrillEvent | DecisionEvent | AuthEvent | ModeEvent | ProviderEvent | SchedulerEvent,
     Field(discriminator="type"),
 ]
 
