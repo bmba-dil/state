@@ -2,6 +2,7 @@
 
 import type { TuiPlugin, TuiSlotPlugin } from "@opencode-ai/plugin/tui";
 import type { TuiPluginModule as TuiPluginModuleType } from "@opencode-ai/plugin/tui";
+import { log } from "./logger.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -28,14 +29,17 @@ function createTuiPlugin(): TuiPlugin {
     const slotPlugin: TuiSlotPlugin = {
       order: 100,
       setup() {
-        console.log(
-          `[@state/opencode-plugin/tui] TUI slot plugins initialized (order=100)`
-        );
+        log({
+          source: "@state/opencode-plugin/tui",
+          event: "tui.slots.setup",
+          order: 100,
+        });
       },
       dispose() {
-        console.log(
-          `[@state/opencode-plugin/tui] TUI slot plugins disposed`
-        );
+        log({
+          source: "@state/opencode-plugin/tui",
+          event: "tui.slots.dispose",
+        });
       },
       slots: {
         sidebar_content(_ctx, _props) {
@@ -63,14 +67,12 @@ function createTuiPlugin(): TuiPlugin {
     // opencode's event bus relays daemon SSE as typed events.
     // Phases 082–085 subscribe to specific event types here.
     const unsubStatus = api.event.on("session.status", (event) => {
-      console.log(
-        JSON.stringify({
-          source: "@state/opencode-plugin/tui",
-          type: "event.session.status",
-          sessionID: event.properties.sessionID,
-          status: event.properties.status,
-        })
-      );
+      log({
+        source: "@state/opencode-plugin/tui",
+        type: "event.session.status",
+        sessionID: event.properties.sessionID,
+        status: event.properties.status,
+      });
     });
 
     // Cleanup all subscriptions on plugin dispose

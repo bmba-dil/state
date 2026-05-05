@@ -1,6 +1,7 @@
 /** Tool execute after hook — output verification + observation */
 
 import type { Hooks } from "@opencode-ai/plugin";
+import { log } from "../logger.js";
 
 type StateMode = "build" | "teach" | "kernel";
 
@@ -14,16 +15,14 @@ function verifyBuildOutput(
   tool: string,
   output: string
 ): { matches: boolean; reason?: string } {
-  console.log(
-    JSON.stringify({
-      source: "@state/opencode-plugin",
-      hook: "tool.execute.after",
-      type: "build.verify",
-      tool,
-      outputPreview: output.slice(0, 500),
-      timestamp: Date.now(),
-    })
-  );
+  log({
+    source: "@state/opencode-plugin",
+    hook: "tool.execute.after",
+    type: "build.verify",
+    tool,
+    outputPreview: output.slice(0, 500),
+    timestamp: Date.now(),
+  });
   return { matches: true };
 }
 
@@ -31,16 +30,14 @@ function recordTeachObservation(
   tool: string,
   output: string
 ): void {
-  console.log(
-    JSON.stringify({
-      source: "@state/opencode-plugin",
-      hook: "tool.execute.after",
-      type: "teach.observation",
-      tool,
-      outputPreview: output.slice(0, 500),
-      timestamp: Date.now(),
-    })
-  );
+  log({
+    source: "@state/opencode-plugin",
+    hook: "tool.execute.after",
+    type: "teach.observation",
+    tool,
+    outputPreview: output.slice(0, 500),
+    timestamp: Date.now(),
+  });
 }
 
 export const toolExecuteAfter: NonNullable<
