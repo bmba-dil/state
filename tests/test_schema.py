@@ -302,9 +302,23 @@ class TestDrillDataModels:
 class TestModeDecisionAuthDataModels:
     """Tests for Mode, Decision, and Auth aggregate data models."""
 
-    def test_mode_activated_data(self) -> None:
-        d = ModeActivatedData(mode_value="teach")
-        assert d.mode_value == "teach"
+    def test_mode_activated_data_old_mode_new_mode(self) -> None:
+        """ModeActivatedData accepts old_mode and new_mode fields."""
+        d = ModeActivatedData(old_mode="build", new_mode="teach")
+        assert d.old_mode == "build"
+        assert d.new_mode == "teach"
+
+    def test_mode_activated_data_rejects_mode_value(self) -> None:
+        """ModeActivatedData rejects the old mode_value field name."""
+        with pytest.raises(ValidationError):
+            ModeActivatedData(mode_value="build")
+
+    def test_mode_activated_data_rejects_extra_fields(self) -> None:
+        """ModeActivatedData with extra=forbid rejects unknown fields."""
+        with pytest.raises(ValidationError):
+            ModeActivatedData(
+                old_mode="build", new_mode="teach", extra_field=1
+            )
 
     def test_decision_asked_data(self) -> None:
         d = DecisionAskedData(
