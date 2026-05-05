@@ -5,6 +5,7 @@ import type { TuiPluginModule as TuiPluginModuleType } from "@opencode-ai/plugin
 import { log } from "./logger.js";
 import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
 import { setupBuildProgress } from "./tui/build-progress.js";
+import { setupTeachConcept } from "./tui/teach-concept.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -14,6 +15,7 @@ import { setupBuildProgress } from "./tui/build-progress.js";
  * 2. Registers placeholder slot renderers for all four TUI slots
  *    (phases 081–088 replace these with real components)
  * 3. Wires BuildProgress event subscriptions (Phase 082)
+ * 4. Wires TeachConcept event subscriptions (Phase 083)
  *
  * All side effects are cleaned up via api.lifecycle.onDispose.
  */
@@ -69,6 +71,10 @@ function createTuiPlugin(): TuiPlugin {
     // Phase 082: BuildProgress — subscribes to daemon SSE via api.event bus.
     // State is updated by event handlers; renderBuildProgress() reads it each frame.
     setupBuildProgress(api);
+
+    // Phase 083: TeachConcept — subscribes to daemon SSE for connectivity heartbeat.
+    // State is updated by event handlers; renderTeachConcept() reads it each frame.
+    setupTeachConcept(api);
   };
 }
 

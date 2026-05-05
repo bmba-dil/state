@@ -2,7 +2,8 @@
  * sidebar-content-renderer — mode-aware renderer for the `sidebar_content` TUI slot.
  *
  * Reads `.state/mode.json` at render time and conditionally produces one of four
- * states: loading, empty, active, or error. Uses the @opentui/core constructs API
+ * states: loading, empty, active, or error. Active state delegates to Phase 082
+ * BuildProgress (build mode) and Phase 083 TeachConcept (teach mode). Uses the @opentui/core constructs API
  * (Box, Text) to build renderable trees directly — no JSX required.
  *
  * Exports:
@@ -15,6 +16,7 @@
 import { Box, Text, createTextAttributes } from "@opentui/core";
 import { readFileSync } from "node:fs";
 import { renderBuildProgress } from "./build-progress.js";
+import { renderTeachConcept } from "./teach-concept.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -289,13 +291,13 @@ function renderActiveState(mode: ResolvedMode): ReturnType<typeof Box> {
     return renderBuildProgress();
   }
   if (mode === "teach") {
-    return placeholderBox(renderTeachPlaceholder());
+    return renderTeachConcept();
   }
-  // both: real BuildProgress + TeachConcept placeholder (Phase 083)
+  // both: real BuildProgress + real TeachConcept (Phase 082 + Phase 083)
   return Box(
     { flexDirection: "column" },
     renderBuildProgress(),
-    Box({ marginTop: 1 }, placeholderBox(renderTeachPlaceholder())),
+    renderTeachConcept(),
   );
 }
 
