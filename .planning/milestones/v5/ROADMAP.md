@@ -83,7 +83,7 @@ Plans:
 **Depends on:** 047
 **Requirements:** DAG-05, DAG-06
 **Parallelizable:** yes
-**Plans:** 1 plan (not started)
+**Plans:** 0/1 plans complete
 
 Plans:
 - [ ] 048-01-PLAN.md — Detection functions (priority inversion + silent deadlock), scheduler event schema, post-tick diagnostic integration

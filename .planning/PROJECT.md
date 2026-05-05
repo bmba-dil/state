@@ -28,12 +28,13 @@ concurrency model.
 
 - ✓ **Dual-write event store (opencode SyncEvent + `.state/events.sqlite`)** — v1 (2026-04-26): 11 phases, 321 tests, deterministic replay verified against 10K-event golden fixture.
 - ✓ **Auth layer covering Anthropic OAuth (Claude Code stealth), Gemini CLI free-tier OAuth, Antigravity OAuth, Copilot device-code, and plain API keys — all five methods on day one** — v2 (2026-05-03): 15 phases (12 + 3 gap-closure), 13/13 AUTH-XX requirements satisfied, 9/9 in-scope P0 pitfalls closed, byte-for-byte stealth header parity vs `state-inputs/claude-oauth.md`.
+- ✓ **Pure-Python DAG scheduler (~300 LOC) with typed edges, topological sort, cycle detection, frontier calculator, TaskGroup dispatcher, CancelledError watchdog, reactive event-driven triggers, and `state dag show` CLI** — v5 (2026-05-04): 9 phases, 130 tests, 7/7 DAG requirements satisfied, P0-16 closed, ~3,311 LOC.
+- ✓ **State daemon with always-on user service, unix-socket HTTP server, SSE event bus, mode-enforcement middleware, pid-file, crash recovery, and launchd/systemd unit installer** — v6 (2026-05-04): 10 phases, 250+ tests, DAE-01/DAE-03..DAE-09 satisfied, P0-15 closed.
 
 ### Active
 
 <!-- High-level capability hypotheses. Refined into REQ-IDs in REQUIREMENTS.md. -->
 
-- [ ] Python daemon with always-on user service + per-opencode-session workers
 - [ ] Provider routing via litellm with direct-SDK escape hatches for Anthropic
       extended thinking and fine-grained cache control
 - [ ] Two independent MCP servers: `state-build` and `state-teach`, registered
@@ -42,8 +43,6 @@ concurrency model.
       hook shim and TUI extensions (sidebar, routes, dialogs)
 - [ ] Four-tier planning hierarchy: **Arc → Phase → Slice → Step**, with the
       full discuss/plan/execute/verify cycle at Step level
-- [ ] DAG scheduler (pure Python) that identifies all unblocked Slices/Steps
-      and runs them concurrently per the `depends_on` graph
 - [ ] Per-Slice worktree isolation for concurrent work (opencode worktree
       service preferred, pygit2 fallback for other hosts)
 - [ ] Snapshot/diff/revert at Step and Slice boundaries
@@ -231,4 +230,4 @@ This document evolves at phase transitions and milestone boundaries.
 - VALIDATION.md not authored for the three gap-closure phases (acceptable per `plan-phase` Step 5.5).
 
 ---
-*Last updated: 2026-05-03 after v2 milestone completion — all 5 auth methods + multi-cred + redactor shipped; v3 (Provider Routing + Model Profiles) is now the active milestone.*
+*Last updated: 2026-05-04 after v5 (DAG Scheduler) and v6 (State Daemon) milestones — v5 delivered pure-Python reactive scheduler (9 phases, 130 tests, P0-16 closed); v6 delivered always-on daemon (10 phases, 250+ tests, P0-15 closed). 4/27 milestones shipped (v1, v2, v5, v6). Tier 1 at 3/5 — v3 Provider Routing active.*

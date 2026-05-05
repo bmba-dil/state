@@ -1,5 +1,15 @@
 # MILESTONES: state
 
+## v5 DAG Scheduler (Shipped: 2026-05-05)
+
+**Phases completed:** 0 phases, 0 plans, 0 tasks
+
+**Key accomplishments:**
+
+- (none recorded)
+
+---
+
 ## v5 DAG Scheduler (Shipped: 2026-05-04)
 
 **Phases completed:** 9 phases, 9 plans
@@ -40,6 +50,7 @@
 **Phases completed:** 15 phases, 46 plans, 4 tasks
 
 **Key accomplishments:**
+
 - (none recorded)
 
 ---

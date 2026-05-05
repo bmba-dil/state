@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
 milestone: v6
-milestone_name: State Daemon (HTTP + SSE + Mode Middleware)
-status: shipped
-last_updated: "2026-05-04T23:15:00.000Z"
+milestone_name: — State Daemon
+status: v5 milestone complete
+last_updated: "2026-05-05T04:18:38.322Z"
 ---
 
 # STATE: state
@@ -98,6 +98,7 @@ See PROJECT.md Key Decisions table — now annotated with v1+v2 outcomes (✓ Go
 
 ### Open issues / debt going into v3
 
+- **Deferred Items (v5 close, 2026-05-04):** 3 quick-tasks acknowledged at milestone close — pre-execution audit of ROADMAP.md review, audit ROADMAP.md for domain confusion, revise ROADMAP.md to apply review roadmap findings.
 - Retroactive SECURITY.md backfill for phases 011–022 + 022.1 + 022.2 (security_enforcement gate added mid-v2; only 022.3 has SECURITY.md).
 - Manual release-time smoke gates for live OAuth (Anthropic/Gemini/Antigravity/Copilot) — owned by user; not yet in CI.
 - Per-plan SUMMARY.md backfilled for 4 plans at v2 close (011-01, 011-02, 013-01, 020-01) — execute-phase agent should land per-plan SUMMARY at execute-time going forward.
@@ -143,6 +144,7 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 - `.planning/MILESTONES.md` — shipped-milestone log (v1 + v2 entries)
 - `.planning/milestones/v1/` — v1 milestone artifacts (Complete)
 - `.planning/milestones/v2/` — v2 milestone artifacts (Complete)
+- `.planning/milestones/v5/` — v5 milestone artifacts (Shipped)
 - `.planning/milestones/v6/` — v6 milestone artifacts (Shipped)
 - `.planning/milestones/v3/` — v3 milestone artifacts (Active)
 - `.planning/milestones/v6-MILESTONE-AUDIT.md` — v6 audit (passed)
@@ -153,8 +155,8 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Tier boundary gates
 
-- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v6 ✓ — 3 left (v3, v4, v5).** v6 (Tier 2 daemon) shipped early because it was unblocked and critical path for v7.
-- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ — 6 left (v7–v13).**
+- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v5 ✓ — 2 left (v3, v4).** Tier 2 (v6–v13) started with v6 daemon shipping early as unblocked critical path for v7.
+- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ — 7 left (v7–v13).**
 
 ---
 
