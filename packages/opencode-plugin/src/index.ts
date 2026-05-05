@@ -11,6 +11,9 @@ import { chatParams, chatHeaders } from "./hooks/chat-params.js";
 import { commandExecuteBefore } from "./hooks/command-execute-before.js";
 import { shellEnv } from "./hooks/shell-env.js";
 
+// PluginModule["server"] type is Plugin = (input, options?) => Promise<Hooks>.
+// The Promise<Hooks> return type requires the async keyword even though the
+// body has no await expressions — without it, the type assignment fails.
 export const server: PluginModule["server"] = async () => ({
   "chat.message": chatMessage,
   "tool.execute.before": toolExecuteBefore,
