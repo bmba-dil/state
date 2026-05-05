@@ -61,6 +61,10 @@ Plans:
 **Depends on:** 001
 **Requirements:** MODE-06, TST-07
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 102-01-PLAN.md — Core import_lint module (ast-based) + comprehensive test suite
 
 #### Phase 103 — CLI: `state mode init build|teach|both` + `state mode set`
 **Goal:** Typer commands; init bootstraps subtree + mode.json; set validates + reloads.
