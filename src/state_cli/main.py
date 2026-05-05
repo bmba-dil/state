@@ -214,7 +214,7 @@ async def _do_export(
     count = 0
 
     if output is not None:
-        with open(output, "w") as fh:
+        with open(output, "w", encoding="utf-8") as fh:
             async for ev in store.read_events_iter(from_id=from_id, to_id=to_id, mode=mode):
                 line = json.dumps(ev, sort_keys=True, separators=(",", ":"))
                 fh.write(line + "\n")
