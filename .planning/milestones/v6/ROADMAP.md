@@ -68,11 +68,13 @@
 **Requirements:** DAE-09
 **Parallelizable:** yes
 
-#### Phase 059 — Auth-manager wiring into daemon (provider refresh, rotation)
+#### Phase 059 — Auth-manager wiring into daemon (provider refresh, rotation) ✅
 **Goal:** Daemon owns the auth refresh loop; multi-cred round-robin surfaced via HTTP `GET /auth/status`.
+**Status:** Complete (2026-05-05)
 **Depends on:** 013, 050
 **Requirements:** AUTH-07, AUTH-08 (runtime wiring)
 **Parallelizable:** no (integration)
+**Plans:** 1 (all complete) — [059-1-SUMMARY.md](phases/059-auth-manager-wiring-into-daemon/059-1-SUMMARY.md)
 
 ---
 
