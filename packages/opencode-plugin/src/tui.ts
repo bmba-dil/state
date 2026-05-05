@@ -3,6 +3,7 @@
 import type { TuiPlugin, TuiSlotPlugin } from "@opencode-ai/plugin/tui";
 import type { TuiPluginModule as TuiPluginModuleType } from "@opencode-ai/plugin/tui";
 import { log } from "./logger.js";
+import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -43,8 +44,8 @@ function createTuiPlugin(): TuiPlugin {
       },
       slots: {
         sidebar_content(_ctx, _props) {
-          // Phase 081: Mode-aware renderer (build-tree vs concept-state)
-          return "";
+          // Phase 081: SidebarContentRenderer — mode-aware renderer (build-tree vs concept-state)
+          return SidebarContentRenderer(_ctx, _props) as unknown as string;
         },
         sidebar_footer(_ctx, _props) {
           // Phase 084: Statusline (mode · scope · provider · cost)
