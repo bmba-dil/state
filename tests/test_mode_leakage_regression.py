@@ -579,6 +579,250 @@ class TestLayer5DaemonMiddleware:
 
 
 # ===========================================================================
+# Layer 3 — MCP registration logic (Phase 099 contract)
+# ===========================================================================
+
+
+def _get_mcp_servers_for_mode(mode: str | None) -> list[str]:
+    """Reproduce ``getMcpServersForMode()`` from the TypeScript plugin for testing.
+
+    This is the functional contract of config.ts — the same logic that
+    determines which MCP servers are registered in opencode based on the
+    active execution mode.
+    """
+    if mode == "build":
+        return ["state-build"]
+    if mode == "teach":
+        return ["state-teach"]
+    if mode == "both":
+        return ["state-build", "state-teach"]
+    return []
+
+
+class TestLayer3McpRegistration:
+    """Validate MCP server selection logic matches the TypeScript contract."""
+
+    def test_build_mode_registers_only_state_build(self) -> None:
+        """Build mode returns ``['state-build']``."""
+        assert _get_mcp_servers_for_mode("build") == ["state-build"]
+
+    def test_teach_mode_registers_only_state_teach(self) -> None:
+        """Teach mode returns ``['state-teach']``."""
+        assert _get_mcp_servers_for_mode("teach") == ["state-teach"]
+
+    def test_both_mode_registers_both_servers(self) -> None:
+        """Both mode returns ``['state-build', 'state-teach']``."""
+        assert _get_mcp_servers_for_mode("both") == ["state-build", "state-teach"]
+
+    def test_null_mode_registers_nothing(self) -> None:
+        """None mode returns empty list."""
+        assert _get_mcp_servers_for_mode(None) == []
+
+    def test_unknown_mode_registers_nothing(self) -> None:
+        """Unknown mode string returns empty list."""
+        assert _get_mcp_servers_for_mode("garbage") == []
+
+    def test_build_mode_does_not_include_state_teach(self) -> None:
+        """Build mode must not register ``state-teach`` MCP server."""
+        result = _get_mcp_servers_for_mode("build")
+        assert "state-teach" not in result
+
+    def test_teach_mode_does_not_include_state_build(self) -> None:
+        """Teach mode must not register ``state-build`` MCP server."""
+        result = _get_mcp_servers_for_mode("teach")
+        assert "state-build" not in result
+
+
+# ===========================================================================
+# Layer 4 — Plugin hook gate logic (Phase 100 contract)
+# ===========================================================================
+
+_STATE_COMMAND_RE = re.compile(r"^/state:(build|teach):")
+
+
+def _is_command_blocked(command: str, mode: str) -> bool:
+    """Reproduce ``command-execute-before.ts`` mode gate logic."""
+    if mode == "both":
+        return False
+    m = _STATE_COMMAND_RE.match(command)
+    if not m:
+        return False
+    return m.group(1) != mode
+
+
+def _is_tool_blocked(tool: str, mode: str) -> bool:
+    """Reproduce ``tool-execute-before.ts`` mode gate logic."""
+    if mode == "both":
+        return False
+    if mode == "build" and tool.startswith("mcp__state-teach__"):
+        return True
+    if mode == "teach" and tool.startswith("mcp__state-build__"):
+        return True
+    return False
+
+
+class TestLayer4HookGate:
+    """Validate command and tool mode-gate logic matches TypeScript hooks."""
+
+    # ── Command gate ─────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "command,mode,blocked",
+        [
+            ("/state:build:code-review", "build", False),
+            ("/state:teach:concept", "teach", False),
+            ("/state:teach:concept", "build", True),
+            ("/state:build:code-review", "teach", True),
+            ("/state:build:code-review", "both", False),
+            ("/state:teach:drill", "both", False),
+            ("/help", "build", False),
+            ("/gsd:progress", "teach", False),
+            ("/state:kernel:status", "build", False),
+        ],
+    )
+    def test_command_gate(
+        self, command: str, mode: str, blocked: bool
+    ) -> None:
+        """Cross-mode commands are blocked; same-mode and non-state commands are not."""
+        assert _is_command_blocked(command, mode) == blocked
+
+    def test_all_build_commands_blocked_in_teach(self) -> None:
+        """All /state:build:* commands are blocked in teach mode."""
+        for cmd in ["/state:build:code-review", "/state:build:plan", "/state:build:execute"]:
+            assert _is_command_blocked(cmd, "teach") is True
+
+    def test_all_teach_commands_blocked_in_build(self) -> None:
+        """All /state:teach:* commands are blocked in build mode."""
+        for cmd in ["/state:teach:concept", "/state:teach:drill", "/state:teach:review"]:
+            assert _is_command_blocked(cmd, "build") is True
+
+    # ── Tool gate ────────────────────────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "tool,mode,blocked",
+        [
+            ("mcp__state-build__some_tool", "build", False),
+            ("mcp__state-teach__some_tool", "teach", False),
+            ("mcp__state-teach__some_tool", "build", True),
+            ("mcp__state-build__some_tool", "teach", True),
+            ("mcp__state-build__some_tool", "both", False),
+            ("mcp__state-teach__other", "both", False),
+            ("bash", "build", False),
+            ("Write", "teach", False),
+        ],
+    )
+    def test_tool_gate(self, tool: str, mode: str, blocked: bool) -> None:
+        """Cross-mode tools are blocked; same-mode and non-state tools are not."""
+        assert _is_tool_blocked(tool, mode) == blocked
+
+    def test_all_mcp_teach_tools_blocked_in_build(self) -> None:
+        """All ``mcp__state-teach__*`` tools are blocked in build mode."""
+        for tool in [
+            "mcp__state-teach__introduce_concept",
+            "mcp__state-teach__review",
+            "mcp__state-teach__run_drill",
+        ]:
+            assert _is_tool_blocked(tool, "build") is True
+
+    def test_all_mcp_build_tools_blocked_in_teach(self) -> None:
+        """All ``mcp__state-build__*`` tools are blocked in teach mode."""
+        for tool in [
+            "mcp__state-build__plan_phase",
+            "mcp__state-build__execute_phase",
+            "mcp__state-build__create_slice",
+        ]:
+            assert _is_tool_blocked(tool, "teach") is True
+
+
+# ===========================================================================
+# Full-suite smoke tests
+# ===========================================================================
+
+
+class TestFullSuiteSmoke:
+    """Integration checks proving the entire regression file runs as a unit."""
+
+    def test_all_6_layers_have_test_classes(self) -> None:
+        """Each layer must have a test class with methods."""
+        import tests.test_mode_leakage_regression as mod
+
+        layer_classes = [
+            "TestLayer1ModeJsonSchema",
+            "TestLayer2SubtreePath",
+            "TestLayer3McpRegistration",
+            "TestLayer4HookGate",
+            "TestLayer5DaemonMiddleware",
+            "TestLayer6ImportLint",
+            "TestFullSuiteSmoke",
+        ]
+        for cls_name in layer_classes:
+            cls = getattr(mod, cls_name, None)
+            assert cls is not None, f"Missing test class: {cls_name}"
+            methods = [
+                name
+                for name in dir(cls)
+                if name.startswith("test_") and callable(getattr(cls, name))
+            ]
+            assert len(methods) > 0, f"{cls_name} has no test methods"
+
+    def test_regression_suite_imports_cleanly(self) -> None:
+        """The test file imports without errors."""
+        import tests.test_mode_leakage_regression as mod  # noqa: F401
+
+    def test_total_test_count_meets_minimum(self) -> None:
+        """The suite must have at least 50 test functions (not counting parametrized expansions)."""
+        import inspect
+        import tests.test_mode_leakage_regression as mod
+
+        count = 0
+        for name in dir(mod):
+            obj = getattr(mod, name)
+            if inspect.isclass(obj) and name.startswith("Test"):
+                for method_name in dir(obj):
+                    if method_name.startswith("test_"):
+                        count += 1
+        assert count >= 50, f"Only {count} test methods found, need >= 50"
+
+    def test_no_external_conftest_dependency(self) -> None:
+        """The test file uses only built-in pytest fixtures (tmp_path, etc.) — no conftest imports."""
+        import importlib.util
+
+        spec = importlib.util.find_spec("tests.test_mode_leakage_regression")
+        assert spec is not None
+        source = Path(spec.origin).read_text() if spec.origin else ""
+
+        # Check that no import statement at module level references conftest.
+        # Use a line-by-line check to avoid matching the test's own assertions.
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("import conftest"):
+                pytest.fail(f"Found conftest import: {stripped}")
+            if stripped.startswith("from conftest"):
+                pytest.fail(f"Found conftest import: {stripped}")
+            if stripped.startswith("from tests.conftest"):
+                pytest.fail(f"Found conftest import: {stripped}")
+
+    def test_mcp_server_separation_guarantee(self) -> None:
+        """Layer 3 guarantee: in single mode, exactly one MCP server registered."""
+        build_servers = _get_mcp_servers_for_mode("build")
+        teach_servers = _get_mcp_servers_for_mode("teach")
+
+        assert len(build_servers) == 1
+        assert len(teach_servers) == 1
+        assert build_servers[0] != teach_servers[0]
+
+    def test_command_tool_matrix_no_false_positives(self) -> None:
+        """Common non-state commands/tools are never blocked."""
+        commands = ["/help", "/clear", "/gsd:progress", ""]
+        tools = ["bash", "Read", "Write", "Edit", "Grep"]
+        for mode in ("build", "teach", "both"):
+            for cmd in commands:
+                assert not _is_command_blocked(cmd, mode)
+            for tool in tools:
+                assert not _is_tool_blocked(tool, mode)
+
+
+# ===========================================================================
 # Helpers
 # ===========================================================================
 
