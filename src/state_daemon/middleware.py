@@ -260,8 +260,37 @@ class ModeMiddleware:
         if request_mode == "kernel":
             return await self._router(method, path, headers, body)
 
-        # Same mode — allow
+        # Same mode — allow, but validate event type (defense-in-depth)
         if request_mode == active_mode:
+            # Only validate event type for write operations with a body.
+            # Read operations, kernel requests, and "both" mode are already
+            # handled above and never reach this branch.
+            if (
+                not _is_read_operation(method, path)
+                and body
+            ):
+                event_type = _extract_event_type(body)
+                if event_type is not None:
+                    if active_mode == "build" and any(
+                        event_type.startswith(p) for p in TEACH_ONLY_EVENT_PREFIXES
+                    ):
+                        return _reject(
+                            403,
+                            "cross_mode_event_rejected",
+                            request_mode=request_mode,
+                            active_mode=active_mode,
+                            event_type=event_type,
+                        )
+                    elif active_mode == "teach" and any(
+                        event_type.startswith(p) for p in BUILD_ONLY_EVENT_PREFIXES
+                    ):
+                        return _reject(
+                            403,
+                            "cross_mode_event_rejected",
+                            request_mode=request_mode,
+                            active_mode=active_mode,
+                            event_type=event_type,
+                        )
             return await self._router(method, path, headers, body)
 
         # Mismatch — read operations still allowed
@@ -294,15 +323,18 @@ def _reject(
     error: str,
     request_mode: str = "",
     active_mode: str = "",
+    event_type: str = "",
 ) -> tuple[int, bytes]:
     """Build a mode-enforcement rejection response.
 
     Returns a ``(status_code, body_bytes)`` tuple that the server
     detects and translates to the correct HTTP status line.
     """
-    payload = {
+    payload: dict[str, str] = {
         "error": error,
         "request_mode": request_mode,
         "active_mode": active_mode,
     }
+    if event_type:
+        payload["event_type"] = event_type
     return (status, json.dumps(payload).encode())

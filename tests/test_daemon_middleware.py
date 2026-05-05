@@ -892,3 +892,238 @@ class TestExtractEventType:
         }).encode()
         result = _extract_event_type(body)
         assert result == ""
+
+
+def _state_emit_body(event_type: str) -> bytes:
+    """Build a JSON-RPC 2.0 state.emit request body."""
+    return json.dumps({
+        "jsonrpc": "2.0",
+        "method": "state.emit",
+        "params": {"type": event_type},
+        "id": 1,
+    }).encode()
+
+
+# ===========================================================================
+# Task 101-01.2 — Event-type validation in ModeMiddleware.__call__
+# ===========================================================================
+
+
+class TestEventTypeMiddleware:
+    """Tests for ModeMiddleware event-type-level validation."""
+
+    # ------------------------------------------------------------------
+    # Build mode rejects teach-only events
+    # ------------------------------------------------------------------
+
+    async def test_build_mode_rejects_concept_event(self) -> None:
+        """Build mode + state.concept.introduced → HTTP 403."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, tuple)
+        status, resp_body = result
+        assert status == 403
+        data = json.loads(resp_body)
+        assert data["error"] == "cross_mode_event_rejected"
+        assert data["event_type"] == "state.concept.introduced"
+
+    async def test_build_mode_rejects_drill_event(self) -> None:
+        """Build mode + state.drill.prepared → HTTP 403."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.drill.prepared")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, tuple)
+        status, resp_body = result
+        assert status == 403
+        data = json.loads(resp_body)
+        assert data["error"] == "cross_mode_event_rejected"
+
+    async def test_build_mode_allows_step_event(self) -> None:
+        """Build mode + state.step.executed → HTTP 200 (passes through)."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.step.executed")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    # ------------------------------------------------------------------
+    # Teach mode rejects build-only events
+    # ------------------------------------------------------------------
+
+    async def test_teach_mode_rejects_arc_event(self) -> None:
+        """Teach mode + state.arc.created → HTTP 403."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="teach")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.arc.created")
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        assert isinstance(result, tuple)
+        status, resp_body = result
+        assert status == 403
+        data = json.loads(resp_body)
+        assert data["error"] == "cross_mode_event_rejected"
+
+    async def test_teach_mode_rejects_slice_event(self) -> None:
+        """Teach mode + state.slice.planned → HTTP 403."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="teach")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.slice.planned")
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        assert isinstance(result, tuple)
+        status, resp_body = result
+        assert status == 403
+        data = json.loads(resp_body)
+        assert data["error"] == "cross_mode_event_rejected"
+
+    async def test_teach_mode_allows_concept_event(self) -> None:
+        """Teach mode + state.concept.observed → HTTP 200 (passes through)."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="teach")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.observed")
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        assert isinstance(result, bytes)
+
+    # ------------------------------------------------------------------
+    # Both mode and kernel bypass event-type checks
+    # ------------------------------------------------------------------
+
+    async def test_both_mode_allows_teach_event(self) -> None:
+        """Active mode 'both' allows teach events even with build header."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="both")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    async def test_kernel_mode_bypasses_event_check(self) -> None:
+        """Kernel request mode bypasses event-type checks entirely."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "kernel"}, body)
+        assert isinstance(result, bytes)
+
+    # ------------------------------------------------------------------
+    # Non-state.emit methods and malformed bodies skip check
+    # ------------------------------------------------------------------
+
+    async def test_non_state_emit_method_skips_check(self) -> None:
+        """Non-state.emit JSON-RPC passes through event-type check."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = json.dumps({
+            "jsonrpc": "2.0",
+            "method": "ping",
+            "id": 1,
+        }).encode()
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    async def test_malformed_json_body_passes_through(self) -> None:
+        """Malformed JSON body passes through (router's concern)."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        result = await mw("POST", "/", {"x-state-mode": "build"}, b"not json")
+        assert isinstance(result, bytes)
+
+    async def test_get_request_skips_event_check(self) -> None:
+        """GET requests skip event-type check entirely."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("GET", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    # ------------------------------------------------------------------
+    # Rejection payload verification
+    # ------------------------------------------------------------------
+
+    async def test_rejection_payload_includes_event_type(self) -> None:
+        """403 event rejection payload includes event_type field."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        _, resp_body = result
+        data = json.loads(resp_body)
+
+        assert data["error"] == "cross_mode_event_rejected"
+        assert data["event_type"] == "state.concept.introduced"
+        assert data["request_mode"] == "build"
+        assert data["active_mode"] == "build"
+
+    # ------------------------------------------------------------------
+    # Existing header-only rejection still works
+    # ------------------------------------------------------------------
+
+    async def test_cross_mode_header_rejection_still_works(self) -> None:
+        """Existing behavior: teach header with build active → 403 'cross_mode_rejected'."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+
+        body = _state_emit_body("state.step.executed")
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        assert isinstance(result, tuple)
+        status, resp_body = result
+        assert status == 403
+        data = json.loads(resp_body)
+        assert data["error"] == "cross_mode_rejected"
+        # Header-only rejection does NOT include event_type
+        assert "event_type" not in data
+
+    async def test_error_codes_are_distinct(self) -> None:
+        """Header rejection = 'cross_mode_rejected', event-type rejection = 'cross_mode_event_rejected'."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        # Test 1: Header mismatch → "cross_mode_rejected"
+        cfg = ModeConfig(mode="build")
+        mw = ModeMiddleware(_make_echo_router(), cfg)
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, b'{"test": 1}')
+        status, resp_body = result
+        assert json.loads(resp_body)["error"] == "cross_mode_rejected"
+
+        # Test 2: Header match but event mismatch → "cross_mode_event_rejected"
+        body = _state_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        status, resp_body = result
+        assert json.loads(resp_body)["error"] == "cross_mode_event_rejected"
