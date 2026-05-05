@@ -42,3 +42,13 @@
 | tests/test_version_compat.py | 7 |
 | tests/stress/test_multi_session.py | 4 |
 | **Total** | **52** (42 new in v7 + 10 pre-existing augmented) |
+
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-05-05:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | pre-execution-audit-of-roadmap-md-review | missing |
+| quick_task | audit-roadmap-md-for-domain-confusion | missing |
+| quick_task | revise-roadmap-md-to-apply-roadmap-review | missing |

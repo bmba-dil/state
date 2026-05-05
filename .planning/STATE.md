@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v6
-milestone_name: — State Daemon
-status: v3 + v4 + v5 + v6 milestones complete
-last_updated: "2026-05-05T06:00:00.000Z"
+milestone: v7
+milestone_name: — Per-Session Worker
+status: v7 milestone shipped
+last_updated: "2026-05-05T05:45:53.144Z"
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-05 — v3 (Provider Routing), v4 (Worktree + Snapshot), v5 (DAG Scheduler), and v6 (State Daemon) all shipped. 6 / 27 milestones complete. v3 delivered 7 phases (023-029, 030/031 deferred), 14 plans, 494 tests. v4 delivered 9 phases (032-040), 55 tests. v5 delivered 9 phases, 130 tests. v6 delivered 10 phases, ~250 tests. All v5+v6 requirements satisfied; v3 PRV-01..PRV-08 satisfied (PRV-09 deferred in 030).
+**Last updated:** 2026-05-05 — v7 (Per-Session Worker) shipped. 7 / 27 milestones complete. v7 delivered 8 phases (060–067), 75 tests, ~1,019 LOC source, ~1,390 LOC tests. All WRK-10..13 requirements satisfied; OBS-01 partial (worker logging only).
 
 ---
 
@@ -27,34 +27,34 @@ last_updated: "2026-05-05T06:00:00.000Z"
 
 ## Current Position
 
-**Current tier:** Tier 1 complete → Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓)
+**Current tier:** Tier 1 complete → Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓)
+**Last shipped milestone:** v7 — Per-Session Worker — Shipped 2026-05-05
 **Last shipped milestone:** v6 — State Daemon (HTTP + SSE + Mode Middleware) — Complete (shipped 2026-05-04)
 **Active milestone:** v7 — Per-Session Worker — next unblocked Tier 2 milestone
 **Active phase:** 060 — (next up; not yet planned)
 **Previous milestones:** v1 (Event Store Foundation), v2 (Auth Coverage), v3 (Provider Routing), v4 (Worktree + Snapshot), v5 (DAG Scheduler), v6 (State Daemon)
 
-**Phases complete:** 61 / 256 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10)
-**Milestones complete:** 6 / 27
+**Phases complete:** 69 / 256 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8)
+**Milestones complete:** 7 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[###########....................................................] 24%
+[##########...................................................] 26%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
 
-- v7 — Per-Session Worker — depends on v6 daemon (v6 shipped)
-- v8 — Plugin Server Hooks (9 hooks) — depends on v7
-- v9 — Plugin TUI Bundle — depends on v7
+- v8 — Plugin Server Hooks (9 hooks) — depends on v7 (now shipped)
+- v9 — Plugin TUI Bundle — depends on v7 (now shipped)
 
 v3, v4, v5 are shipped. Tier 2 (v6–v13) is the active tier.
 
 ### Critical path preview
 
-Build critical path: A1 → A6 → A7 → A8 → A11 → A12 → A14 → A15 → A16 → A27
-Teach critical path: A1 → A6 → A7 → A8 → A11 → A13 → A18 → A20 → A22 → A27
+Build critical path: A1 → A6 → A7 ✓ → A8 → A11 → A12 → A14 → A15 → A16 → A27
+Teach critical path: A1 → A6 → A7 ✓ → A8 → A11 → A13 → A18 → A20 → A22 → A27
 
 A1 (= v1) and A2 (= v2) now complete.
 
