@@ -191,7 +191,7 @@ def export(
         raise typer.BadParameter("Only --format=jsonl is supported in this version")
     try:
         asyncio.run(_do_export(
-            from_id=from_id, to_id=to_id, mode=mode, output=output, _output_format=output_format,
+            from_id=from_id, to_id=to_id, mode=mode, output=output,
         ))
     except Exception as exc:
         typer.echo(f"Error: {exc}", err=True)
@@ -203,7 +203,6 @@ async def _do_export(
     to_id: str | None = None,
     mode: str | None = None,
     output: str | None = None,
-    _output_format: str = "jsonl",
 ) -> None:
     """Export events in JSONL format."""
     import sys
