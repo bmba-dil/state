@@ -283,3 +283,90 @@ def mode_init(
         (state_dir / TEACH_SUBTREE.removeprefix(".state/")).mkdir(parents=True, exist_ok=True)
 
     typer.echo(f"Mode initialised to '{cfg.mode}' ({mode_path})")
+
+
+@mode_app.command(name="set")
+def mode_set(
+    mode: str = typer.Argument(..., help="Mode to activate: build, teach, or both"),
+) -> None:
+    """Change the active mode and trigger daemon hot-reload.
+
+    Overwrites .state/mode.json with the new mode atomically
+    (temp file + rename) with strict 0600 permissions. Creates
+    the corresponding subtree directories (.state/build/ and/or
+    .state/teach/). If the daemon is running, sends SIGHUP so
+    it picks up the mode change without restarting.
+
+    Valid modes: build, teach, both
+    """
+    import signal
+    import tempfile
+
+    from src.state_core.schema import validate_mode_config
+
+    # --- Validate mode before touching filesystem ---
+    try:
+        cfg = validate_mode_config({"mode": mode})
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    # --- Determine project root (same logic as mode_init) ---
+    project_root = Path.cwd()
+    current = project_root
+    while current != current.parent:
+        if (current / ".state").is_dir():
+            project_root = current
+            break
+        current = current.parent
+
+    state_dir = project_root / ".state"
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Atomic write of mode.json ---
+    # Write to temp file first, chmod, then rename (atomic on Unix).
+    # This prevents partial-write corruption if the process crashes mid-write.
+    mode_path = state_dir / "mode.json"
+    fd, tmp_path = tempfile.mkstemp(
+        dir=str(state_dir), prefix=".mode_", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"mode": cfg.mode}, f)
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, mode_path)  # atomic rename
+    except Exception:
+        # Clean up temp file on failure
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+        raise
+
+    # --- Create subtree directories for the new mode ---
+    # Following 098-01 pattern: mkdir exist_ok=True for idempotency.
+    if cfg.mode in ("build", "both"):
+        (state_dir / BUILD_SUBTREE.removeprefix(".state/")).mkdir(
+            parents=True, exist_ok=True
+        )
+    if cfg.mode in ("teach", "both"):
+        (state_dir / TEACH_SUBTREE.removeprefix(".state/")).mkdir(
+            parents=True, exist_ok=True
+        )
+
+    typer.echo(f"Mode set to '{cfg.mode}' ({mode_path})")
+
+    # --- SIGHUP running daemon for hot-reload ---
+    pid_path = state_dir / "daemon.pid"
+    if pid_path.is_file():
+        try:
+            with open(pid_path, "r", encoding="utf-8") as f:
+                pid_data = json.load(f)
+            pid = pid_data.get("pid")
+            if pid is not None:
+                # Check if process is alive
+                os.kill(pid, 0)
+                # Process exists — send SIGHUP for mode reload
+                os.kill(pid, signal.SIGHUP)
+                typer.echo(f"Sent SIGHUP to daemon (pid={pid}) for hot-reload.")
+        except (json.JSONDecodeError, KeyError, OSError):
+            # Daemon not running or pid file is stale — silent ok.
+            pass

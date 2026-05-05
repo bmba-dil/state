@@ -46,6 +46,9 @@ _auth_refresh: AuthRefreshLoop | None = None
 # Pid file path — set during startup so the shutdown handler can clean it up.
 _pid_path: str | None = None
 
+# Project root — set during startup so the SIGHUP handler can reload mode config.
+_project_root: str | None = None
+
 
 async def startup() -> None:
     """Run the full startup sequence: redactor → logging → import → repair → migrate → reconciler → HTTP server.
@@ -210,6 +213,8 @@ async def startup() -> None:
     log.info("startup: resolving socket path")
     router = JsonRpcRouter()
     project_root = os.environ.get("STATE_PROJECT_ROOT", os.getcwd())
+    global _project_root
+    _project_root = project_root
     socket_path = os.environ.get("STATE_DAEMON_SOCKET", resolve_socket_path(project_root))
 
     log.info(
@@ -266,6 +271,15 @@ async def startup() -> None:
             # without win32 support) — graceful shutdown via other mechanisms.
             pass
 
+    # Register SIGHUP handler for mode hot-reload.
+    try:
+        loop.add_signal_handler(signal.SIGHUP, _schedule_mode_reload)
+        log.info("startup: SIGHUP handler registered for mode hot-reload")
+    except (NotImplementedError, AttributeError):
+        # SIGHUP not available on this platform (e.g. Windows) —
+        # mode changes still work via daemon restart.
+        pass
+
     log.info("startup: complete", socket_path=socket_path)
 
 
@@ -304,6 +318,27 @@ async def _build_in_flight_steps(step_ids: list[str]) -> list[InFlightStep]:
             )
             for row in rows
         ]
+
+
+def _schedule_mode_reload() -> None:
+    """Schedule mode config reload from a SIGHUP signal handler.
+
+    Re-reads .state/mode.json and logs the new mode.  The global
+    _config in middleware.py is updated so all subsequent requests
+    use the new mode — no daemon restart needed.
+
+    Must be a plain function because asyncio signal handlers are
+    called synchronously from the event loop.
+    """
+    if _project_root is not None:
+        log.info("daemon.reload.signal_received", signal="SIGHUP")
+        try:
+            new_config = load_mode_config(_project_root)
+            log.info("daemon.reload.complete", new_mode=new_config.mode)
+        except Exception as exc:
+            log.error("daemon.reload.failed", error=str(exc))
+    else:
+        log.warning("daemon.reload.no_project_root", signal="SIGHUP")
 
 
 def _schedule_shutdown() -> None:
