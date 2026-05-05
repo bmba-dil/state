@@ -29,3 +29,5 @@ const statePlugin: PluginModule = {
 };
 
 export default statePlugin;
+
+export { TuiPluginModule } from "./tui.js";
