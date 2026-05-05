@@ -12,16 +12,20 @@
 **Depends on:** 001
 **Requirements:** DAG-01
 **Parallelizable:** yes
-**Plans:** 1 plan (1 wave)
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 041-01-PLAN.md — Core scheduler types (Edge, Node, NodeRegistry) with TDD
+- [x] 041-01-PLAN.md — Core scheduler types (Edge, Node, NodeRegistry) with TDD
 
 #### Phase 042 — Topological sort (Kahn's algorithm, stable ordering)
 **Goal:** `topo_sort()` returning stable sequence; key = `(slice_id, step_id)`.
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 043
+**Plans:** 1 plan
+
+Plans:
+- [ ] 042-01-PLAN.md — Implement topo_sort with Kahn's algorithm, stable ordering, cycle detection
 
 #### Phase 043 — Cycle detection (DFS color marking)
 **Goal:** `detect_cycles()` returns cycle paths; used at roadmap validation.
