@@ -10,24 +10,26 @@ import asyncio
 import os
 import signal
 
+import aiosqlite
 import litellm
 import structlog
 
 from state_core.auth import import_from_opencode
+from state_core.database import get_connection
 from state_core.deps import Deps
 from state_core.events import SqliteEventStore
 from state_core.http_client import build_shared_client
 from state_core.migrations import migrate
 from state_core.observability import assert_redactor_attached, install
-from state_core.reactive import ReactiveTrigger
+from state_core.projector import Projector
 from state_core.reconciler import StartupReconciler
-from state_core.scheduler import DAGScheduler, Edge, Node
 from state_core.sync_mirror import SyncEventMirror
 
 from src.state_daemon.auth_manager import AuthRefreshLoop, AuthStatusHandler
 from src.state_daemon.logging import configure_daemon_logging
 from src.state_daemon.middleware import ModeMiddleware, load_mode_config
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
+from src.state_daemon.recovery import CrashRecovery, InFlightStep
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
 from src.state_daemon.socket import resolve_socket_path, write_socket_path
@@ -162,25 +164,45 @@ async def startup() -> None:
     sse_handler = SseEndpointHandler(sse_client_manager)
     log.info("startup: SSE bus wired to event store post-commit")
 
-    # Step 3.6 (Phase 047): Create reactive trigger wired to DAG scheduler.
-    # On state.step.advanced / state.slice.worktree_ready / state.phase.planned,
-    # DAGScheduler.tick() is called with current DAG state (no polling).
-    log.info("startup: initializing reactive trigger")
-    scheduler = DAGScheduler(concurrency_cap=4)
-    # dag_provider returns empty DAG initially — the DAG state is populated
-    # by downstream phases (048+) that build DAG state from event projections.
-    # For Phase 047, the trigger mechanism itself is the deliverable.
-    dag_state: list[Node] = []
-    dag_edges: list[Edge] = []
-    reactive_trigger = ReactiveTrigger(
-        scheduler=scheduler,
-        dag_provider=lambda: (dag_state, dag_edges),
-    )
-    store.add_post_commit_callback(reactive_trigger.on_event)
+    # Step 3.6 (Phase 057 / DAE-08): Crash recovery — replay event log
+    # through the projector to rebuild projections and resume in-flight
+    # Steps that were executing/verifying at crash time.  Runs AFTER
+    # SSE bus wiring (so recovery events are broadcast) and BEFORE
+    # server start (so no connections are accepted until recovered).
+    log.info("startup: running crash recovery")
+    projector = Projector(store)
+    recovery = CrashRecovery(projector)
+    recovery_result = await recovery.recover()
+
+    if not recovery_result.projection_valid:
+        log.critical(
+            "crash_recovery.projection_invalid",
+            events_replayed=recovery_result.events_replayed,
+        )
+        raise SystemExit(1)
+
     log.info(
-        "startup: reactive trigger wired to event store",
-        watched_events=sorted(reactive_trigger.watched_events),
+        "startup: recovery replay complete",
+        events_replayed=recovery_result.events_replayed,
+        in_flight_count=len(recovery_result.in_flight_steps),
+        last_event_id=recovery_result.last_event_id,
     )
+
+    if recovery_result.in_flight_steps:
+        # Build InFlightStep records from the step IDs and resume them.
+        # Status is read from the steps cache table (already rebuilt).
+        in_flight_steps = await _build_in_flight_steps(
+            recovery_result.in_flight_steps,
+        )
+        resume_actions = await recovery.resume_in_flight(
+            store, in_flight_steps,
+        )
+        log.info(
+            "startup: in-flight steps resumed",
+            count=len(resume_actions),
+        )
+    else:
+        log.info("startup: no in-flight steps to resume")
 
     # Step 4 (Phase 050 / 052): Resolve deterministic socket path, start
     # HTTP server, and persist the path for worker/client discovery.
@@ -245,6 +267,43 @@ async def startup() -> None:
             pass
 
     log.info("startup: complete", socket_path=socket_path)
+
+
+async def _build_in_flight_steps(step_ids: list[str]) -> list[InFlightStep]:
+    """Query the steps cache table for status of each in-flight step ID.
+
+    Called after crash recovery rebuilds the steps projection, so the
+    cache table is guaranteed fresh.
+
+    Args:
+        step_ids: Step IDs detected as in-flight by CrashRecovery.
+
+    Returns:
+        InFlightStep records with status populated from the cache.
+    """
+    if not step_ids:
+        return []
+
+    async with get_connection() as db:
+        db.row_factory = aiosqlite.Row
+        # Build a parameterized IN clause
+        placeholders = ", ".join("?" for _ in step_ids)
+        cursor = await db.execute(
+            f"SELECT id, state, slice_id, title FROM steps "
+            f"WHERE id IN ({placeholders}) "
+            f"ORDER BY id ASC",
+            tuple(step_ids),
+        )
+        rows = await cursor.fetchall()
+        return [
+            InFlightStep(
+                step_id=row["id"],
+                status=row["state"],
+                slice_id=row.get("slice_id"),
+                title=row.get("title"),
+            )
+            for row in rows
+        ]
 
 
 def _schedule_shutdown() -> None:

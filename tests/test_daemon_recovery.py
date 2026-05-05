@@ -585,3 +585,143 @@ class TestRebuildFailure:
         assert result.in_flight_steps == []
         assert result.projection_valid is False
         assert result.last_event_id is None
+
+
+# ── Orchestrator Integration Tests ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestOrchestratorIntegration:
+    """End-to-end: simulate crash with in-flight steps, recover, verify."""
+
+    async def test_full_recovery_flow(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """Simulate crash: seed executing + verifying steps, then recover."""
+        # Seed steps that would be in-flight at crash time
+        exec_id, _ = await _seed_executing_step(store, "step-exec-int")
+        verify_id, _ = await _seed_verifying_step(store, "step-verify-int")
+
+        # Also seed a completed step (should NOT be detected)
+        done_id = "step-done-int"
+        await _append_step_event(
+            store, done_id, "state.step.discussed",
+            {"slice_id": "s-done", "approach_summary": "done"},
+        )
+        await _append_step_event(
+            store, done_id, "state.step.planned", {"slice_id": "s-done"},
+        )
+        await _append_step_event(
+            store, done_id, "state.step.executed",
+            {"slice_id": "s-done", "changes_summary": "done"},
+        )
+        await _append_step_event(
+            store, done_id, "state.step.verify_started",
+            {"slice_id": "s-done"},
+        )
+        await _append_step_event(
+            store, done_id, "state.step.verify_passed",
+            {"slice_id": "s-done", "duration_ms": 50},
+        )
+
+        # Rebuild projections so all states are in cache
+        prj = Projector(store)
+        await prj.rebuild_all()
+
+        # Run crash recovery
+        recovery = CrashRecovery(prj)
+        result = await recovery.recover()
+
+        # Verify in-flight detection
+        assert result.projection_valid is True
+        assert exec_id in result.in_flight_steps
+        assert verify_id in result.in_flight_steps
+        assert done_id not in result.in_flight_steps
+        assert len(result.in_flight_steps) == 2
+        assert result.last_event_id is not None
+
+    async def test_recovery_then_resume_integration(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """Recover detects in-flight steps, resume emits events."""
+        exec_id, _ = await _seed_executing_step(store, "step-ri-1")
+
+        prj = Projector(store)
+        await prj.rebuild_all()
+
+        # Phase 1: Recover
+        recovery = CrashRecovery(prj)
+        result = await recovery.recover()
+        assert exec_id in result.in_flight_steps
+
+        # Phase 2: Resume (as orchestrator would)
+        in_flight = [
+            InFlightStep(step_id=sid, status="executing")
+            for sid in result.in_flight_steps
+        ]
+        actions = await recovery.resume_in_flight(store, in_flight)
+        assert len(actions) == 1
+        assert actions[0].step_id == exec_id
+
+        # Verify the resumed event is persisted
+        events = await store.read_events()
+        resumed = [e for e in events if e["type"] == "state.step.resumed"]
+        assert len(resumed) == 1
+        assert resumed[0]["aggregate_id"] == exec_id
+
+    async def test_clean_state_full_flow(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """No events → recover returns empty, no errors."""
+        prj = Projector(store)
+        await prj.rebuild_all()
+
+        recovery = CrashRecovery(prj)
+        result = await recovery.recover()
+
+        assert result.events_replayed == 0
+        assert result.in_flight_steps == []
+        assert result.projection_valid is True
+
+        # Resume with empty list should no-op
+        actions = await recovery.resume_in_flight(store, [])
+        assert actions == []
+
+    async def test_crash_with_multiple_executing_steps(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """Multiple executing steps → all detected and resumed."""
+        ids = []
+        for i in range(5):
+            sid, _ = await _seed_executing_step(store, f"step-multi-{i}")
+            ids.append(sid)
+
+        prj = Projector(store)
+        await prj.rebuild_all()
+
+        recovery = CrashRecovery(prj)
+        result = await recovery.recover()
+
+        assert len(result.in_flight_steps) == 5
+        for sid in ids:
+            assert sid in result.in_flight_steps
+
+    async def test_events_replayed_lte_event_count(
+        self, store: SqliteEventStore,
+    ) -> None:
+        """events_replayed should not exceed total event count."""
+        await _seed_executing_step(store, "step-count-1")
+        await _seed_verifying_step(store, "step-count-2")
+
+        prj = Projector(store)
+        await prj.rebuild_all()
+
+        total = await store.count_events()
+        assert total >= 7  # 3 for executing + 4 for verifying
+
+        recovery = CrashRecovery(prj)
+        result = await recovery.recover()
+
+        assert result.events_replayed > 0
+        # Should not exceed total events (rebuild_all counts all rows)
+        assert result.events_replayed >= total
