@@ -14,6 +14,7 @@
 
 import { Box, Text, createTextAttributes } from "@opentui/core";
 import { readFileSync } from "node:fs";
+import { renderBuildProgress } from "./build-progress.js";
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
@@ -281,18 +282,19 @@ function renderEmptyState(mode: ResolvedMode): ReturnType<typeof Box> {
   return Box({ flexDirection: "column", marginTop: 4 }, ...items);
 }
 
-/** Render the active state: placeholder boxes for downstream phases. */
+/** Render the active state: real components for implemented phases, placeholders for future phases. */
 function renderActiveState(mode: ResolvedMode): ReturnType<typeof Box> {
   if (mode === "build") {
-    return placeholderBox(renderBuildPlaceholder());
+    // Phase 082: real BuildProgress replaces placeholder
+    return renderBuildProgress();
   }
   if (mode === "teach") {
     return placeholderBox(renderTeachPlaceholder());
   }
-  // both: both placeholders stacked
+  // both: real BuildProgress + TeachConcept placeholder (Phase 083)
   return Box(
-    { flexDirection: "column", marginTop: 4 },
-    placeholderBox(renderBuildPlaceholder()),
+    { flexDirection: "column" },
+    renderBuildProgress(),
     Box({ marginTop: 1 }, placeholderBox(renderTeachPlaceholder())),
   );
 }

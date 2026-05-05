@@ -4,6 +4,7 @@ import type { TuiPlugin, TuiSlotPlugin } from "@opencode-ai/plugin/tui";
 import type { TuiPluginModule as TuiPluginModuleType } from "@opencode-ai/plugin/tui";
 import { log } from "./logger.js";
 import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
+import { setupBuildProgress } from "./tui/build-progress.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -12,7 +13,7 @@ import SidebarContentRenderer from "./tui/sidebar-content-renderer.js";
  * 1. Installs the custom theme.json (dark mode, 12 semantic color tokens)
  * 2. Registers placeholder slot renderers for all four TUI slots
  *    (phases 081–088 replace these with real components)
- * 3. Subscribes to session status events from the daemon's SSE stream
+ * 3. Wires BuildProgress event subscriptions (Phase 082)
  *
  * All side effects are cleaned up via api.lifecycle.onDispose.
  */
@@ -65,21 +66,9 @@ function createTuiPlugin(): TuiPlugin {
     api.slots.register(slotPlugin);
 
     // ── 3. Subscribe to daemon SSE ───────────────────────────────────────
-    // opencode's event bus relays daemon SSE as typed events.
-    // Phases 082–085 subscribe to specific event types here.
-    const unsubStatus = api.event.on("session.status", (event) => {
-      log({
-        source: "@state/opencode-plugin/tui",
-        type: "event.session.status",
-        sessionID: event.properties.sessionID,
-        status: event.properties.status,
-      });
-    });
-
-    // Cleanup all subscriptions on plugin dispose
-    api.lifecycle.onDispose(() => {
-      unsubStatus();
-    });
+    // Phase 082: BuildProgress — subscribes to daemon SSE via api.event bus.
+    // State is updated by event handlers; renderBuildProgress() reads it each frame.
+    setupBuildProgress(api);
   };
 }
 
