@@ -2,6 +2,9 @@
 
 Mode-gated MCP server for build-mode tools. Registered as ``state-build``
 in opencode MCP config. Tool schemas are pydantic-validated via type hints.
+
+Provides 15 skeleton tools (MCP-B-03). Real implementations deferred to
+Phase 111 (shared library wiring).
 """
 
 from __future__ import annotations
@@ -19,22 +22,119 @@ mcp = FastMCP(
 )
 
 
-class DAGStatus(BaseModel):
-    """DAG scheduler status response."""
+class SkeletonResponse(BaseModel):
+    """Standard not-implemented response for skeleton tools."""
 
+    tool: str
     status: str = "not_implemented"
-    nodes: int = 0
-    edges: int = 0
+
+
+# ── Planning tools ────────────────────────────────────────────
 
 
 @mcp.tool()
-def dag_status() -> DAGStatus:
-    """Query the current state of the build-mode DAG scheduler.
+def plan_step() -> SkeletonResponse:
+    """Create step plan from discuss context. Returns structured task list."""
+    return SkeletonResponse(tool="plan_step")
 
-    Returns node and edge counts plus overall scheduler status.
-    Full implementation deferred to Phase 107 (shared library wiring).
-    """
-    return DAGStatus()
+
+@mcp.tool()
+def execute_step() -> SkeletonResponse:
+    """Execute planned step tasks. Reports progress per task."""
+    return SkeletonResponse(tool="execute_step")
+
+
+@mcp.tool()
+def verify_step() -> SkeletonResponse:
+    """Goal-backward verification of step outputs. Returns pass/gap status."""
+    return SkeletonResponse(tool="verify_step")
+
+
+@mcp.tool()
+def discuss_step() -> SkeletonResponse:
+    """Surface implementation decisions for a step. Returns grey-area table."""
+    return SkeletonResponse(tool="discuss_step")
+
+
+@mcp.tool()
+def research_step() -> SkeletonResponse:
+    """Research technical approach for a step. Returns findings document."""
+    return SkeletonResponse(tool="research_step")
+
+
+# ── DAG and arc tools ────────────────────────────────────────
+
+
+@mcp.tool()
+def dag_status() -> SkeletonResponse:
+    """Query build-mode DAG scheduler state. Returns node and edge counts."""
+    return SkeletonResponse(tool="dag_status")
+
+
+@mcp.tool()
+def arc_show() -> SkeletonResponse:
+    """Display current arc status and phase progression."""
+    return SkeletonResponse(tool="arc_show")
+
+
+# ── Ship and snapshot tools ───────────────────────────────────
+
+
+@mcp.tool()
+def slice_ship() -> SkeletonResponse:
+    """Ship completed slice with PR and verification. Returns ship status."""
+    return SkeletonResponse(tool="slice_ship")
+
+
+@mcp.tool()
+def snapshot_revert() -> SkeletonResponse:
+    """Revert working tree to named snapshot. Returns reverted ref."""
+    return SkeletonResponse(tool="snapshot_revert")
+
+
+# ── Quality tools ─────────────────────────────────────────────
+
+
+@mcp.tool()
+def code_review() -> SkeletonResponse:
+    """Review staged changes for bugs and quality. Returns structured findings."""
+    return SkeletonResponse(tool="code_review")
+
+
+# ── Session and debugging tools ───────────────────────────────
+
+
+@mcp.tool()
+def debug_session() -> SkeletonResponse:
+    """Start or resume a persistent debug session. Returns session ID."""
+    return SkeletonResponse(tool="debug_session")
+
+
+@mcp.tool()
+def forensics() -> SkeletonResponse:
+    """Post-mortem failed workflow analysis. Returns forensic report."""
+    return SkeletonResponse(tool="forensics")
+
+
+# ── Utility tools ─────────────────────────────────────────────
+
+
+@mcp.tool()
+def intel_refresh() -> SkeletonResponse:
+    """Refresh codebase intelligence files. Returns updated intel paths."""
+    return SkeletonResponse(tool="intel_refresh")
+
+
+@mcp.tool()
+def pause_work() -> SkeletonResponse:
+    """Create context handoff for pausing. Returns handoff path."""
+    return SkeletonResponse(tool="pause_work")
+
+
+@mcp.tool()
+def resume_work() -> SkeletonResponse:
+    """Resume from saved context handoff. Returns restored state."""
+    return SkeletonResponse(tool="resume_work")
 
 
 if __name__ == "__main__":
