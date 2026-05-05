@@ -22,10 +22,10 @@ Plans:
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 043
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 042-01-PLAN.md — Implement topo_sort with Kahn's algorithm, stable ordering, cycle detection
+- [x] 042-01-PLAN.md — Implement topo_sort with Kahn's algorithm, stable ordering, cycle detection
 
 #### Phase 043 — Cycle detection (DFS color marking)
 **Goal:** `detect_cycles()` returns cycle paths; used at roadmap validation.
@@ -38,6 +38,10 @@ Plans:
 **Depends on:** 041
 **Requirements:** DAG-01, DAG-02
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 044-01-PLAN.md — Implement frontier() function with TDD (17 tests)
 
 #### Phase 045 — Dispatcher (group by Slice → TaskGroup per Slice, concurrency cap)
 **Goal:** `asyncio.gather` across Slices with cap; serial within Slice; configurable cap in `config.toml`.
