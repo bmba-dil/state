@@ -63,6 +63,9 @@ function makeApi(overrides: Record<string, unknown> = {}) {
     event: {
       on: mock(() => () => {}),
     },
+    route: {
+      register: mock(() => () => {}),
+    },
     lifecycle: {
       onDispose: mock(() => () => {}),
       signal: new AbortController().signal,

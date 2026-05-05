@@ -9,6 +9,7 @@ import { setupTeachConcept } from "./tui/teach-concept.js";
 import { setupStatusline, renderStatusline } from "./tui/statusline.js";
 import { setupPromptHint, renderPromptHint } from "./tui/prompt-hint.js";
 import { setupToast } from "./tui/toast.js";
+import { setupDagViewer, renderDagViewer, DAG_VIEWER_STATE } from "./tui/dag-viewer.js";
 
 /**
  * Creates the TuiPlugin function that opencode calls when loading the TUI module.
@@ -121,6 +122,15 @@ function createTuiPlugin(): TuiPlugin {
 
     api.slots.register(slotPlugin);
 
+    // ── 2.5. Register state.dag route (Phase 089) ──────────────────────
+    const unregisterDag = api.route.register([
+      {
+        name: "state.dag",
+        render: (_input) => renderDagViewer(DAG_VIEWER_STATE) as any,
+      },
+    ]);
+    api.lifecycle.onDispose(() => unregisterDag());
+
     // ── 3. Subscribe to daemon SSE ───────────────────────────────────────
     // Phase 082: BuildProgress — subscribes to daemon SSE via api.event bus.
     // State is updated by event handlers; renderBuildProgress() reads it each frame.
@@ -129,6 +139,9 @@ function createTuiPlugin(): TuiPlugin {
     // Phase 083: TeachConcept — subscribes to daemon SSE for connectivity heartbeat.
     // State is updated by event handlers; renderTeachConcept() reads it each frame.
     setupTeachConcept(api);
+
+    // Phase 089: DagViewer — subscribes to daemon SSE for DAG route state
+    setupDagViewer(api);
 
     // Phase 084: Statusline — subscribes to daemon SSE cost/status events
     // for sidebar_footer and home_footer rendering.

@@ -21,19 +21,15 @@ import { Box, Text, createTextAttributes } from "@opentui/core";
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
 import type { SessionStatus } from "@opencode-ai/sdk/v2";
 import type { EventSessionStatus } from "@opencode-ai/sdk/v2";
+import { STATUS_CHARS, STATUS_LABELS, statusColor, stepStatusColor } from "./status-palette.js";
+import type { StepStatus } from "./status-palette.js";
+
+export { statusColor, stepStatusColor };
+export type { StepStatus };
 
 /* ── Types ─────────────────────────────────────────────────────── */
 
 export type ConnectionStatus = "connected" | "disconnected" | "unreachable";
-export type StepStatus =
-  | "pending"
-  | "running"
-  | "done"
-  | "blocked"
-  | "retry"
-  | "unknown"
-  | "idle"
-  | "busy";
 
 export interface BuildProgressState {
   connection: ConnectionStatus;
@@ -70,19 +66,6 @@ const T = {
 const ATTR_BOLD = createTextAttributes({ bold: true });
 const ATTR_DIM = createTextAttributes({ dim: true });
 
-/* ── Status dot characters ──────────────────────────────────────── */
-
-const STATUS_DOTS: Record<string, string> = {
-  done: "\u25CF",    // ● black circle
-  running: "\u25C9", // ◉ fisheye
-  pending: "\u25CB",  // ○ white circle
-  blocked: "\u2717",  // ✗ ballot x
-  retry: "\u25C9",    // ◉ fisheye (same as running — retry is active)
-  unknown: "\u25CB",   // ○ white circle
-  idle: "\u25CF",      // ● black circle (idle = done)
-  busy: "\u25C9",      // ◉ fisheye (busy = running)
-};
-
 /* ── Module-level state ─────────────────────────────────────────── */
 
 export const BUILD_PROGRESS_STATE: BuildProgressState = {
@@ -113,35 +96,6 @@ function truncate(text: string, maxLen = 28): string {
 }
 
 /* ── Exported pure functions ────────────────────────────────────── */
-
-/**
- * Maps a StepStatus to its corresponding hex color from theme.json.
- *
- * Mapping:
- *   "running" | "busy" → T.accent (#6366F1)
- *   "done" | "idle"    → T.success (#10B981)
- *   "blocked"          → T.error (#EF4444)
- *   "retry"            → T.warning (#F59E0B)
- *   "pending" | "unknown" → T.textMuted (#64748B)
- */
-export function stepStatusColor(status: StepStatus): string {
-  switch (status) {
-    case "running":
-    case "busy":
-      return T.accent;
-    case "done":
-    case "idle":
-      return T.success;
-    case "blocked":
-      return T.error;
-    case "retry":
-      return T.warning;
-    case "pending":
-    case "unknown":
-    default:
-      return T.textMuted;
-  }
-}
 
 /**
  * Returns the status indicator text for the connection state.
@@ -244,7 +198,7 @@ export function renderDagBox(nodes: DagNode[], edges: DagEdge[]): string {
       rendered.add(current);
       const node = nodeMap.get(current);
       if (!node) break;
-      const dot = STATUS_DOTS[node.status] || STATUS_DOTS.unknown;
+      const dot = STATUS_CHARS[node.status] || STATUS_CHARS.unknown;
       chainParts.push(`${dot} ${node.name}`);
       // Follow first edge from this node
       const childIds: string[] = outgoingEdges.get(current) || [];
@@ -267,7 +221,7 @@ export function renderDagBox(nodes: DagNode[], edges: DagEdge[]): string {
   for (const node of nodes) {
     if (!rendered.has(node.id)) {
       rendered.add(node.id);
-      const dot = STATUS_DOTS[node.status] || STATUS_DOTS.unknown;
+      const dot = STATUS_CHARS[node.status] || STATUS_CHARS.unknown;
       const lineContent = `${dot} ${node.name}`;
       const rightPad = innerW - 2 - lineContent.length;
       lines.push(
@@ -295,8 +249,8 @@ export function renderDagBox(nodes: DagNode[], edges: DagEdge[]): string {
 export function renderBuildProgress(): ReturnType<typeof Box> {
   const st = BUILD_PROGRESS_STATE;
   const step = deriveStepStatus();
-  const color = stepStatusColor(step);
-  const dot = STATUS_DOTS[step] || STATUS_DOTS.unknown;
+  const color = statusColor(step);
+  const dot = STATUS_CHARS[step] || STATUS_CHARS.unknown;
 
   // ── A. Step status row ─────────────────────────────────────────
   let statusLabel: string;

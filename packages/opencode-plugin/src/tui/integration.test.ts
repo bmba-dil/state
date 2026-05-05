@@ -74,6 +74,9 @@ function makeApi() {
         return () => {};
       }),
     },
+    route: {
+      register: mock(() => () => {}),
+    },
     lifecycle: {
       onDispose: mock((cb: () => void) => {
         disposeCallbacks.push(cb);

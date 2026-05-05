@@ -1,5 +1,22 @@
 # MILESTONES: state
 
+## v10 TUI DAG Viewer (Shipped: 2026-05-05)
+
+**Phases completed:** 8 phases, 8 plans
+**Tests:** 344 passed (TUI) | **Build:** tui.js 51 KB
+
+**Key accomplishments:**
+
+- Registered `state.dag` route in opencode plugin with topological DAG layout (longest-path layering + barycenter cross-reduction)
+- Shared status palette (7 statuses, theme-derived colors) consumed by dag-viewer and build-progress
+- Full navigation (arrow keys, Enter, Esc) with focus/selection visual indicators and screen-reader accessibility
+- Filter bar with critical-path computation (DP longest-path algorithm from roots to leaves)
+- SSE live updates with diff-patching for incremental status changes from daemon
+- Layout caching with key-based invalidation + viewport clipping for graphs ≥100 nodes
+- DAG-VIEW-01 through DAG-VIEW-04 satisfied (all 4 v10 requirements)
+
+---
+
 ## v8 Plugin Server Hooks (Shipped: 2026-05-05)
 
 **Phases completed:** 0 phases, 0 plans, 0 tasks
@@ -164,7 +181,7 @@
 | v7 Per-Session Worker | 0/8 | Not started |
 | v8 Plugin Server Hooks (all 9) | 0/12 | Not started |
 | v9 Plugin TUI Bundle | 0/9 | Not started |
-| v10 TUI DAG Viewer | 0/8 | Not started |
+| v10 TUI DAG Viewer | 8/8 | **Complete** — Shipped 2026-05-05 |
 | v11 Mode Enforcement (6 Layers) | 0/9 | Not started |
 | v12 state-build MCP Server (skeleton) | 0/9 | Not started |
 | v13 state-teach MCP Server (skeleton) | 0/9 | Not started |
@@ -182,6 +199,6 @@
 | v25 Migration & Import | 0/8 | Not started |
 | v26 Portability Shims | 0/8 | Not started |
 | v27 Release & Packaging | 0/10 | Not started |
-| **TOTAL** | **45/256** | — |
+| **TOTAL** | **53/256** | — |
 
 *See `_archived/ROADMAP.md` for the pre-migration monolithic roadmap including DAG, tier boundaries, and revision history.*

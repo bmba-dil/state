@@ -28,12 +28,12 @@ describe("stepStatusColor", () => {
     expect(stepStatusColor("idle")).toBe("#10B981");
   });
 
-  it('returns T.error (#EF4444) for "blocked"', () => {
-    expect(stepStatusColor("blocked")).toBe("#EF4444");
+  it('returns T.warning (#F59E0B) for "blocked"', () => {
+    expect(stepStatusColor("blocked")).toBe("#F59E0B");
   });
 
-  it('returns T.warning (#F59E0B) for "retry"', () => {
-    expect(stepStatusColor("retry")).toBe("#F59E0B");
+  it('returns T.info (#3B82F6) for "retry"', () => {
+    expect(stepStatusColor("retry")).toBe("#3B82F6");
   });
 
   it('returns T.textMuted (#64748B) for "pending"', () => {
@@ -101,12 +101,12 @@ describe("renderDagBox", () => {
     expect(result).toContain("\u25CB"); // ○
   });
 
-  it("renders cross (✗) for blocked nodes", () => {
+  it("renders circle-dot (◍) for blocked nodes", () => {
     const nodes: DagNode[] = [
       { id: "d", name: "M-A3.P1", status: "blocked" },
     ];
     const result = renderDagBox(nodes, []);
-    expect(result).toContain("\u2717"); // ✗
+    expect(result).toContain("\u25CD"); // ◍
   });
 
   it('contains "Slice DAG" title in populated state', () => {
@@ -348,12 +348,12 @@ describe("renderDagBox status dots", () => {
     expect(result).toContain("\u25CF"); // black circle for idle
   });
 
-  it("renders fisheye dot for retry status", () => {
+  it("renders retry arrow for retry status", () => {
     const nodes: DagNode[] = [
       { id: "a", name: "Task1", status: "retry" },
     ];
     const result = renderDagBox(nodes, []);
-    expect(result).toContain("\u25C9"); // fisheye for retry
+    expect(result).toContain("\u21BB"); // ↻ for retry
   });
 
   it("renders open circle for unknown status", () => {

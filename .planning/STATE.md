@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v8
-milestone_name: — Plugin Server Hooks
-status: v8 milestone complete
-last_updated: "2026-05-05T11:09:32.227Z"
+milestone: v10
+milestone_name: — TUI DAG Viewer
+status: v10 milestone complete
+last_updated: "2026-05-05T20:00:00.000Z"
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-05 — v8 (Plugin Server Hooks) shipped. 8 / 27 milestones complete. v8 delivered 12 phases (068–079), 10/11 HOOK requirements satisfied (HOOK-05 event hook deferred — `event` not in opencode Hooks type v1.14.35). `@state/opencode-plugin` TS package scaffolded with bun build bundling, 9 server hooks implemented, install.sh auto-registration.
+**Last updated:** 2026-05-05 — v10 (TUI DAG Viewer) shipped. 9 / 27 milestones complete. v10 delivered 8 phases (089–096), 4/4 DAG-VIEW requirements satisfied. Registered `state.dag` route with topological layout, shared status palette, navigation, filtering, SSE live updates, and large-graph performance optimizations.
 
 ---
 
@@ -27,20 +27,20 @@ last_updated: "2026-05-05T11:09:32.227Z"
 
 ## Current Position
 
-**Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓)
-**Last shipped milestone:** v8 — Plugin Server Hooks — Shipped 2026-05-05
-**Active milestone:** v8 — just shipped; v9 next unblocked
+**Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓, v10 ✓)
+**Last shipped milestone:** v10 — TUI DAG Viewer — Shipped 2026-05-05
+**Active milestone:** v10 — just shipped; v9 or v11 next unblocked
 **Active phase:** None currently (milestone just completed)
 **Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker)
 
-**Phases complete:** 80 / 268 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11 of 12)
-**Milestones complete:** 8 / 27
+**Phases complete:** 88 / 268 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11 of 12, v10: 8)
+**Milestones complete:** 9 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[##########...................................................] 30%
+[###########................................................] 33%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
@@ -72,13 +72,14 @@ A1 (= v1) and A2 (= v2) now complete.
 | v6 shipped | 2026-05-04 |
 | v7 shipped | 2026-05-05 |
 | v8 shipped | 2026-05-05 |
+| v10 shipped | 2026-05-05 |
 | Phases defined | 268 |
 | Milestones defined | 27 |
 | v1 requirements captured | 221 |
 | Coverage | 100% |
 | P0 pitfalls identified | 16 |
 | P0 pitfalls closed | 12 / 16 (P0-9 in v1; P0-1..P0-8 + P0-13 + P0-14 in v2; P0-10 in v4; P0-15 in v6; P0-16 in v5) |
-| Milestones shipped | 8 / 27 |
+| Milestones shipped | 9 / 27 |
 | v1-milestone phases shipped | 11 / 11 |
 | v2-milestone phases shipped | 15 / 15 (12 + 3 gap-closure) |
 | v3-milestone phases shipped | 7 / 9 (030/031 deferred) |
@@ -87,7 +88,8 @@ A1 (= v1) and A2 (= v2) now complete.
 | v6-milestone phases shipped | 10 / 10 |
 | v7-milestone phases shipped | 8 / 8 |
 | v8-milestone phases shipped | 11 / 12 (073 deferred) |
-| Total project phases shipped | 80 / 268 |
+| v10-milestone phases shipped | 8 / 8 |
+| Total project phases shipped | 88 / 268 |
 | v1 commits | 67 |
 | v2 commits (since v1 tag) | 153 |
 | v6 commits (daemon dir) | 27 |
@@ -130,6 +132,19 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 1. **v9 — Plugin TUI Bundle:** TUI extensions (sidebar, routes, dialogs, statusline) for `@state/opencode-plugin`. v8 server hooks unblock this.
 2. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
 3. **Optional cleanup:** v3/v4/v5/v6/v7/v8 shipped; old phase branches safe to clean.
+
+### v10 milestone delivered
+
+- `state.dag` route registered in opencode plugin via `api.route.register()`
+- Topological layout algorithm (longest-path layering + barycenter cross-reduction)
+- Shared status palette (`status-palette.ts`) with 7 statuses and theme-derived colors
+- Split-view detail pane with node metadata and dependency display
+- Keyboard navigation (↑↓ to navigate, Enter to select, Esc to deselect)
+- Filter bar with presets: all, active, blocked, critical-path (DP longest-path)
+- SSE live updates with diff-patching for incremental node status changes
+- Layout caching with key-based invalidation + viewport clipping for graphs ≥100 nodes
+- Accessibility: screen-reader announcements, focus indicators, keyboard-only navigation
+- 8 phases, 344 TUI tests, 0 failures, 4/4 DAG-VIEW requirements satisfied
 
 ### v8 milestone delivered
 
