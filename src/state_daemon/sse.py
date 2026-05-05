@@ -347,3 +347,63 @@ async def _heartbeat_loop(writer: asyncio.StreamWriter) -> None:
         except Exception:
             log.exception("sse.heartbeat_error")
             break
+
+
+# ---------------------------------------------------------------------------
+# SSE Bus — event-store post-commit broadcast (Task 054.3)
+# ---------------------------------------------------------------------------
+
+
+class SseBus:
+    """Connects the event store to the SSE broadcast bus.
+
+    Receives event rows from post-commit hooks, serializes them as JSON,
+    and fans them out to all connected SSE clients via the client manager.
+
+    Broadcast is fire-and-forget via ``asyncio.create_task`` — the event
+    store does not block on SSE delivery.
+    """
+
+    def __init__(self, client_manager: SseClientManager) -> None:
+        self._client_manager = client_manager
+
+    def on_event(self, event_row: dict[str, Any]) -> None:
+        """Post-commit callback: broadcast an event to SSE subscribers.
+
+        Args:
+            event_row: A dict with event-table columns — must include
+                ``id``, ``type``, ``data``, ``mode``.  If ``data`` is a
+                dict, it is serialized deterministically to JSON.
+        """
+        event_id = event_row["id"]
+        event_type = event_row["type"]
+        mode = event_row.get("mode", "kernel")
+
+        # Serialize data field — may already be JSON string or a dict.
+        data = event_row["data"]
+        if isinstance(data, dict):
+            event_json = json.dumps(data, sort_keys=True, separators=(",", ":"))
+        elif isinstance(data, str):
+            event_json = data
+        else:
+            event_json = json.dumps(data, sort_keys=True, separators=(",", ":"))
+
+        # Fire-and-forget — the event store must not block on SSE delivery.
+        asyncio.create_task(self._broadcast(event_json, event_type, event_id, mode))
+
+    async def _broadcast(
+        self,
+        event_json: str,
+        event_type: str,
+        event_id: str,
+        mode: str,
+    ) -> None:
+        """Schedule the broadcast on the event loop.
+
+        Runs as a background task so any slow clients or full queues don't
+        stall the event store's post-commit path.
+        """
+        try:
+            self._client_manager.broadcast(event_json, event_type, event_id, mode)
+        except Exception:
+            log.exception("sse.bus.broadcast_error", event_id=event_id)

@@ -513,3 +513,132 @@ class TestSseEndpoint:
             await w2.wait_closed()
         finally:
             await server.stop()
+
+
+# ---------------------------------------------------------------------------
+# Task 054.3 — SseBus + Event Store post-commit integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestSseBus:
+    """Tests for SseBus — event-store post-commit broadcast."""
+
+    @pytest.mark.asyncio
+    async def test_on_event_calls_manager_broadcast(self) -> None:
+        """SseBus.on_event() serializes and broadcasts to client manager."""
+        from src.state_daemon.sse import SseBus, SseClientManager
+
+        mgr = SseClientManager()
+        client = mgr.add_client()
+        bus = SseBus(mgr)
+
+        event_row = {
+            "id": "ulid-001",
+            "type": "state.test.event",
+            "data": {"hello": "world"},
+            "mode": "kernel",
+        }
+
+        # on_event is fire-and-forget — give the task a moment to complete.
+        bus.on_event(event_row)
+        await asyncio.sleep(0.1)
+
+        msg = await asyncio.wait_for(client.queue.get(), timeout=2.0)
+        assert "id: ulid-001" in msg
+        assert "event: state.test.event" in msg
+        assert "hello" in msg
+
+    @pytest.mark.asyncio
+    async def test_on_event_handles_string_data(self) -> None:
+        """SseBus.on_event() passes string data through unchanged."""
+        from src.state_daemon.sse import SseBus, SseClientManager
+
+        mgr = SseClientManager()
+        client = mgr.add_client()
+        bus = SseBus(mgr)
+
+        event_row = {
+            "id": "ulid-002",
+            "type": "state.raw",
+            "data": '{"already":"json"}',
+            "mode": "build",
+        }
+
+        bus.on_event(event_row)
+        await asyncio.sleep(0.1)
+
+        msg = await asyncio.wait_for(client.queue.get(), timeout=2.0)
+        assert '{"already":"json"}' in msg
+
+    @pytest.mark.asyncio
+    async def test_event_store_post_commit_triggers_sse(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Appending to SqliteEventStore triggers SSE broadcast via post-commit."""
+        import shutil
+        import tempfile
+
+        from src.state_daemon.sse import SseBus, SseClientManager, SseEndpointHandler
+        from src.state_daemon.server import DaemonServer
+        from src.state_core.events import SqliteEventStore
+        from src.state_core.migrations import migrate
+
+        # Set up isolated test database
+        db_path = tmp_path / ".state" / "events.sqlite"
+        monkeypatch.setenv("STATE_DB_PATH", str(db_path))
+
+        # Copy migrations so migrate() can find them
+        migrations_src = Path.cwd() / ".state" / "migrations"
+        migrations_dst = tmp_path / ".state" / "migrations"
+        if migrations_src.exists():
+            shutil.copytree(migrations_src, migrations_dst, dirs_exist_ok=True)
+
+        await migrate()
+
+        # Use a temp socket path
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = str(Path(tmpdir) / "sse-bus-test.sock")
+
+            mgr = SseClientManager()
+            bus = SseBus(mgr)
+            store = SqliteEventStore()
+            store.add_post_commit_callback(bus.on_event)
+
+            sse_handler = SseEndpointHandler(mgr)
+
+            async def _router(method: str, path: str, headers: dict[str, str], body: bytes) -> bytes:
+                return b"{}"
+
+            server = DaemonServer(socket_path, _router, sse_handler=sse_handler)
+            await server.start()
+
+            try:
+                # Connect an SSE client
+                reader, writer = await asyncio.open_unix_connection(socket_path)
+                writer.write(_raw_request("GET", "/events/subscribe"))
+                await writer.drain()
+
+                # Read past headers
+                await asyncio.wait_for(reader.readline(), timeout=2.0)
+                while True:
+                    line = await asyncio.wait_for(reader.readline(), timeout=2.0)
+                    if line in (b"\r\n", b"\n", b""):
+                        break
+
+                # Write an event through the event store — should trigger SSE broadcast
+                await store.append(
+                    "step",
+                    "step-054",
+                    "state.step.executed",
+                    {"action": "test-sse"},
+                    mode="build",
+                )
+
+                # SSE client should receive the event
+                evt = await _read_sse_event(reader, timeout=3.0)
+                assert evt["event"] == "state.step.executed"
+                data = json.loads(evt["data"])
+                assert data["action"] == "test-sse"
+
+                writer.close()
+                await writer.wait_closed()
+            finally:
+                await server.stop()

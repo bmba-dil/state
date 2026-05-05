@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Any, Protocol
 
 import aiosqlite
@@ -104,6 +104,7 @@ class SqliteEventStore:
                 when run_repair_now() is called. Defaults to False.
         """
         self._repair_done = False
+        self._post_commit_callbacks: list[Callable[[dict[str, Any]], None]] = []
 
     async def _maybe_repair(self, source: str = "unknown") -> None:
         """Run repair once per session if not yet done.
@@ -136,6 +137,21 @@ class SqliteEventStore:
         self._repair_done = True
         log.info("repair_forced_complete", count=len(repairs))
         return repairs
+
+    def add_post_commit_callback(
+        self, callback: Callable[[dict[str, Any]], None]
+    ) -> None:
+        """Register a callback invoked after every successful ``append()`` commit.
+
+        The callback receives the event row dict (keys: ``id``, ``seq``,
+        ``aggregate_id``, ``type``, ``data``, ``ts``, ``mode``).  Callbacks
+        are called synchronously after the transaction commits; callers
+        should dispatch async work via ``asyncio.create_task()`` if needed.
+
+        Args:
+            callback: A synchronous callable that accepts an event row dict.
+        """
+        self._post_commit_callbacks.append(callback)
 
     async def append(
         self,
@@ -217,16 +233,29 @@ class SqliteEventStore:
 
             await db.commit()
 
+        # Build the event row for post-commit callbacks and mirror.
+        event_row: dict[str, Any] = {
+            "id": id_,
+            "seq": seq,
+            "aggregate_type": aggregate_type,
+            "aggregate_id": aggregate_id,
+            "type": event_type,
+            "data": data,
+            "ts": ts,
+            "mode": mode,
+        }
+
+        # Invoke post-commit callbacks (Phase 054 — SSE bus broadcast).
+        for callback in self._post_commit_callbacks:
+            try:
+                callback(event_row)
+            except Exception:
+                log.exception(
+                    "events.post_commit_callback_error",
+                    event_id=id_,
+                )
+
         if mirror is not None:
-            event_row: dict[str, Any] = {
-                "id": id_,
-                "seq": seq,
-                "aggregate_id": aggregate_id,
-                "type": event_type,
-                "data": data,
-                "ts": ts,
-                "mode": mode,
-            }
             asyncio.ensure_future(mirror.emit(event_row))
 
         return id_
