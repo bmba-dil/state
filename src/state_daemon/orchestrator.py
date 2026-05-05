@@ -22,6 +22,7 @@ from state_core.observability import assert_redactor_attached, install
 from state_core.reconciler import StartupReconciler
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
 
@@ -33,6 +34,9 @@ _DEFAULT_SOCKET_PATH = ".state/daemon.sock"
 
 # Module-level server reference for graceful shutdown via signal handlers.
 _server: DaemonServer | None = None
+
+# Pid file path — set during startup so the shutdown handler can clean it up.
+_pid_path: str | None = None
 
 
 async def startup() -> None:
@@ -69,12 +73,21 @@ async def startup() -> None:
     caller can keep the event loop alive.
     """
     global _server
+    global _pid_path
 
     # Step 0 (Phase 020 / AUTH-10): install + verify redactor BEFORE any other I/O.
     # Failure raises RedactorNotAttached which is fatal — the daemon process
     # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
     install()
     assert_redactor_attached()
+
+    # Step 0.0 (Phase 051 / DAE-03): acquire pid file BEFORE any network bind.
+    # P0-15 defense: stale pid detection prevents a zombie pid-file from blocking
+    # daemon restart.  Returns False if another instance is already running.
+    _pid_path = os.environ.get("STATE_DAEMON_PID", ".state/daemon.pid")
+    if not acquire_pid_file(_pid_path):
+        log.critical("startup.pid_file_denied", path=_pid_path)
+        raise SystemExit(1)
 
     # Step 0.1 (Phase 023 / PRV-06): build shared HTTP client + Deps container.
     # Must be created inside an async function (not at module level) to avoid
@@ -156,7 +169,11 @@ def _schedule_shutdown() -> None:
 async def _shutdown_server() -> None:
     """Stop the HTTP server and clean up."""
     global _server
+    global _pid_path
     if _server is not None:
         await _server.stop()
         _server = None
         log.info("daemon.shutdown.complete")
+    if _pid_path is not None:
+        release_pid_file(_pid_path)
+        _pid_path = None

@@ -43,6 +43,8 @@ async def test_orchestrator_runs_importer_after_redactor_selfcheck() -> None:
     with (
         patch("state_daemon.orchestrator.install", new_callable=MagicMock) as mock_install,
         patch("state_daemon.orchestrator.assert_redactor_attached", new_callable=MagicMock) as mock_assert,
+        patch("state_daemon.orchestrator.acquire_pid_file", return_value=True),
+        patch("state_daemon.orchestrator.release_pid_file"),
         patch("state_daemon.orchestrator.import_from_opencode", new_callable=AsyncMock) as mock_importer,
         patch("state_daemon.orchestrator.SqliteEventStore") as store_cls,
         patch("state_daemon.orchestrator.SyncEventMirror") as mirror_cls,
@@ -110,6 +112,7 @@ async def test_orchestrator_import_failure_does_not_abort_boot() -> None:
     with (
         patch("state_daemon.orchestrator.install"),
         patch("state_daemon.orchestrator.assert_redactor_attached"),
+        patch("state_daemon.orchestrator.acquire_pid_file", return_value=True),
         patch("state_daemon.orchestrator.import_from_opencode", importer_mock),
         patch("state_daemon.orchestrator.SqliteEventStore") as store_cls,
         patch("state_daemon.orchestrator.SyncEventMirror"),
@@ -153,6 +156,7 @@ async def test_orchestrator_passes_store_and_mirror_to_importer() -> None:
     with (
         patch("state_daemon.orchestrator.install"),
         patch("state_daemon.orchestrator.assert_redactor_attached"),
+        patch("state_daemon.orchestrator.acquire_pid_file", return_value=True),
         patch("state_daemon.orchestrator.import_from_opencode", importer_mock),
         patch("state_daemon.orchestrator.SqliteEventStore") as store_cls,
         patch("state_daemon.orchestrator.SyncEventMirror") as mirror_cls,

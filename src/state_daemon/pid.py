@@ -227,3 +227,75 @@ def _is_pid_alive_fallback(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Task 051.3 — PID file lifecycle
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_PID_PATH = ".state/daemon.pid"
+
+
+def acquire_pid_file(path: str = _DEFAULT_PID_PATH) -> bool:
+    """Attempt to claim the pid file at *path*.
+
+    Returns ``True`` if the pid file was successfully acquired (daemon may
+    start).  Returns ``False`` if another daemon instance is already running.
+
+    Logic:
+    1. No file → write new file, return True.
+    2. File exists + pid matches a running process with same start time →
+       another daemon is running, return False (log error, do NOT start).
+    3. File exists + pid is stale (dead or recycled) → remove old file,
+       write new one, log warning, return True.
+    """
+    existing = read_pid_file(path)
+
+    if existing is None:
+        # No valid pid file — safe to claim.
+        write_pid_file(path)
+        log.info("daemon.pid.acquired", path=path)
+        return True
+
+    pid = existing["pid"]
+    start_ns = existing["start_time_ns"]
+
+    if is_pid_alive(pid, start_ns):
+        log.error(
+            "daemon.pid.already_running",
+            path=path,
+            pid=pid,
+        )
+        return False
+
+    # Stale pid file — clean up and claim.
+    log.warning(
+        "daemon.pid.stale_cleaned",
+        path=path,
+        stale_pid=pid,
+        stale_start_ns=start_ns,
+    )
+    try:
+        os.unlink(path)
+    except OSError:
+        pass  # already gone — proceed
+
+    write_pid_file(path)
+    log.info("daemon.pid.acquired_after_cleanup", path=path)
+    return True
+
+
+def release_pid_file(path: str = _DEFAULT_PID_PATH) -> None:
+    """Remove the pid file at *path* (called on graceful shutdown)."""
+    try:
+        os.unlink(path)
+        log.info("daemon.pid.released", path=path)
+    except FileNotFoundError:
+        pass  # already gone — nothing to do
+    except OSError as exc:
+        log.warning(
+            "daemon.pid.release_failed",
+            path=path,
+            error_type=type(exc).__name__,
+        )

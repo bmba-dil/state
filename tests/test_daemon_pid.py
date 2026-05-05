@@ -15,8 +15,10 @@ from src.state_daemon.pid import (
     _is_pid_alive_fallback,
     _is_pid_alive_linux,
     _parse_lstart,
+    acquire_pid_file,
     is_pid_alive,
     read_pid_file,
+    release_pid_file,
     write_pid_file,
 )
 
@@ -283,3 +285,96 @@ class TestParseLstart:
     def test_unknown_month_raises(self) -> None:
         with pytest.raises(ValueError):
             _parse_lstart("Mon Xyz  1 12:00:00 2026")
+
+
+# ---------------------------------------------------------------------------
+# Task 051.3 — acquire_pid_file / release_pid_file lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestAcquirePidFile:
+    """PID file acquisition with stale detection and double-start prevention."""
+
+    def test_fresh_start_acquires_and_writes(self, tmp_path: Path) -> None:
+        """When no pid file exists, acquire returns True and creates the file."""
+        path = str(tmp_path / "daemon.pid")
+        result = acquire_pid_file(path)
+        assert result is True
+        data = read_pid_file(path)
+        assert data is not None
+        assert data["pid"] == os.getpid()
+
+    def test_double_start_prevented(self, tmp_path: Path) -> None:
+        """When a live daemon is detected, acquire returns False."""
+        path = str(tmp_path / "daemon.pid")
+
+        # First acquire succeeds
+        assert acquire_pid_file(path) is True
+
+        # Second acquire — the pid is our own, and it's alive
+        result = acquire_pid_file(path)
+        assert result is False
+
+    def test_stale_pid_cleaned_and_reclaimed(self, tmp_path: Path) -> None:
+        """When the pid file exists but the process is dead, stale cleanup happens."""
+        path = str(tmp_path / "daemon.pid")
+
+        # Write a pid file for a dead process (pid 99999 is unlikely to exist)
+        import json
+        path_lib = Path(path)
+        path_lib.write_text(
+            json.dumps({"pid": 99999, "start_time_ns": 0}),
+            encoding="utf-8",
+        )
+
+        # Simulate stale — pid 99999 doesn't exist, so is_pid_alive returns False
+        with mock.patch("src.state_daemon.pid.is_pid_alive", return_value=False):
+            result = acquire_pid_file(path)
+            assert result is True
+
+            # File should contain OUR pid, not 99999
+            data = read_pid_file(path)
+            assert data is not None
+            assert data["pid"] == os.getpid()
+
+    def test_stale_pid_different_start_time_reclaimed(self, tmp_path: Path) -> None:
+        """When pid exists but start time differs (pid recycled), stale cleanup."""
+        path = str(tmp_path / "daemon.pid")
+
+        # Write a pid file with our pid but a different start_time_ns
+        import json
+        path_lib = Path(path)
+        path_lib.write_text(
+            json.dumps({"pid": os.getpid(), "start_time_ns": 0}),
+            encoding="utf-8",
+        )
+
+        # is_pid_alive returns False because start_time_ns doesn't match
+        with mock.patch("src.state_daemon.pid.is_pid_alive", return_value=False):
+            result = acquire_pid_file(path)
+            assert result is True
+
+
+class TestReleasePidFile:
+    """PID file removal on graceful shutdown."""
+
+    def test_removes_existing_file(self, tmp_path: Path) -> None:
+        path = str(tmp_path / "daemon.pid")
+        write_pid_file(path)
+        assert os.path.isfile(path)
+
+        release_pid_file(path)
+        assert not os.path.isfile(path)
+
+    def test_no_error_when_already_missing(self, tmp_path: Path) -> None:
+        path = str(tmp_path / "nonexistent.pid")
+        # Should not raise
+        release_pid_file(path)
+
+    def test_warns_on_permission_error(self, tmp_path: Path) -> None:
+        path = str(tmp_path / "daemon.pid")
+        write_pid_file(path)
+
+        with mock.patch("os.unlink", side_effect=PermissionError):
+            # Should not raise — logs warning
+            release_pid_file(path)
