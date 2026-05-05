@@ -454,7 +454,7 @@ def load_scheduler_config(config_path: Path | None = None) -> SchedulerConfig:
         if not isinstance(scheduler_data, dict):
             return defaults
         merged = defaults.model_dump() | {
-            k: v for k, v in scheduler_data.items() if k in defaults.model_fields
+            k: v for k, v in scheduler_data.items() if k in SchedulerConfig.model_fields
         }
         return SchedulerConfig(**merged)
     except (tomllib.TOMLDecodeError, OSError, ValueError):

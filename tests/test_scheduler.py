@@ -756,4 +756,45 @@ class TestDispatcher:
         assert received.kind == "step"
         assert received.status == "idle"
 
+    # --- Config tests -------------------------------------------------------
 
+    def test_config_defaults(self) -> None:
+        """load_scheduler_config() with missing file returns defaults (cap=4)."""
+        config = load_scheduler_config(Path("/nonexistent/config.toml"))
+        assert config.concurrency_cap == 4
+
+    def test_config_from_toml(self) -> None:
+        """load_scheduler_config() reads concurrency_cap from [scheduler] section."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write("[scheduler]\nconcurrency_cap = 8\n")
+            f.flush()
+            path = Path(f.name)
+        try:
+            config = load_scheduler_config(path)
+            assert config.concurrency_cap == 8
+        finally:
+            os.unlink(path)
+
+    def test_config_clamps_invalid_range(self) -> None:
+        """SchedulerConfig rejects concurrency_cap outside [1, 64]."""
+        with pytest.raises(ValidationError):
+            SchedulerConfig(concurrency_cap=0)
+        with pytest.raises(ValidationError):
+            SchedulerConfig(concurrency_cap=65)
+
+    def test_config_rejects_extra_fields(self) -> None:
+        """SchedulerConfig rejects unknown fields (extra='forbid')."""
+        with pytest.raises(ValidationError):
+            SchedulerConfig(unknown_field=123)  # type: ignore[call-arg]
+
+    def test_config_missing_section_returns_defaults(self) -> None:
+        """TOML file without [scheduler] section returns defaults."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+            f.write("[other]\nkey = 1\n")
+            f.flush()
+            path = Path(f.name)
+        try:
+            config = load_scheduler_config(path)
+            assert config.concurrency_cap == 4
+        finally:
+            os.unlink(path)
