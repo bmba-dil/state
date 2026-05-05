@@ -52,10 +52,10 @@ Plans:
 **Depends on:** 044
 **Requirements:** DAG-02
 **Parallelizable:** no
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 045-01-PLAN.md — Implement DAGScheduler.tick() with frontier grouping, asyncio.gather dispatch, SchedulerConfig from config.toml
+- [x] 045-01-PLAN.md — Implement DAGScheduler.tick() with frontier grouping, asyncio.gather dispatch, SchedulerConfig from config.toml
 
 #### Phase 046 — TaskGroup watchdog (P0-16 defence)
 **Goal:** Nested TaskGroup regression harness; watchdog detects `CancelledError` swallow via exception group inspection; fails loud.
@@ -63,6 +63,10 @@ Plans:
 **Requirements:** DAG-03
 **Parallelizable:** no
 **P0 pitfall:** P0-16
+**Plans:** 0/1 plans complete
+
+Plans:
+- [ ] 046-01-PLAN.md — Refactor tick() to TaskGroup, implement CancelledError watchdog, nested TaskGroup regression harness
 
 #### Phase 047 — Reactive trigger (subscribe to v1 event stream)
 **Goal:** On `state.step.advanced`, `state.slice.worktree_ready`, `state.phase.planned` → recompute frontier; no polling.
@@ -81,6 +85,10 @@ Plans:
 **Depends on:** 042, 044
 **Requirements:** DAG-07
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+
+Plans:
+- [ ] 049-01-PLAN.md — DAG CLI module with render_dag engine, show command, Hypothesis property test
 
 ---
 
