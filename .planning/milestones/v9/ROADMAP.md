@@ -12,6 +12,8 @@
 **Depends on:** 068
 **Requirements:** TUI-01
 **Parallelizable:** yes
+**Plans:** 1 plan (Wave 1)
+- [ ] 080-01-PLAN.md — Create theme.json + tui.ts (TuiPluginModule scaffold) + re-export from index.ts
 
 #### Phase 081 — Sidebar slot (`sidebar_content`) — mode-aware renderer
 **Goal:** Reads `.state/mode.json` at render; conditional render build-tree vs concept-state.
