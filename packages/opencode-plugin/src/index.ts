@@ -9,22 +9,26 @@ import { chatSystemTransform } from "./hooks/chat-system-transform.js";
 import { sessionCompacting } from "./hooks/session-compacting.js";
 import { chatParams, chatHeaders } from "./hooks/chat-params.js";
 import { commandExecuteBefore } from "./hooks/command-execute-before.js";
+import { config } from "./hooks/config.js";
+import { event } from "./hooks/event.js";
 import { shellEnv } from "./hooks/shell-env.js";
 
 // PluginModule["server"] type is Plugin = (input, options?) => Promise<Hooks>.
 // The Promise<Hooks> return type requires the async keyword even though the
 // body has no await expressions — without it, the type assignment fails.
 export const server: PluginModule["server"] = async () => ({
+  "chat.headers": chatHeaders,
   "chat.message": chatMessage,
-  "tool.execute.before": toolExecuteBefore,
-  "tool.execute.after": toolExecuteAfter,
-  "permission.ask": permissionAsk,
+  "chat.params": chatParams,
+  "command.execute.before": commandExecuteBefore,
+  "config": config,
+  "event": event,
   "experimental.chat.system.transform": chatSystemTransform,
   "experimental.session.compacting": sessionCompacting,
-  "chat.params": chatParams,
-  "chat.headers": chatHeaders,
-  "command.execute.before": commandExecuteBefore,
+  "permission.ask": permissionAsk,
   "shell.env": shellEnv,
+  "tool.execute.after": toolExecuteAfter,
+  "tool.execute.before": toolExecuteBefore,
 });
 
 const statePlugin: PluginModule = {
