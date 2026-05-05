@@ -675,3 +675,27 @@ class TestIntegration:
             await writer.wait_closed()
         finally:
             await srv.stop()
+
+
+# ===========================================================================
+# Task 098-02 — validate_daemon_path() subtree enforcement
+# ===========================================================================
+
+
+class TestValidateDaemonPath:
+    """validate_daemon_path() — daemon subtree enforcement (layer 2 of 6)."""
+
+    def test_validate_daemon_path_default_permissive(self) -> None:
+        """Without load_mode_config(), validate_daemon_path() uses 'both' default.
+
+        This test imports validate_daemon_path from the daemon middleware.
+        Since no load_mode_config() has been called, get_current_mode()
+        returns 'both' — which allows all paths.
+        """
+        from src.state_daemon.middleware import validate_daemon_path
+
+        # Default "both" mode allows both subtrees
+        validate_daemon_path(".state/build/events.sqlite")
+        validate_daemon_path(".state/teach/concepts.db")
+        validate_daemon_path(".state/mode.json")
+        validate_daemon_path(".state/events.sqlite")
