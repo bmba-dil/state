@@ -19,7 +19,9 @@ from state_core.events import SqliteEventStore
 from state_core.http_client import build_shared_client
 from state_core.migrations import migrate
 from state_core.observability import assert_redactor_attached, install
+from state_core.reactive import ReactiveTrigger
 from state_core.reconciler import StartupReconciler
+from state_core.scheduler import DAGScheduler, Edge, Node
 from state_core.sync_mirror import SyncEventMirror
 
 from src.state_daemon.logging import configure_daemon_logging
@@ -155,6 +157,26 @@ async def startup() -> None:
     store.add_post_commit_callback(sse_bus.on_event)
     sse_handler = SseEndpointHandler(sse_client_manager)
     log.info("startup: SSE bus wired to event store post-commit")
+
+    # Step 3.6 (Phase 047): Create reactive trigger wired to DAG scheduler.
+    # On state.step.advanced / state.slice.worktree_ready / state.phase.planned,
+    # DAGScheduler.tick() is called with current DAG state (no polling).
+    log.info("startup: initializing reactive trigger")
+    scheduler = DAGScheduler(concurrency_cap=4)
+    # dag_provider returns empty DAG initially — the DAG state is populated
+    # by downstream phases (048+) that build DAG state from event projections.
+    # For Phase 047, the trigger mechanism itself is the deliverable.
+    dag_state: list[Node] = []
+    dag_edges: list[Edge] = []
+    reactive_trigger = ReactiveTrigger(
+        scheduler=scheduler,
+        dag_provider=lambda: (dag_state, dag_edges),
+    )
+    store.add_post_commit_callback(reactive_trigger.on_event)
+    log.info(
+        "startup: reactive trigger wired to event store",
+        watched_events=sorted(reactive_trigger.watched_events),
+    )
 
     # Step 4 (Phase 050 / 052): Resolve deterministic socket path, start
     # HTTP server, and persist the path for worker/client discovery.
