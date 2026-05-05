@@ -9,7 +9,7 @@ Phase 111 (shared library wiring).
 
 from __future__ import annotations
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel
 
 mcp = FastMCP(
@@ -34,26 +34,42 @@ class SkeletonResponse(BaseModel):
 
 
 @mcp.tool()
-def plan_step(task_id: str | None = None) -> SkeletonResponse:
+def plan_step(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Create step plan from discuss context. Returns structured task list."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="plan_step", task_id=task_id)
 
 
 @mcp.tool()
-def execute_step(task_id: str | None = None) -> SkeletonResponse:
+def execute_step(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Execute planned step tasks. Reports progress per task."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="execute_step", task_id=task_id)
 
 
 @mcp.tool()
-def verify_step(task_id: str | None = None) -> SkeletonResponse:
+def verify_step(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Goal-backward verification of step outputs. Returns pass/gap status."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="verify_step", task_id=task_id)
 
 
 @mcp.tool()
-def discuss_step(task_id: str | None = None) -> SkeletonResponse:
+def discuss_step(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Surface implementation decisions for a step. Returns grey-area table."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="discuss_step", task_id=task_id)
 
 
@@ -97,8 +113,12 @@ def snapshot_revert() -> SkeletonResponse:
 
 
 @mcp.tool()
-def code_review(task_id: str | None = None) -> SkeletonResponse:
+def code_review(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Review staged changes for bugs and quality. Returns structured findings."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="code_review", task_id=task_id)
 
 
@@ -106,8 +126,12 @@ def code_review(task_id: str | None = None) -> SkeletonResponse:
 
 
 @mcp.tool()
-def debug_session(task_id: str | None = None) -> SkeletonResponse:
+def debug_session(
+    task_id: str | None = None,
+    ctx: Context = None,
+) -> SkeletonResponse:
     """Start or resume a persistent debug session. Returns session ID."""
+    _ = ctx  # Phase 111: ctx.report_progress(progress=..., total=...)
     return SkeletonResponse(tool="debug_session", task_id=task_id)
 
 
