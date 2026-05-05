@@ -188,6 +188,141 @@ def topo_sort(edges: list[Edge], nodes: list[Node]) -> list[Node]:
     return result
 
 
+# -- Frontier calculator --------------------------------------------------------
+
+
+def frontier(nodes: list[Node], edges: list[Edge]) -> list[Node]:
+    """Return unblocked nodes whose blocks/data predecessors are all DONE.
+
+    - Nodes with status 'done' or 'failed' are excluded.
+    - Only 'blocks' and 'data' edges block; 'soft' edges do NOT block.
+    - A node is unblocked iff ALL its blocks/data predecessors have status 'done'.
+
+    Args:
+        nodes: All nodes in the DAG.
+        edges: Directed dependency edges (source_node -> target_node).
+
+    Returns:
+        Nodes that are unblocked and not done/failed.
+
+    Raises:
+        ValueError: If an edge references a source_node not in the nodes list.
+    """
+    node_map = {n.id: n for n in nodes}
+
+    result: list[Node] = []
+    for node in nodes:
+        # Exclude done and failed nodes — they're already resolved
+        if node.status in ("done", "failed"):
+            continue
+
+        # Find all edges targeting this node that are blocking
+        blocking_predecessors = [
+            edge for edge in edges
+            if edge.target_node == node.id
+            and edge.kind in ("blocks", "data")
+        ]
+
+        # Validate edge endpoints (matching topo_sort pattern)
+        for edge in blocking_predecessors:
+            if edge.source_node not in node_map:
+                raise ValueError(
+                    f"Edge source '{edge.source_node}' not found in node list"
+                )
+
+        # Check all blocking predecessors are done
+        all_done = all(
+            node_map[edge.source_node].status == "done"
+            for edge in blocking_predecessors
+        )
+
+        if all_done:
+            result.append(node)
+
+    return result
+
+
+# -- Cycle detection -----------------------------------------------------------
+
+
+def detect_cycles(edges: list[Edge]) -> list[list[str]]:
+    """DFS-based cycle detection with 3-color marking (WHITE/GRAY/BLACK).
+
+    Returns a list of cycle paths found in the graph. Each cycle is
+    a list[str] of node IDs where the first and last elements are the
+    same node (the back-edge closure point). Returns an empty list
+    for acyclic DAGs.
+
+    Uses iterative DFS with an explicit path stack to extract cycle
+    paths when back edges (GRAY→GRAY) are detected. Nodes are derived
+    from edge endpoints only — no separate node list is required.
+
+    Args:
+        edges: Directed dependency edges. Nodes are derived from edge
+               endpoints — no separate node list is required.
+
+    Returns:
+        List of cycles, each a list of node ID strings forming the
+        cycle path. Empty list if the graph has no cycles.
+    """
+    # Derive all unique nodes from edge endpoints
+    nodes: set[str] = set()
+    for edge in edges:
+        nodes.add(edge.source_node)
+        nodes.add(edge.target_node)
+
+    if not nodes:
+        return []
+
+    # Build adjacency list
+    adj: dict[str, list[str]] = {n: [] for n in nodes}
+    for edge in edges:
+        adj[edge.source_node].append(edge.target_node)
+
+    # 3-color marking: 0=WHITE, 1=GRAY, 2=BLACK
+    color: dict[str, int] = {n: 0 for n in nodes}
+    cycles: list[list[str]] = []
+
+    # Iterative DFS with explicit path — avoids recursion limit issues
+    # and makes cycle-path extraction straightforward.
+    for start in sorted(nodes):
+        if color[start] != 0:
+            continue
+
+        # Each entry: (node, neighbor_index). The neighbor_index is the
+        # NEXT neighbor to examine (0 means haven't started examining).
+        stack: list[tuple[str, int]] = [(start, 0)]
+        path: list[str] = [start]
+        color[start] = 1  # GRAY
+
+        while stack:
+            node, ni = stack[-1]
+            neighbors = adj.get(node, [])
+
+            if ni >= len(neighbors):
+                # All neighbors examined — pop, mark BLACK
+                stack.pop()
+                path.pop()
+                color[node] = 2  # BLACK
+                continue
+
+            # Advance the frame's neighbor index for next time
+            stack[-1] = (node, ni + 1)
+
+            neighbor = neighbors[ni]
+            if color[neighbor] == 0:  # WHITE → descend
+                stack.append((neighbor, 0))
+                path.append(neighbor)
+                color[neighbor] = 1  # GRAY
+            elif color[neighbor] == 1:  # GRAY → back edge, cycle found
+                cycle_start = path.index(neighbor)
+                cycle = path[cycle_start:] + [neighbor]
+                cycles.append(cycle)
+            # BLACK → skip (already fully explored)
+
+    return cycles
+
+
 # -- DAG Scheduler skeleton (phases 042-049) -----------------------------------
 
 
