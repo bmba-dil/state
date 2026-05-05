@@ -25,12 +25,9 @@ from state_core.sync_mirror import SyncEventMirror
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
+from src.state_daemon.socket import resolve_socket_path, write_socket_path
 
 log = structlog.get_logger(__name__)
-
-# Phase 050 default socket path — finalized in Phase 052.
-# In the project root (where .state/ lives).
-_DEFAULT_SOCKET_PATH = ".state/daemon.sock"
 
 # Module-level server reference for graceful shutdown via signal handlers.
 _server: DaemonServer | None = None
@@ -133,14 +130,29 @@ async def startup() -> None:
     reconciler = StartupReconciler(db=store, mirror=mirror)
     await reconciler.start()
 
-    # Step 4 (Phase 050): Start HTTP server on unix domain socket.
-    # Socket path is a temporary default; Phase 052 will finalize it.
+    # Step 4 (Phase 050 / 052): Resolve deterministic socket path, start
+    # HTTP server, and persist the path for worker/client discovery.
     # The JsonRpcRouter starts empty — downstream phases call add_method().
-    log.info("startup: starting HTTP server")
+    log.info("startup: resolving socket path")
     router = JsonRpcRouter()
-    socket_path = os.environ.get("STATE_DAEMON_SOCKET", _DEFAULT_SOCKET_PATH)
+    project_root = os.environ.get("STATE_PROJECT_ROOT", os.getcwd())
+    socket_path = os.environ.get("STATE_DAEMON_SOCKET", resolve_socket_path(project_root))
+
     _server = DaemonServer(socket_path, router)
-    await _server.start()
+    try:
+        await _server.start()
+    except OSError as exc:
+        log.critical(
+            "daemon.startup.socket_in_use",
+            socket_path=socket_path,
+            error_type=type(exc).__name__,
+            hint="Address already in use — another daemon may be running. "
+                 "Check `ps aux | grep state` for a stale process.",
+        )
+        raise
+
+    # Persist the resolved socket path for worker discovery (Phase 061).
+    write_socket_path(socket_path)
 
     # Register signal handlers for graceful shutdown.
     loop = asyncio.get_running_loop()
