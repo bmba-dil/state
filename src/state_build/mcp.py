@@ -171,5 +171,34 @@ def resume_work() -> SkeletonResponse:
     return SkeletonResponse(tool="resume_work")
 
 
+def _check_mode_gate() -> None:
+    """Verify mode.json allows state-build to run.
+
+    Reads .state/mode.json and exits with a clear error if the active
+    mode is not 'build' (or 'both').  Called before the server starts.
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    mode_path = Path(".state/mode.json")
+    if not mode_path.exists():
+        return  # No mode file — allow startup (development mode)
+
+    try:
+        data = json.loads(mode_path.read_text())
+        mode = data.get("mode")
+    except (json.JSONDecodeError, OSError):
+        return  # Corrupt or unreadable — allow startup with warning
+
+    if mode not in ("build", "both"):
+        sys.stderr.write(
+            f"state-build: mode mismatch — .state/mode.json has mode={mode}, "
+            f"but state-build requires mode=build or mode=both.\n",
+        )
+        sys.exit(78)  # EX_CONFIG: configuration error
+
+
 if __name__ == "__main__":
+    _check_mode_gate()
     mcp.run(transport="stdio")
