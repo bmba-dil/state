@@ -36,8 +36,9 @@
 **Requirements:** DAE-05, MODE-05
 **Parallelizable:** no (depends on v11 schema too — soft dep)
 
-#### Phase 054 — SSE bus broadcast endpoint
+#### Phase 054 — SSE bus broadcast endpoint ✅
 **Goal:** `/events/subscribe` SSE stream fan-out of event-store updates; multi-client support; heartbeats.
+**Status:** Complete (2026-05-04)
 **Depends on:** 050, 009
 **Requirements:** DAE-06
 **Parallelizable:** yes with 053

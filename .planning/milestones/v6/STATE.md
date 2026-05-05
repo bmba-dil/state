@@ -3,8 +3,8 @@
 **Milestone:** v6
 **Phase range:** 050–059
 **Status:** In progress
-**Phases complete:** 4 / 10
-**Last activity:** 2026-05-04 — Phase 053 completed (mode-enforcement-http-middleware)
+**Phases complete:** 5 / 10
+**Last activity:** 2026-05-04 — Phase 054 completed (sse-bus-broadcast-endpoint)
 
 ---
 
@@ -16,7 +16,7 @@
 | 051 | pid-file-start-time-ns | Complete |
 | 052 | unix-socket-path | Complete |
 | 053 | mode-enforcement-http-middleware | Complete |
-| 054 | sse-bus-broadcast-endpoint | Not started |
+| 054 | sse-bus-broadcast-endpoint | Complete |
 | 055 | launchd-plist-systemd-user-unit | Not started |
 | 056 | structlog-rotatingfilehandler-log-rotation-config | Not started |
 | 057 | crash-recovery | Not started |
