@@ -4,11 +4,12 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
-from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry
+from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry, topo_sort
 
 __all__ = [
     "Edge",
     "EdgeKind",
     "Node",
     "NodeRegistry",
+    "topo_sort",
 ]
