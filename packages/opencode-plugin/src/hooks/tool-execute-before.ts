@@ -1,18 +1,11 @@
 /** Tool execute before hook — mode gate, scope gate, path rewrite */
 
 import type { Hooks } from "@opencode-ai/plugin";
-
-type StateMode = "build" | "teach" | "kernel";
+import { getCurrentMode } from "../mode-reader.js";
 
 const STATE_MCP_PREFIX = "mcp__state-";
 const STATE_BUILD_PREFIX = "mcp__state-build__";
 const STATE_TEACH_PREFIX = "mcp__state-teach__";
-
-function currentMode(): StateMode {
-  const m = process.env.STATE_MODE;
-  if (m === "build" || m === "teach" || m === "kernel") return m;
-  return "kernel";
-}
 
 function isStateTool(tool: string): boolean {
   return tool.startsWith(STATE_MCP_PREFIX);
@@ -32,8 +25,9 @@ function rewriteStatePaths(args: Record<string, unknown>): Record<string, unknow
 export const toolExecuteBefore: NonNullable<
   Hooks["tool.execute.before"]
 > = async (input, output) => {
-  const mode = currentMode();
-  if (mode === "kernel") return;
+  const mode = await getCurrentMode(process.cwd());
+  // Both mode and absent mode.json are permissive — allow all tools
+  if (mode === "both" || mode === null) return;
 
   const tool = input.tool;
 

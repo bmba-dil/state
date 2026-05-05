@@ -3,16 +3,9 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import type { Part } from "@opencode-ai/sdk";
 import { log } from "../logger.js";
-
-type StateMode = "build" | "teach" | "kernel";
+import { getCurrentMode } from "../mode-reader.js";
 
 const STATE_COMMAND_RE = /^\/state:(build|teach):/;
-
-function currentMode(): StateMode {
-  const m = process.env.STATE_MODE;
-  if (m === "build" || m === "teach" || m === "kernel") return m;
-  return "kernel";
-}
 
 function createTextPart(text: string): Part {
   return {
@@ -29,8 +22,9 @@ function createTextPart(text: string): Part {
 export const commandExecuteBefore: NonNullable<
   Hooks["command.execute.before"]
 > = async (input, output) => {
-  const mode = currentMode();
-  if (mode === "kernel") return;
+  const mode = await getCurrentMode(process.cwd());
+  // Both mode and absent mode.json are permissive — allow all commands
+  if (mode === "both" || mode === null) return;
 
   const match = input.command.match(STATE_COMMAND_RE);
   if (!match) return;
