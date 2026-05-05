@@ -71,6 +71,10 @@ Plans:
 **Depends on:** 097, 098
 **Requirements:** MODE-07
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 103-01-PLAN.md — CLI state mode set + daemon SIGHUP handler + tests
 
 #### Phase 104 — Mode activation event (`state.mode.activated`)
 **Goal:** Emit event on mode change; SSE fan-out triggers MCP reload.
