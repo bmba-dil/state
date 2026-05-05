@@ -22,3 +22,12 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=500]
+  - repo: local
+    hooks:
+      - id: import-lint
+        name: Import-graph lint (MODE-06)
+        entry: .venv/bin/python3 -m state_core.import_lint
+        language: system
+        types: [python]
+        pass_filenames: false
+        always_run: true
