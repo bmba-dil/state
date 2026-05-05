@@ -12,6 +12,11 @@ from __future__ import annotations
 from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel
 
+# Shared library wiring (Phase 111) — single import surface for all tools
+from state_core.auth import load_credentials as _load_credentials  # noqa: F401
+from state_core.events import SqliteEventStore as _SqliteEventStore  # noqa: F401
+from state_core.scheduler import DAGScheduler as _DAGScheduler  # noqa: F401
+
 mcp = FastMCP(
     "state-build",
     instructions="Build-mode tools for the state workflow engine. "
@@ -85,7 +90,11 @@ def research_step() -> SkeletonResponse:
 @mcp.tool()
 def dag_status() -> SkeletonResponse:
     """Query build-mode DAG scheduler state. Returns node and edge counts."""
-    return SkeletonResponse(tool="dag_status")
+    scheduler = _DAGScheduler()
+    return SkeletonResponse(
+        tool="dag_status",
+        status=f"scheduler_ready (cap={scheduler.concurrency_cap})",
+    )
 
 
 @mcp.tool()
