@@ -81,6 +81,11 @@ Plans:
 **Depends on:** 099, 004
 **Requirements:** MODE-03, MODE-05
 **Parallelizable:** no
+**Plans:** 2 plans
+
+Plans:
+- [ ] 104-01-PLAN.md — Update ModeActivatedData schema + emit event from daemon SIGHUP handler
+- [ ] 104-02-PLAN.md — Complete event.ts hot-reload with getMcpServersForMode() extraction
 
 #### Phase 105 — Cross-mode leakage regression suite
 **Goal:** P0-11 test suite: attempt every illegal combination, assert rejection at canonical gate.
