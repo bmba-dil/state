@@ -434,3 +434,99 @@ class TestFrontier:
         bad_edge = Edge(source_node="ghost", target_node="a", kind="blocks")
         with pytest.raises(ValueError, match="ghost"):
             frontier([a], [bad_edge])
+
+
+# -- Cycle detection tests ------------------------------------------------------
+
+
+class TestCycleDetection:
+    """Tests for detect_cycles DFS 3-color cycle detection."""
+
+    def test_no_cycles_acyclic_linear(self) -> None:
+        """Linear chain a->b->c with no cycles returns empty list."""
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="blocks"),
+        ]
+        result = detect_cycles(edges)
+        assert result == []
+
+    def test_no_cycles_acyclic_diamond(self) -> None:
+        """Diamond a->{b,c}->d with no cycles returns empty list."""
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="blocks"),
+            Edge(source_node="c", target_node="d", kind="blocks"),
+        ]
+        result = detect_cycles(edges)
+        assert result == []
+
+    def test_self_loop(self) -> None:
+        """Edge a->a (self-loop) returns a cycle path containing 'a'."""
+        edges = [Edge(source_node="a", target_node="a", kind="blocks")]
+        result = detect_cycles(edges)
+        assert len(result) == 1
+        assert "a" in result[0]
+
+    def test_simple_two_node_cycle(self) -> None:
+        """a->b, b->a returns a cycle path."""
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="a", kind="blocks"),
+        ]
+        result = detect_cycles(edges)
+        assert len(result) == 1
+        cycle = result[0]
+        assert cycle[0] == cycle[-1]  # cycle ends where it started
+        assert "a" in cycle
+        assert "b" in cycle
+
+    def test_triangle_cycle(self) -> None:
+        """a->b, b->c, c->a detects 3-node triangle cycle."""
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="blocks"),
+            Edge(source_node="c", target_node="a", kind="blocks"),
+        ]
+        result = detect_cycles(edges)
+        assert len(result) == 1
+        cycle = result[0]
+        assert cycle[0] == cycle[-1]  # cycle ends where it started
+        assert set(cycle[:-1]) == {"a", "b", "c"}  # all three nodes appear before the closing
+        assert len(cycle) == 4  # 3 distinct nodes + closing node
+
+    def test_multiple_cycles(self) -> None:
+        """Graph with two independent cycles detects both."""
+        # Cycle 1: a<->b  (a->b, b->a)
+        # Cycle 2: c->d->e->c
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="a", kind="blocks"),
+            Edge(source_node="c", target_node="d", kind="blocks"),
+            Edge(source_node="d", target_node="e", kind="blocks"),
+            Edge(source_node="e", target_node="c", kind="blocks"),
+        ]
+        result = detect_cycles(edges)
+        assert len(result) == 2
+        # Each cycle should end where it started
+        for cycle in result:
+            assert cycle[0] == cycle[-1]
+
+    def test_empty_input(self) -> None:
+        """No edges returns empty list."""
+        result = detect_cycles([])
+        assert result == []
+
+    def test_unreachable_node_with_cycle(self) -> None:
+        """Node with no edges alongside a cycle -- cycle still detected."""
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="a", kind="blocks"),
+            Edge(source_node="z", target_node="z", kind="blocks"),  # unreachable self-loop
+        ]
+        result = detect_cycles(edges)
+        assert len(result) >= 1  # at minimum the self-loop is detected
+        # Verify that there's at least one cycle path containing 'a'
+        a_cycle = any("a" in c for c in result)
+        assert a_cycle is True
