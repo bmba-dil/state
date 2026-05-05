@@ -1,15 +1,10 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.1
-milestone_name: milestone
+milestone: v3
+milestone_name: — Provider Routing + Model Profiles
 status: planning
-last_updated: "2026-05-04T16:23:02.284Z"
+last_updated: "2026-05-05T02:12:08.003Z"
 last_activity: 2026-04-22 — Migrated to milestone-scoped layout
-progress:
-  total_phases: 9
-  completed_phases: 7
-  total_plans: 14
-  completed_plans: 14
 ---
 
 # STATE: v3 — Provider Routing + Model Profiles

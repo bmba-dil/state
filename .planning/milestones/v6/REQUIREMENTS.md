@@ -6,12 +6,12 @@
 
 ### Kernel: Daemon (A6)
 
-- [ ] **DAE-01**: Always-on user service (launchd plist on macOS, systemd --user unit on Linux)
+- [x] **DAE-01**: Always-on user service (launchd plist on macOS, systemd --user unit on Linux) ✓ (Phase 055, 2026-05-05)
 - [ ] **DAE-02**: Per-session worker spawned by plugin shim; shares event store with daemon via HTTP+SSE
-- [ ] **DAE-03**: pid-file includes process `start_time_ns`; stale-pid detection via `/proc` (Linux) or `ps` (macOS)
-- [ ] **DAE-04**: Unix socket at `$XDG_RUNTIME_DIR/state-<projecthash>.sock` (fallback `/tmp/state-<user>-<hash>.sock`)
-- [ ] **DAE-05**: HTTP API (Starlette or bare) with mode-enforcement middleware (canonical gate)
-- [ ] **DAE-06**: SSE broadcast for live TUI updates (event forwarding, Slice status changes, DAG state)
-- [ ] **DAE-07**: Log rotation with structlog + `logging.handlers.RotatingFileHandler`
-- [ ] **DAE-08**: Crash recovery: daemon restart replays STATE.md projections from event log, resumes in-flight Steps from their last checkpoint
-- [ ] **DAE-09**: `state daemon start|stop|restart|status|logs` CLI
+- [x] **DAE-03**: pid-file includes process `start_time_ns`; stale-pid detection via `/proc` (Linux) or `ps` (macOS) ✓ (Phase 051, 2026-05-05)
+- [x] **DAE-04**: Unix socket at `$XDG_RUNTIME_DIR/state-<projecthash>.sock` (fallback `/tmp/state-<user>-<hash>.sock`) ✓ (Phase 052, 2026-05-04)
+- [x] **DAE-05**: HTTP API (Starlette or bare) with mode-enforcement middleware (canonical gate) ✓ (Phase 053, 2026-05-04)
+- [x] **DAE-06**: SSE broadcast for live TUI updates (event forwarding, Slice status changes, DAG state) ✓ (Phase 054, 2026-05-04)
+- [x] **DAE-07**: Log rotation with structlog + `logging.handlers.RotatingFileHandler` ✓ (Phase 056, 2026-05-05)
+- [x] **DAE-08**: Crash recovery: daemon restart replays STATE.md projections from event log, resumes in-flight Steps from their last checkpoint ✓ (Phase 057, 2026-05-05)
+- [x] **DAE-09**: `state daemon start|stop|restart|status|logs` CLI ✓ (Phase 058, 2026-05-04)

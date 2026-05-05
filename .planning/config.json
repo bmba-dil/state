@@ -6,7 +6,7 @@
   "granularity": "fine",
   "parallelization": true,
   "commit_docs": false,
-  "model_profile": "budget",
+  "model_profile": "balanced",
   "workflow": {
     "research": true,
     "plan_check": true,
@@ -30,13 +30,8 @@
     "context_warnings": true
   },
   "quality": {
-    "level": "fast",
-    "test_exemptions": [
-      ".md",
-      ".json",
-      "templates/**",
-      ".planning/**"
-    ],
+    "level": "high",
+    "test_exemptions": [".md", ".json", "templates/**", ".planning/**"],
     "context7_token_cap": 2000
   },
   "concurrent": true

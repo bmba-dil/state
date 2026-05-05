@@ -37,7 +37,7 @@
 
 ### Tier 2 — Kernel & Plumbing (depends on Tier 1)
 
-- [ ] **v6 — State Daemon (HTTP + SSE + mode middleware)** — Always-on user service with canonical mode gate
+- [x] **v6 — State Daemon (HTTP + SSE + mode middleware)** — Always-on user service with canonical mode gate ✓ Shipped 2026-05-04
 - [ ] **v7 — Per-Session Worker** — Session-scoped worker bridging plugin and daemon
 - [ ] **v8 — Plugin Server Hooks (9 hooks)** — Full opencode hook surface wired
 - [ ] **v9 — Plugin TUI Bundle** — SolidJS TUI extensions (sidebar, statusline, toasts)
@@ -147,7 +147,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v3. Provider Routing | 0/9 | Not started | - | - |
 | v4. Worktree + Snapshot | 0/9 | Not started | - | - |
 | v5. DAG Scheduler | 0/9 | Not started | - | - |
-| v6. State Daemon | 0/10 | Not started | - | - |
+| v6. State Daemon | 10/10 | Shipped | 2026-05-04 | 2026-05-04 |
 | v7. Per-Session Worker | 0/8 | Not started | - | - |
 | v8. Plugin Server Hooks | 0/12 | Not started | - | - |
 | v9. Plugin TUI Bundle | 0/9 | Not started | - | - |

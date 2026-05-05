@@ -4,11 +4,18 @@ from __future__ import annotations
 
 __version__ = "0.1.0"
 
-from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry
+from src.state_core.reactive import ReactiveTrigger
+from src.state_core.scheduler import DAGScheduler, Edge, EdgeKind, Node, NodeRegistry, SchedulerConfig, detect_cycles, frontier, topo_sort
 
 __all__ = [
+    "DAGScheduler",
+    "detect_cycles",
     "Edge",
     "EdgeKind",
+    "frontier",
     "Node",
     "NodeRegistry",
+    "ReactiveTrigger",
+    "SchedulerConfig",
+    "topo_sort",
 ]

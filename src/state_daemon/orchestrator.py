@@ -10,38 +10,57 @@ import asyncio
 import os
 import signal
 
+import aiosqlite
 import litellm
 import structlog
 
 from state_core.auth import import_from_opencode
+from state_core.database import get_connection
 from state_core.deps import Deps
 from state_core.events import SqliteEventStore
 from state_core.http_client import build_shared_client
 from state_core.migrations import migrate
 from state_core.observability import assert_redactor_attached, install
+from state_core.projector import Projector
 from state_core.reconciler import StartupReconciler
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.auth_manager import AuthRefreshLoop, AuthStatusHandler
+from src.state_daemon.logging import configure_daemon_logging
+from src.state_daemon.middleware import ModeMiddleware, load_mode_config
+from src.state_daemon.pid import acquire_pid_file, release_pid_file
+from src.state_daemon.recovery import CrashRecovery, InFlightStep
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
+from src.state_daemon.socket import resolve_socket_path, write_socket_path
+from src.state_daemon.sse import SseBus, SseClientManager, SseEndpointHandler
 
 log = structlog.get_logger(__name__)
-
-# Phase 050 default socket path — finalized in Phase 052.
-# In the project root (where .state/ lives).
-_DEFAULT_SOCKET_PATH = ".state/daemon.sock"
 
 # Module-level server reference for graceful shutdown via signal handlers.
 _server: DaemonServer | None = None
 
+# Module-level auth refresh loop reference for graceful shutdown.
+_auth_refresh: AuthRefreshLoop | None = None
+
+# Pid file path — set during startup so the shutdown handler can clean it up.
+_pid_path: str | None = None
+
 
 async def startup() -> None:
-    """Run the full startup sequence: redactor → import → repair → migrate → reconciler → HTTP server.
+    """Run the full startup sequence: redactor → logging → import → repair → migrate → reconciler → HTTP server.
 
     Step 0 (Phase 020 / AUTH-10) installs the root-logger token
     redactor and self-checks that it is attached. If the redactor
     is not attached, RedactorNotAttached fires and the daemon
     process exits before any other I/O (P0-14 defense layer 2).
+
+    Step 0.0-logging (Phase 056 / DAE-07) configures structured daemon
+    logging with rotation, redaction, and configurable output mode
+    (JSON for production, human-readable for dev).  Must run AFTER the
+    redactor is attached (so the file handler inherits redaction) and
+    BEFORE any I/O-driven steps (so all subsequent log records land in
+    .state/logs/daemon.log).
 
     Step 0.5 (Phase 021 / AUTH-11) runs the opencode auth.json
     importer. It MUST run AFTER the redactor is attached (so any
@@ -69,12 +88,27 @@ async def startup() -> None:
     caller can keep the event loop alive.
     """
     global _server
+    global _pid_path
 
     # Step 0 (Phase 020 / AUTH-10): install + verify redactor BEFORE any other I/O.
     # Failure raises RedactorNotAttached which is fatal — the daemon process
     # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
     install()
     assert_redactor_attached()
+
+    # Step 0.0-logging (Phase 056 / DAE-07): configure daemon structured logging
+    # with rotation, redaction, and mode selection.  Must run AFTER redactor install
+    # (so the file handler inherits redaction) and BEFORE pid acquisition (so
+    # startup messages are captured in the log file).
+    configure_daemon_logging()
+
+    # Step 0.0 (Phase 051 / DAE-03): acquire pid file BEFORE any network bind.
+    # P0-15 defense: stale pid detection prevents a zombie pid-file from blocking
+    # daemon restart.  Returns False if another instance is already running.
+    _pid_path = os.environ.get("STATE_DAEMON_PID", ".state/daemon.pid")
+    if not acquire_pid_file(_pid_path):
+        log.critical("startup.pid_file_denied", path=_pid_path)
+        raise SystemExit(1)
 
     # Step 0.1 (Phase 023 / PRV-06): build shared HTTP client + Deps container.
     # Must be created inside an async function (not at module level) to avoid
@@ -120,14 +154,107 @@ async def startup() -> None:
     reconciler = StartupReconciler(db=store, mirror=mirror)
     await reconciler.start()
 
-    # Step 4 (Phase 050): Start HTTP server on unix domain socket.
-    # Socket path is a temporary default; Phase 052 will finalize it.
+    # Step 3.5 (Phase 054): Create SSE broadcast bus and wire post-commit
+    # callback so every state.* event appended to the event store is
+    # automatically fanned out to all connected SSE subscribers.
+    log.info("startup: initializing SSE bus")
+    sse_client_manager = SseClientManager()
+    sse_bus = SseBus(sse_client_manager)
+    store.add_post_commit_callback(sse_bus.on_event)
+    sse_handler = SseEndpointHandler(sse_client_manager)
+    log.info("startup: SSE bus wired to event store post-commit")
+
+    # Step 3.6 (Phase 057 / DAE-08): Crash recovery — replay event log
+    # through the projector to rebuild projections and resume in-flight
+    # Steps that were executing/verifying at crash time.  Runs AFTER
+    # SSE bus wiring (so recovery events are broadcast) and BEFORE
+    # server start (so no connections are accepted until recovered).
+    log.info("startup: running crash recovery")
+    projector = Projector(store)
+    recovery = CrashRecovery(projector)
+    recovery_result = await recovery.recover()
+
+    if not recovery_result.projection_valid:
+        log.critical(
+            "crash_recovery.projection_invalid",
+            events_replayed=recovery_result.events_replayed,
+        )
+        raise SystemExit(1)
+
+    log.info(
+        "startup: recovery replay complete",
+        events_replayed=recovery_result.events_replayed,
+        in_flight_count=len(recovery_result.in_flight_steps),
+        last_event_id=recovery_result.last_event_id,
+    )
+
+    if recovery_result.in_flight_steps:
+        # Build InFlightStep records from the step IDs and resume them.
+        # Status is read from the steps cache table (already rebuilt).
+        in_flight_steps = await _build_in_flight_steps(
+            recovery_result.in_flight_steps,
+        )
+        resume_actions = await recovery.resume_in_flight(
+            store, in_flight_steps,
+        )
+        log.info(
+            "startup: in-flight steps resumed",
+            count=len(resume_actions),
+        )
+    else:
+        log.info("startup: no in-flight steps to resume")
+
+    # Step 4 (Phase 050 / 052): Resolve deterministic socket path, start
+    # HTTP server, and persist the path for worker/client discovery.
     # The JsonRpcRouter starts empty — downstream phases call add_method().
-    log.info("startup: starting HTTP server")
+    log.info("startup: resolving socket path")
     router = JsonRpcRouter()
-    socket_path = os.environ.get("STATE_DAEMON_SOCKET", _DEFAULT_SOCKET_PATH)
-    _server = DaemonServer(socket_path, router)
-    await _server.start()
+    project_root = os.environ.get("STATE_PROJECT_ROOT", os.getcwd())
+    socket_path = os.environ.get("STATE_DAEMON_SOCKET", resolve_socket_path(project_root))
+
+    log.info(
+        "daemon.startup.begin",
+        pid=os.getpid(),
+        project_root=project_root,
+        socket_path=socket_path,
+    )
+
+    # Step 4.5 (Phase 053): Load mode config and wrap router with
+    # ModeMiddleware — the 6th layer of defense-in-depth for mode
+    # isolation.  Cross-mode write requests are rejected with 403
+    # before they reach any JSON-RPC handler.
+    log.info("startup: loading mode config")
+    mode_config = load_mode_config(project_root)
+    middleware = ModeMiddleware(router, mode_config)
+    log.info("startup: mode middleware enabled", active_mode=mode_config.mode)
+
+    _server = DaemonServer(socket_path, middleware, sse_handler=sse_handler)
+    try:
+        await _server.start()
+    except OSError as exc:
+        log.critical(
+            "daemon.startup.socket_in_use",
+            socket_path=socket_path,
+            error_type=type(exc).__name__,
+            hint="Address already in use — another daemon may be running. "
+                 "Check `ps aux | grep state` for a stale process.",
+        )
+        raise
+
+    # Persist the resolved socket path for worker discovery (Phase 061).
+    write_socket_path(socket_path)
+
+    # Step 5 (Phase 059): Wire auth manager — status endpoint + background refresh.
+    # Workers query /auth/status over HTTP; they never read auth.json directly.
+    log.info("startup: wiring auth manager")
+    auth_status = AuthStatusHandler()
+    _server.add_get_handler("/auth/status", auth_status.handle)
+    log.info("startup: auth status endpoint registered at /auth/status")
+
+    global _auth_refresh
+    _auth_refresh = AuthRefreshLoop()
+    await _auth_refresh.start()
+    log.info("startup: auth refresh loop started")
 
     # Register signal handlers for graceful shutdown.
     loop = asyncio.get_running_loop()
@@ -142,6 +269,43 @@ async def startup() -> None:
     log.info("startup: complete", socket_path=socket_path)
 
 
+async def _build_in_flight_steps(step_ids: list[str]) -> list[InFlightStep]:
+    """Query the steps cache table for status of each in-flight step ID.
+
+    Called after crash recovery rebuilds the steps projection, so the
+    cache table is guaranteed fresh.
+
+    Args:
+        step_ids: Step IDs detected as in-flight by CrashRecovery.
+
+    Returns:
+        InFlightStep records with status populated from the cache.
+    """
+    if not step_ids:
+        return []
+
+    async with get_connection() as db:
+        db.row_factory = aiosqlite.Row
+        # Build a parameterized IN clause
+        placeholders = ", ".join("?" for _ in step_ids)
+        cursor = await db.execute(
+            f"SELECT id, state, slice_id, title FROM steps "
+            f"WHERE id IN ({placeholders}) "
+            f"ORDER BY id ASC",
+            tuple(step_ids),
+        )
+        rows = await cursor.fetchall()
+        return [
+            InFlightStep(
+                step_id=row["id"],
+                status=row["state"],
+                slice_id=row.get("slice_id"),
+                title=row.get("title"),
+            )
+            for row in rows
+        ]
+
+
 def _schedule_shutdown() -> None:
     """Schedule graceful server shutdown from a signal handler.
 
@@ -154,9 +318,21 @@ def _schedule_shutdown() -> None:
 
 
 async def _shutdown_server() -> None:
-    """Stop the HTTP server and clean up."""
+    """Stop the HTTP server, auth refresh loop, and clean up."""
     global _server
+    global _auth_refresh
+    global _pid_path
+
+    # Stop the auth refresh loop first (no-op if not started).
+    if _auth_refresh is not None:
+        await _auth_refresh.stop()
+        _auth_refresh = None
+        log.info("daemon.shutdown.auth_refresh_stopped")
+
     if _server is not None:
         await _server.stop()
         _server = None
         log.info("daemon.shutdown.complete")
+    if _pid_path is not None:
+        release_pid_file(_pid_path)
+        _pid_path = None

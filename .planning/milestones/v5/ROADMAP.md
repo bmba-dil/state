@@ -12,34 +12,50 @@
 **Depends on:** 001
 **Requirements:** DAG-01
 **Parallelizable:** yes
-**Plans:** 1 plan (1 wave)
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 041-01-PLAN.md — Core scheduler types (Edge, Node, NodeRegistry) with TDD
+- [x] 041-01-PLAN.md — Core scheduler types (Edge, Node, NodeRegistry) with TDD
 
 #### Phase 042 — Topological sort (Kahn's algorithm, stable ordering)
 **Goal:** `topo_sort()` returning stable sequence; key = `(slice_id, step_id)`.
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 043
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 042-01-PLAN.md — Implement topo_sort with Kahn's algorithm, stable ordering, cycle detection
 
 #### Phase 043 — Cycle detection (DFS color marking)
 **Goal:** `detect_cycles()` returns cycle paths; used at roadmap validation.
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 042
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 043-01-PLAN.md — Implement detect_cycles with DFS 3-color marking, TDD with 8 cycle-detection tests
 
 #### Phase 044 — Frontier calculator (unblocked set per tick)
 **Goal:** `frontier(state)` — all IDLE nodes whose `blocks`/`data` predecessors are DONE.
 **Depends on:** 041
 **Requirements:** DAG-01, DAG-02
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 044-01-PLAN.md — Implement frontier() function with TDD (17 tests)
 
 #### Phase 045 — Dispatcher (group by Slice → TaskGroup per Slice, concurrency cap)
 **Goal:** `asyncio.gather` across Slices with cap; serial within Slice; configurable cap in `config.toml`.
 **Depends on:** 044
 **Requirements:** DAG-02
 **Parallelizable:** no
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 045-01-PLAN.md — Implement DAGScheduler.tick() with frontier grouping, asyncio.gather dispatch, SchedulerConfig from config.toml
 
 #### Phase 046 — TaskGroup watchdog (P0-16 defence)
 **Goal:** Nested TaskGroup regression harness; watchdog detects `CancelledError` swallow via exception group inspection; fails loud.
@@ -47,24 +63,40 @@ Plans:
 **Requirements:** DAG-03
 **Parallelizable:** no
 **P0 pitfall:** P0-16
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 046-01-PLAN.md — Refactor tick() to TaskGroup, implement CancelledError watchdog, nested TaskGroup regression harness
 
 #### Phase 047 — Reactive trigger (subscribe to v1 event stream)
 **Goal:** On `state.step.advanced`, `state.slice.worktree_ready`, `state.phase.planned` → recompute frontier; no polling.
 **Depends on:** 045, 009
 **Requirements:** DAG-04
 **Parallelizable:** no
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 047-01-PLAN.md — ReactiveTrigger with post-commit callback filtering and async tick dispatch
 
 #### Phase 048 — Priority inversion + silent deadlock detection
 **Goal:** Heuristic: if critical-path Step is blocked on `soft` edge, warn; if all in-flight are blocked on descoped/missing predecessors, emit `state.scheduler.deadlock` → TUI surfaces.
 **Depends on:** 047
 **Requirements:** DAG-05, DAG-06
 **Parallelizable:** yes
+**Plans:** 1 plan (not started)
+
+Plans:
+- [ ] 048-01-PLAN.md — Detection functions (priority inversion + silent deadlock), scheduler event schema, post-tick diagnostic integration
 
 #### Phase 049 — CLI: `state dag show [--arc|--phase|--slice]` ASCII renderer
 **Goal:** Box-drawing rendering with status colors; Hypothesis property test: any valid graph renders without crash.
 **Depends on:** 042, 044
 **Requirements:** DAG-07
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+
+Plans:
+- [x] 049-01-PLAN.md — DAG CLI module with render_dag engine, show command, Hypothesis property test
 
 ---
 

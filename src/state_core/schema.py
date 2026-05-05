@@ -28,6 +28,7 @@ AggregateType = Literal[
     "auth",
     "mode",
     "provider",  # Phase 028: cost accounting
+    "scheduler",
 ]
 """Aggregate discriminator -- maps events to their owning aggregate."""
 
@@ -97,6 +98,12 @@ AUTH_EVENT_TYPES = Literal[
 PROVIDER_EVENT_TYPES = Literal[
     "state.provider.request",
     "state.provider.response",
+]
+
+# Scheduler
+SCHEDULER_EVENT_TYPES = Literal[
+    "state.scheduler.priority_inversion",
+    "state.scheduler.deadlock",
 ]
 
 # -- ULID validation -------------------------------------------------------------
@@ -424,6 +431,37 @@ class ProviderResponseData(BaseModel):
     """Exception type name, set only on failed calls (e.g. 'ProviderTransientError'). None on success."""
 
 
+class SchedulerPriorityInversionData(BaseModel):
+    """Payload for state.scheduler.priority_inversion events.
+
+    Emitted when a critical-path node is blocked only on soft edges.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    node_id: str
+    """The DAG node ID (e.g. 'arc-1/phase-1/slice-3/step-2') that is soft-blocked."""
+    soft_edges: list[str]
+    """Source node IDs of unfulfilled soft edges blocking this node."""
+    critical_path: bool
+    """Always True — detection only fires for critical-path nodes."""
+
+
+class SchedulerDeadlockData(BaseModel):
+    """Payload for state.scheduler.deadlock events.
+
+    Emitted when all in-progress nodes are blocked on missing/descoped
+    predecessors with no dispatchable work remaining.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    deadlocked_nodes: list[str]
+    """Node IDs of in-progress nodes that cannot complete."""
+    missing_predecessors: list[str]
+    """Predecessor node IDs referenced by edges but not in the node registry."""
+    descoped_predecessors: list[str]
+    """Predecessor node IDs with status 'failed' or 'blocked' (descoped/unreachable)."""
+
+
 # -- Typed event models (discriminated unions) ------------------------------------
 
 
@@ -637,6 +675,18 @@ class AuthImportedEvent(EventEnvelope):
     data: AuthImportedData  # type: ignore[assignment]
 
 
+class SchedulerPriorityInversionEvent(EventEnvelope):
+    type: Literal["state.scheduler.priority_inversion"] = "state.scheduler.priority_inversion"
+    aggregate_type: Literal["scheduler"] = "scheduler"
+    data: SchedulerPriorityInversionData  # type: ignore[assignment]
+
+
+class SchedulerDeadlockEvent(EventEnvelope):
+    type: Literal["state.scheduler.deadlock"] = "state.scheduler.deadlock"
+    aggregate_type: Literal["scheduler"] = "scheduler"
+    data: SchedulerDeadlockData  # type: ignore[assignment]
+
+
 # -- Aggregate discriminated unions ------------------------------------------------
 
 
@@ -691,8 +741,13 @@ AuthEvent = Annotated[
 
 ModeEvent = ModeActivatedEvent
 
+SchedulerEvent = Annotated[
+    SchedulerPriorityInversionEvent | SchedulerDeadlockEvent,
+    Field(discriminator="type"),
+]
+
 AnyStateEvent = Annotated[
-    ArcEvent | PhaseEvent | SliceEvent | StepEvent | ConceptEvent | DrillEvent | DecisionEvent | AuthEvent | ModeEvent,
+    ArcEvent | PhaseEvent | SliceEvent | StepEvent | ConceptEvent | DrillEvent | DecisionEvent | AuthEvent | ModeEvent | SchedulerEvent,
     Field(discriminator="type"),
 ]
 
