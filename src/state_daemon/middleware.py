@@ -47,16 +47,23 @@ def load_mode_config(root: str) -> ModeConfig:
 
     if not os.path.isfile(mode_path):
         default = ModeConfig(mode="both")
-        with open(mode_path, "w", encoding="utf-8") as f:
-            json.dump({"mode": "both"}, f)
-        os.chmod(mode_path, 0o600)
-        _config = default
-        log.info(
-            "daemon.middleware.mode_config_created",
-            mode="both",
-            path=mode_path,
-        )
-        return default
+        # Atomically create with correct permissions (O_EXCL avoids TOCTOU race)
+        try:
+            fd = os.open(mode_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            # Race: another process created the file between isfile() and open().
+            # Fall through to the normal read path below.
+            pass
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"mode": "both"}, f)
+            _config = default
+            log.info(
+                "daemon.middleware.mode_config_created",
+                mode="both",
+                path=mode_path,
+            )
+            return default
 
     try:
         with open(mode_path, "r", encoding="utf-8") as f:
