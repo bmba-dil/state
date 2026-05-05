@@ -14,8 +14,9 @@
 **Requirements:** DAE-05
 **Parallelizable:** yes with 051
 
-#### Phase 051 — pid-file + start_time_ns + stale detection
+#### Phase 051 — pid-file + start_time_ns + stale detection ✅
 **Goal:** `.state/daemon.pid` with `{pid, start_time_ns}`; `/proc/<pid>/stat` on Linux, `ps -o lstart=` on macOS; stale → remove and start fresh.
+**Status:** Complete (2026-05-05)
 **Depends on:** 001
 **Requirements:** DAE-03
 **Parallelizable:** yes with 050

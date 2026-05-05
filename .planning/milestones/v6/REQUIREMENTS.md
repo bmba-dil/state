@@ -8,7 +8,7 @@
 
 - [ ] **DAE-01**: Always-on user service (launchd plist on macOS, systemd --user unit on Linux)
 - [ ] **DAE-02**: Per-session worker spawned by plugin shim; shares event store with daemon via HTTP+SSE
-- [ ] **DAE-03**: pid-file includes process `start_time_ns`; stale-pid detection via `/proc` (Linux) or `ps` (macOS)
+- [x] **DAE-03**: pid-file includes process `start_time_ns`; stale-pid detection via `/proc` (Linux) or `ps` (macOS) ✓ (Phase 051, 2026-05-05)
 - [ ] **DAE-04**: Unix socket at `$XDG_RUNTIME_DIR/state-<projecthash>.sock` (fallback `/tmp/state-<user>-<hash>.sock`)
 - [ ] **DAE-05**: HTTP API (Starlette or bare) with mode-enforcement middleware (canonical gate)
 - [ ] **DAE-06**: SSE broadcast for live TUI updates (event forwarding, Slice status changes, DAG state)
