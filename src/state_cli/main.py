@@ -42,6 +42,10 @@ app.add_typer(daemon_app)
 mode_app = typer.Typer(name="mode", help="Mode management commands")
 app.add_typer(mode_app)
 
+# Phase 108 — dev sub-app
+from src.state_cli.dev import dev_app  # noqa: E402
+app.add_typer(dev_app)
+
 
 @db_app.command(name="init")
 def db_init() -> None:
