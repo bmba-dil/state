@@ -35,9 +35,29 @@ export async function readModeConfig(projectDir: string): Promise<string | null>
 }
 
 /**
+ * Pure function: returns the list of MCP server name strings
+ * that should be registered for a given mode. Used by both the
+ * config hook (boot-time registration) and event hook (hot-reload
+ * computation).
+ */
+export function getMcpServersForMode(mode: string | null): string[] {
+  switch (mode) {
+    case "build":
+      return ["state-build"];
+    case "teach":
+      return ["state-teach"];
+    case "both":
+      return ["state-build", "state-teach"];
+    default:
+      return [];
+  }
+}
+
+/**
  * Apply MCP server registration based on the active mode.
  * Mutates input.plugin in-place: removes any existing state-*
  * entries, then pushes the correct servers for the given mode.
+ * Delegates mode→server mapping to getMcpServersForMode().
  */
 export function applyMcpRegistration(mode: string | null, input: Config): void {
   input.plugin = input.plugin || [];
@@ -48,13 +68,7 @@ export function applyMcpRegistration(mode: string | null, input: Config): void {
     return name !== "state-build" && name !== "state-teach";
   });
 
-  if (mode === "build" || mode === "both") {
-    input.plugin.push("state-build");
-  }
-
-  if (mode === "teach" || mode === "both") {
-    input.plugin.push("state-teach");
-  }
+  input.plugin.push(...getMcpServersForMode(mode));
 
   log({
     msg: "config hook: MCP registration applied",
