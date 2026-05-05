@@ -15,13 +15,16 @@ import structlog
 
 log = structlog.get_logger(__name__)
 
-# Router callable signature: (method, path, headers, body) -> bytes
-Router = Callable[[str, str, dict[str, str], bytes], Awaitable[bytes]]
+# Router callable signature: (method, path, headers, body) -> bytes | (status, body)
+# Middleware may return a tuple[int, bytes] to signal a non-200 status code
+# (e.g. 400/403 on mode enforcement rejection).  Plain bytes get 200/204.
+Router = Callable[[str, str, dict[str, str], bytes], Awaitable[bytes | tuple[int, bytes]]]
 
 _HTTP_STATUS_TEXTS: dict[int, str] = {
     200: "OK",
     204: "No Content",
     400: "Bad Request",
+    403: "Forbidden",
     405: "Method Not Allowed",
     415: "Unsupported Media Type",
     500: "Internal Server Error",
@@ -119,12 +122,20 @@ class DaemonServer:
                     return
 
             # --- Route to the pluggable router ---
-            response_body = await self._router(method, path, headers, body)
+            router_result = await self._router(method, path, headers, body)
+
+            # Middleware may return a (status_code, body) tuple for
+            # non-200 responses (e.g. 400/403 mode enforcement).
+            if isinstance(router_result, tuple):
+                status_code, response_body = router_result
+            else:
+                status_code = 200
+                response_body = router_result
 
             if response_body:
                 writer.write(
                     _http_response(
-                        200,
+                        status_code,
                         [("Content-Type", "application/json")],
                         response_body,
                     )

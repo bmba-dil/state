@@ -22,6 +22,7 @@ from state_core.observability import assert_redactor_attached, install
 from state_core.reconciler import StartupReconciler
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.middleware import ModeMiddleware, load_mode_config
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.router import JsonRpcRouter
 from src.state_daemon.server import DaemonServer
@@ -138,7 +139,16 @@ async def startup() -> None:
     project_root = os.environ.get("STATE_PROJECT_ROOT", os.getcwd())
     socket_path = os.environ.get("STATE_DAEMON_SOCKET", resolve_socket_path(project_root))
 
-    _server = DaemonServer(socket_path, router)
+    # Step 4.5 (Phase 053): Load mode config and wrap router with
+    # ModeMiddleware — the 6th layer of defense-in-depth for mode
+    # isolation.  Cross-mode write requests are rejected with 403
+    # before they reach any JSON-RPC handler.
+    log.info("startup: loading mode config")
+    mode_config = load_mode_config(project_root)
+    middleware = ModeMiddleware(router, mode_config)
+    log.info("startup: mode middleware enabled", active_mode=mode_config.mode)
+
+    _server = DaemonServer(socket_path, middleware)
     try:
         await _server.start()
     except OSError as exc:
