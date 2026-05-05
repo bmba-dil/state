@@ -16,6 +16,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from src.state_core.schema import (
     AnyStateEvent,
+    ModeConfig,
+    validate_mode_config,
     ArcCreatedData,
     ArcCreatedEvent,
     ArcRetiredData,
@@ -718,8 +720,73 @@ class TestBuildEvent:
         assert e.aggregate_type == "concept"
 
 
-# -- Smoke and import tests ------------------------------------------------------------
+# -- ModeConfig + validator tests ------------------------------------------------------
 
+class TestModeConfig:
+    """Tests for ModeConfig model — persisted mode configuration."""
+
+    def test_construct_valid_build(self) -> None:
+        """ModeConfig(mode='build') succeeds."""
+        cfg = ModeConfig(mode="build")
+        assert cfg.mode == "build"
+
+    def test_construct_valid_teach(self) -> None:
+        """ModeConfig(mode='teach') succeeds."""
+        cfg = ModeConfig(mode="teach")
+        assert cfg.mode == "teach"
+
+    def test_construct_valid_both(self) -> None:
+        """ModeConfig(mode='both') succeeds."""
+        cfg = ModeConfig(mode="both")
+        assert cfg.mode == "both"
+
+    def test_rejects_invalid_mode(self) -> None:
+        """ModeConfig(mode='invalid') raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ModeConfig(mode="invalid")  # type: ignore[arg-type]
+
+    def test_rejects_kernel(self) -> None:
+        """ModeConfig(mode='kernel') raises ValidationError — kernel not persistable."""
+        with pytest.raises(ValidationError):
+            ModeConfig(mode="kernel")  # type: ignore[arg-type]
+
+    def test_rejects_missing_mode(self) -> None:
+        """ModeConfig() raises ValidationError — mode field is required."""
+        with pytest.raises(ValidationError):
+            ModeConfig()  # type: ignore[call-arg]
+
+    def test_rejects_extra_field(self) -> None:
+        """ModeConfig(mode='build', extra='x') raises ValidationError."""
+        with pytest.raises(ValidationError):
+            ModeConfig(mode="build", extra="x")  # type: ignore[call-arg]
+
+
+class TestValidateModeConfig:
+    """Tests for validate_mode_config() standalone validator."""
+
+    def test_returns_mode_config_on_valid(self) -> None:
+        """validate_mode_config returns a ModeConfig instance on valid input."""
+        result = validate_mode_config({"mode": "build"})
+        assert isinstance(result, ModeConfig)
+        assert result.mode == "build"
+
+    def test_raises_value_error_on_invalid(self) -> None:
+        """validate_mode_config raises ValueError (not ValidationError) on bad mode."""
+        with pytest.raises(ValueError, match="Invalid mode config"):
+            validate_mode_config({"mode": "invalid"})
+
+    def test_raises_value_error_on_missing(self) -> None:
+        """validate_mode_config raises ValueError when mode key is missing."""
+        with pytest.raises(ValueError, match="Invalid mode config"):
+            validate_mode_config({})
+
+    def test_raises_value_error_on_extra(self) -> None:
+        """validate_mode_config raises ValueError on extra fields."""
+        with pytest.raises(ValueError, match="Invalid mode config"):
+            validate_mode_config({"mode": "build", "x": 1})
+
+
+# -- Smoke and import tests ------------------------------------------------------------
 
 class TestImports:
     """Schema module imports cleanly and exposes expected names."""

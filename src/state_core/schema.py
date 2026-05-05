@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from ulid import ULID
 
 # -- Type literals ----------------------------------------------------------------
@@ -105,6 +105,43 @@ SCHEDULER_EVENT_TYPES = Literal[
     "state.scheduler.priority_inversion",
     "state.scheduler.deadlock",
 ]
+
+# -- Configuration models (non-event, for file I/O) -------------------------------
+
+class ModeConfig(BaseModel):
+    """Persisted mode configuration from ``.state/mode.json``.
+
+    Only ``build``, ``teach``, and ``both`` are storable modes.
+    ``kernel`` is an internal-only mode (valid in ``Mode`` literal for
+    event routing but NOT persistable to ``mode.json``).
+
+    Unlike the frozen data-payload models below, this model is NOT frozen
+    — it represents a read-write configuration file.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["build", "teach", "both"]
+
+
+def validate_mode_config(data: dict[str, object]) -> ModeConfig:
+    """Validate and return a ``ModeConfig`` from raw dict data.
+
+    Args:
+        data: Raw dict to validate (e.g. ``{"mode": "build"}``).
+
+    Returns:
+        A validated ``ModeConfig`` instance.
+
+    Raises:
+        ValueError: If *data* is invalid (missing ``mode`` key,
+                    unsupported mode value, or extra fields present).
+    """
+    try:
+        return ModeConfig(**data)
+    except ValidationError as exc:
+        raise ValueError(f"Invalid mode config: {exc}") from exc
+
 
 # -- ULID validation -------------------------------------------------------------
 
