@@ -15,7 +15,7 @@
 **Plans:** 1 plan
 
 Plans:
-- [ ] 115-01-PLAN.md — FastMCP stdio entry point with mode-gate check + comprehensive tests
+- [x] 115-01-PLAN.md — FastMCP stdio entry point with mode-gate check + comprehensive tests
 
 #### Phase 116 — 15 skeleton tools with ≤80-token descriptions
 **Goal:** Names per MCP-T-03; "not implemented" skeletons.

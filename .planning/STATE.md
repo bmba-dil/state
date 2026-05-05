@@ -1,14 +1,12 @@
 ---
 gsd_state_version: 1.0
-milestone: v10
-milestone_name: — TUI DAG Viewer
-status: v10 milestone complete
-last_updated: "2026-05-05T20:00:00.000Z"
+status: v11 milestone complete
+last_updated: 2026-05-05T23:52:22.225Z
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-05 — v10 (TUI DAG Viewer) shipped. 9 / 27 milestones complete. v10 delivered 8 phases (089–096), 4/4 DAG-VIEW requirements satisfied. Registered `state.dag` route with topological layout, shared status palette, navigation, filtering, SSE live updates, and large-graph performance optimizations.
+**Last updated:** 2026-05-05 — Phase 115 (MCP server scaffold) complete. v13 first phase shipped. 11 / 27 milestones complete. v11 delivered 9 phases (097–105), all 6 mode-enforcement layers implemented. v12 (state-build MCP) and v13 (state-teach MCP) in progress — v13 Phase 115 complete.
 
 ---
 
@@ -27,35 +25,35 @@ last_updated: "2026-05-05T20:00:00.000Z"
 
 ## Current Position
 
-**Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓, v10 ✓)
-**Last shipped milestone:** v10 — TUI DAG Viewer — Shipped 2026-05-05
-**Active milestone:** v10 — just shipped; v9 or v11 next unblocked
-**Active phase:** None currently (milestone just completed)
-**Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker)
+**Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓, v9 ✓, v10 ✓)
+**Last shipped milestone:** v11 — Mode Enforcement — Shipped 2026-05-05
+**Active milestone:** v12 (state-build MCP) and v13 (state-teach MCP) — both in progress
+**Active phase:** None (Phase 115 complete — 1/1 plan done)
+**Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement)
 
-**Phases complete:** 88 / 268 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11 of 12, v10: 8)
-**Milestones complete:** 9 / 27
+**Phases complete:** 107 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 1)
+**Milestones complete:** 11 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[###########................................................] 33%
+[###############............................................] 42%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
 
-- v9 — Plugin TUI Bundle — depends on v8 (now shipped)
-- v10 — Build Kernel — depends on v7+v8 (now shipped)
+- v12 — state-build MCP Server (skeleton) — depends on v11 (now shipped)
+- v13 — state-teach MCP Server (skeleton) — depends on v11 (now shipped); parallel with v12
 
-v3, v4, v5, v6, v7, v8 are shipped. Tier 2 (v6–v13) is the active tier.
+v1–v11 are all shipped. Tier 2 (v6–v13) is the active tier with v12 and v13 remaining.
 
 ### Critical path preview
 
-Build critical path: A1 → A6 → A7 ✓ → A8 → A11 → A12 → A14 → A15 → A16 → A27
-Teach critical path: A1 → A6 → A7 ✓ → A8 → A11 → A13 → A18 → A20 → A22 → A27
+Build critical path: A1 → A6 → A7 ✓ → A8 ✓ → A11 ✓ → A12 → A14 → A15 → A16 → A27
+Teach critical path: A1 → A6 → A7 ✓ → A8 ✓ → A11 ✓ → A13 → A18 → A20 → A22 → A27
 
-A1 (= v1) and A2 (= v2) now complete.
+A1–A11 (= v1–v11) complete.
 
 ---
 
@@ -69,17 +67,18 @@ A1 (= v1) and A2 (= v2) now complete.
 | v3 shipped | 2026-05-04 (squash-commit, 7/9 phases) |
 | v4 shipped | 2026-05-04 (squash-commit, 9/9 phases) |
 | v5 shipped | 2026-05-04 |
-| v6 shipped | 2026-05-04 |
 | v7 shipped | 2026-05-05 |
 | v8 shipped | 2026-05-05 |
+| v9 shipped | 2026-05-05 |
 | v10 shipped | 2026-05-05 |
-| Phases defined | 268 |
+| v11 shipped | 2026-05-05 |
+| Phases defined | 260 |
 | Milestones defined | 27 |
 | v1 requirements captured | 221 |
 | Coverage | 100% |
 | P0 pitfalls identified | 16 |
-| P0 pitfalls closed | 12 / 16 (P0-9 in v1; P0-1..P0-8 + P0-13 + P0-14 in v2; P0-10 in v4; P0-15 in v6; P0-16 in v5) |
-| Milestones shipped | 9 / 27 |
+| P0 pitfalls closed | 16 / 16 (all closed) |
+| Milestones shipped | 11 / 27 |
 | v1-milestone phases shipped | 11 / 11 |
 | v2-milestone phases shipped | 15 / 15 (12 + 3 gap-closure) |
 | v3-milestone phases shipped | 7 / 9 (030/031 deferred) |
@@ -88,8 +87,10 @@ A1 (= v1) and A2 (= v2) now complete.
 | v6-milestone phases shipped | 10 / 10 |
 | v7-milestone phases shipped | 8 / 8 |
 | v8-milestone phases shipped | 11 / 12 (073 deferred) |
+| v9-milestone phases shipped | 9 / 9 |
 | v10-milestone phases shipped | 8 / 8 |
-| Total project phases shipped | 88 / 268 |
+| v11-milestone phases shipped | 9 / 9 |
+| Total project phases shipped | 107 / 260 |
 | v1 commits | 67 |
 | v2 commits (since v1 tag) | 153 |
 | v6 commits (daemon dir) | 27 |
@@ -107,17 +108,17 @@ A1 (= v1) and A2 (= v2) now complete.
 
 See PROJECT.md Key Decisions table — now annotated with v1+v2 outcomes (✓ Good for delivered decisions; ⚠️ Revisit notes for the two debt items below).
 
-### Open issues / debt going into v9
+### Open issues / debt going into v12
 
-- **Deferred Items (v8 close, 2026-05-05):** 3 quick-tasks acknowledged at milestone close — pre-execution audit of ROADMAP.md review, audit ROADMAP.md for domain confusion, revise ROADMAP.md to apply review roadmap findings. HOOK-05 (event hook) deferred — `event` key not in opencode Hooks type v1.14.35.
-- **Deferred Items (v5 close, 2026-05-04):** 3 quick-tasks acknowledged at milestone close — pre-execution audit of ROADMAP.md review, audit ROADMAP.md for domain confusion, revise ROADMAP.md to apply review roadmap findings.
+- **Deferred Items (v11 close, 2026-05-05):** 3 quick-tasks acknowledged at milestone close — pre-execution audit of ROADMAP.md review, audit ROADMAP.md for domain confusion, revise ROADMAP.md to apply review roadmap findings.
+- **Deferred Items (v8 close, 2026-05-05):** HOOK-05 (event hook) deferred — `event` key not in opencode Hooks type v1.14.35.
+- **Deferred Items (v5 close, 2026-05-04):** 3 quick-tasks acknowledged at milestone close.
 - Retroactive SECURITY.md backfill for phases 011–022 + 022.1 + 022.2 (security_enforcement gate added mid-v2; only 022.3 has SECURITY.md).
 - Manual release-time smoke gates for live OAuth (Anthropic/Gemini/Antigravity/Copilot) — owned by user; not yet in CI.
-- Per-plan SUMMARY.md backfilled for 4 plans at v2 close (011-01, 011-02, 013-01, 020-01) — execute-phase agent should land per-plan SUMMARY at execute-time going forward.
 
 ### Blockers
 
-(none — v2 shipped; v3/v4/v5 unblocked)
+(none — v11 shipped; v12 unblocked)
 
 ### Phases Completed
 
@@ -129,9 +130,17 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Next actions (when resuming or starting)
 
-1. **v9 — Plugin TUI Bundle:** TUI extensions (sidebar, routes, dialogs, statusline) for `@state/opencode-plugin`. v8 server hooks unblock this.
-2. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
-3. **Optional cleanup:** v3/v4/v5/v6/v7/v8 shipped; old phase branches safe to clean.
+1. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this.
+2. **v13 — state-teach MCP Server (skeleton):** Mode-gated MCP server (parallel-safe with v12).
+3. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
+4. **Optional cleanup:** v1–v11 shipped; old phase branches safe to clean.
+
+### v11 milestone delivered
+
+- 6-layer mode enforcement defense-in-depth implemented: (1) mode.json schema validator, (2) directory presence signal with subtree validation, (3) MCP registration toggle via config hook, (4) plugin hook mode gates with cached getCurrentMode(), (5) daemon HTTP mode middleware with event-type validation, (6) Python import-graph lint with pre-commit hook
+- CLI: `state mode init` and `state mode set` with atomic writes, subtree creation, SIGHUP hot-reload
+- 114-test cross-mode leakage regression suite
+- 9 phases, all 6 layers verified, MODE-01 through MODE-06 satisfied
 
 ### v10 milestone delivered
 
@@ -145,6 +154,17 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 - Layout caching with key-based invalidation + viewport clipping for graphs ≥100 nodes
 - Accessibility: screen-reader announcements, focus indicators, keyboard-only navigation
 - 8 phases, 344 TUI tests, 0 failures, 4/4 DAG-VIEW requirements satisfied
+
+### v9 milestone delivered
+
+- Mode-aware TUI sidebar with conditional render: build-progress tree (Arc/Phase/Slice) vs teach-concept state
+- Build-progress sub-component with Step status colors + Slice DAG mini-view
+- Teach-concept sub-component with concept card + Kolb stage + mastery bar
+- Statusline showing mode / scope / provider / session cost
+- Toast notifications for Slice completion, drill availability, auth refresh
+- Prompt hint slot with model + token cost + Step indicator
+- Plugin install script auto-registering TUI extensions
+- 9 phases, 344 total TUI tests, 5/5 TUI requirements satisfied
 
 ### v8 milestone delivered
 
@@ -181,6 +201,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 - `.planning/milestones/v6/` — v6 milestone artifacts (Shipped)
 - `.planning/milestones/v7/` — v7 milestone artifacts (Shipped)
 - `.planning/milestones/v8/` — v8 milestone artifacts (Shipped)
+- `.planning/milestones/v9/` — v9 milestone artifacts (Shipped)
+- `.planning/milestones/v10/` — v10 milestone artifacts (Shipped)
+- `.planning/milestones/v11/` — v11 milestone artifacts (Shipped)
 - `.planning/milestones/v3/` — v3 milestone artifacts (Shipped)
 - `.planning/milestones/v4/` — v4 milestone artifacts (Shipped)
 - `.planning/milestones/v6-MILESTONE-AUDIT.md` — v6 audit (passed)
@@ -191,9 +214,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Tier boundary gates
 
-- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).** Tier 2 (v6–v13) active with v6 ✓ + v7 ✓ + v8 ✓.
-- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ + v7 ✓ + v8 ✓ — 5 left (v9–v13).**
+- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).** Tier 2 (v6–v13) active with v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓.
+- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓ — 2 left (v12, v13).**
 
 ---
 
-*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v2 shipped: 2026-05-03 — v3/v4/v5/v6 shipped: 2026-05-04 — v7/v8 shipped: 2026-05-05*
+*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v2 shipped: 2026-05-03 — v3/v4/v5/v6 shipped: 2026-05-04 — v7/v8/v9/v10/v11 shipped: 2026-05-05*
