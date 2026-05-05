@@ -63,16 +63,20 @@ Plans:
 **Requirements:** DAG-03
 **Parallelizable:** no
 **P0 pitfall:** P0-16
-**Plans:** 0/1 plans complete
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 046-01-PLAN.md — Refactor tick() to TaskGroup, implement CancelledError watchdog, nested TaskGroup regression harness
+- [x] 046-01-PLAN.md — Refactor tick() to TaskGroup, implement CancelledError watchdog, nested TaskGroup regression harness
 
 #### Phase 047 — Reactive trigger (subscribe to v1 event stream)
 **Goal:** On `state.step.advanced`, `state.slice.worktree_ready`, `state.phase.planned` → recompute frontier; no polling.
 **Depends on:** 045, 009
 **Requirements:** DAG-04
 **Parallelizable:** no
+**Plans:** 1 plans
+
+Plans:
+- [ ] 047-01-PLAN.md — ReactiveTrigger with post-commit callback filtering and async tick dispatch
 
 #### Phase 048 — Priority inversion + silent deadlock detection
 **Goal:** Heuristic: if critical-path Step is blocked on `soft` edge, warn; if all in-flight are blocked on descoped/missing predecessors, emit `state.scheduler.deadlock` → TUI surfaces.
