@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry, topo_sort
+from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry, topo_sort, frontier, detect_cycles
 
 
 # -- Edge model tests ------------------------------------------------------------
@@ -265,3 +265,172 @@ class TestTopoSort:
         edge = Edge(source_node="a", target_node="ghost", kind="blocks")
         with pytest.raises(ValueError, match="ghost"):
             topo_sort([edge], [a])
+
+
+# -- Frontier tests --------------------------------------------------------------
+
+
+class TestFrontier:
+    """Tests for frontier() — unblocked-node calculator.
+
+    Covering: empty/trivial, blocks/data/soft edge semantics,
+    multiple predecessors, edge cases, and validation.
+    """
+
+    # --- Empty / trivial -------------------------------------------------------
+
+    def test_frontier_empty_graph(self) -> None:
+        """frontier([], []) returns []."""
+        result = frontier([], [])
+        assert result == []
+
+    def test_frontier_single_idle(self) -> None:
+        """Single idle node, no edges → returns [node]."""
+        n = Node(id="a", kind="step", status="idle")
+        result = frontier([n], [])
+        assert [n.id for n in result] == ["a"]
+
+    def test_frontier_single_done_excluded(self) -> None:
+        """Single done node, no edges → [] (done excluded)."""
+        n = Node(id="a", kind="step", status="done")
+        result = frontier([n], [])
+        assert result == []
+
+    def test_frontier_single_failed_excluded(self) -> None:
+        """Single failed node, no edges → [] (failed excluded)."""
+        n = Node(id="a", kind="step", status="failed")
+        result = frontier([n], [])
+        assert result == []
+
+    def test_frontier_single_in_progress(self) -> None:
+        """Single in_progress node, no edges → [node] (only done/failed excluded)."""
+        n = Node(id="a", kind="step", status="in_progress")
+        result = frontier([n], [])
+        assert [n.id for n in result] == ["a"]
+
+    # --- blocks edge semantics -------------------------------------------------
+
+    def test_frontier_blocks_edge_done_unblocks(self) -> None:
+        """A(done) -blocks→ B(idle) → [B] (B unblocked, A excluded as done)."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="blocks")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["b"]
+
+    def test_frontier_blocks_edge_not_done_blocks(self) -> None:
+        """A(idle) -blocks→ B(idle) → [A] (B blocked by A not done)."""
+        a = Node(id="a", kind="step", status="idle")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="blocks")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["a"]
+
+    # --- data edge semantics (same blocking as blocks) ------------------------
+
+    def test_frontier_data_edge_done_unblocks(self) -> None:
+        """A(done) -data→ B(idle) → [B]."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="data")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["b"]
+
+    def test_frontier_data_edge_not_done_blocks(self) -> None:
+        """A(idle) -data→ B(idle) → [A] (B blocked by A not done)."""
+        a = Node(id="a", kind="step", status="idle")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="data")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["a"]
+
+    # --- soft edge semantics (does NOT block) ----------------------------------
+
+    def test_frontier_soft_edge_does_not_block(self) -> None:
+        """A(idle) -soft→ B(idle) → [A, B] (both unblocked)."""
+        a = Node(id="a", kind="step", status="idle")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="soft")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["a", "b"]
+
+    def test_frontier_soft_edge_done_excluded(self) -> None:
+        """A(done) -soft→ B(idle) → [B] (A excluded as done)."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="soft")
+        result = frontier([a, b], [e])
+        assert [n.id for n in result] == ["b"]
+
+    # --- Multiple predecessors --------------------------------------------------
+
+    def test_frontier_multiple_predecessors_all_done(self) -> None:
+        """A(done)+B(done) both → C(idle) → [C] (all done)."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="done")
+        c = Node(id="c", kind="step", status="idle")
+        e1 = Edge(source_node="a", target_node="c", kind="blocks")
+        e2 = Edge(source_node="b", target_node="c", kind="blocks")
+        result = frontier([a, b, c], [e1, e2])
+        assert [n.id for n in result] == ["c"]
+
+    def test_frontier_multiple_predecessors_one_not_done(self) -> None:
+        """A(done)+B(idle) both → C(idle) → [B] (C blocked by B not done)."""
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        e1 = Edge(source_node="a", target_node="c", kind="blocks")
+        e2 = Edge(source_node="b", target_node="c", kind="blocks")
+        result = frontier([a, b, c], [e1, e2])
+        assert [n.id for n in result] == ["b"]
+
+    # --- Edge cases -------------------------------------------------------------
+
+    def test_frontier_failed_predecessor_blocks(self) -> None:
+        """A(failed) -blocks→ B(idle) → [] (both excluded)."""
+        a = Node(id="a", kind="step", status="failed")
+        b = Node(id="b", kind="step", status="idle")
+        e = Edge(source_node="a", target_node="b", kind="blocks")
+        result = frontier([a, b], [e])
+        assert result == []
+
+    def test_frontier_mixed_block_soft(self) -> None:
+        """A(done)-blocks→C(idle), B(idle)-soft→C(idle) → [B, C].
+        
+        C unblocked because only blocks/data edges matter;
+        soft edge from B to C does not block C.
+        """
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        e1 = Edge(source_node="a", target_node="c", kind="blocks")
+        e2 = Edge(source_node="b", target_node="c", kind="soft")
+        result = frontier([a, b, c], [e1, e2])
+        assert [n.id for n in result] == ["b", "c"]
+
+    def test_frontier_diamond_middle_only(self) -> None:
+        """Diamond A(done)→B,C(idle), B,C→D(idle) → [B, C].
+        
+        D blocked — both B and C must be done first.
+        """
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        d = Node(id="d", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="blocks"),
+            Edge(source_node="c", target_node="d", kind="blocks"),
+        ]
+        result = frontier(edges=edges, nodes=[a, b, c, d])
+        assert [n.id for n in result] == ["b", "c"]
+
+    # --- Validation (matching topo_sort pattern) -------------------------------
+
+    def test_frontier_missing_source_node_raises(self) -> None:
+        """Edge references source_node not in nodes → raises ValueError."""
+        a = Node(id="a", kind="step", status="idle")
+        bad_edge = Edge(source_node="ghost", target_node="a", kind="blocks")
+        with pytest.raises(ValueError, match="ghost"):
+            frontier([a], [bad_edge])
