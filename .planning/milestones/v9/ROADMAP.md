@@ -69,18 +69,18 @@ Plans:
 **Depends on:** 084
 **Requirements:** TUI-03
 **Parallelizable:** yes
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
-- [ ] 087-01-PLAN.md — PromptHint component (model · cost · step counter) + SSE event wiring + tui.ts integration
+- [x] 087-01-PLAN.md — PromptHint component (model · cost · step counter) + SSE event wiring + tui.ts integration
 
 #### Phase 088 — Bun test suite for TUI components
 **Goal:** Comprehensive `bun test` unit tests for all five TUI components (sidebar-content-renderer, build-progress, teach-concept, statusline, toast) with cross-component integration test and >80% coverage.
 **Depends on:** 081..P8
 **Requirements:** VERIFIER-088
 **Parallelizable:** no (final)
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
-- [ ] 088-01-PLAN.md — Deepen unit tests + cross-component integration test + coverage verification
+- [x] 088-01-PLAN.md — Deepen unit tests + cross-component integration test + coverage verification
 
 ---
 

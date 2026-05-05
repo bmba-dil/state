@@ -42,7 +42,7 @@ patterns-established:
 requirements-completed:
   - TUI-03
 metrics:
-  duration: 5m
+  duration: 9m
   completed: 2026-05-05
 ---
 
