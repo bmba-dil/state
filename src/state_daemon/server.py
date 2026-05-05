@@ -44,6 +44,12 @@ _HTTP_STATUS_TEXTS: dict[int, str] = {
 }
 
 
+# GET handler callable signature: () -> bytes (response body).
+# The server wraps the returned bytes in a 200 + Content-Type: application/json
+# response.  Handlers that need to signal errors should return a JSON error body.
+GetHandler = Callable[[], Awaitable[bytes]]
+
+
 class DaemonServer:
     """Async HTTP server bound to a unix domain socket.
 
@@ -53,6 +59,9 @@ class DaemonServer:
     GET /events/subscribe is delegated to an optional SSE handler that
     manages the stream lifecycle (headers, event streaming, heartbeat,
     client cleanup).
+
+    Additional GET endpoints can be registered via ``add_get_handler(path, handler)``
+    — the handler is called with no arguments and returns response body bytes.
     """
 
     def __init__(
@@ -65,6 +74,8 @@ class DaemonServer:
         self._router = router
         self._sse_handler = sse_handler
         self._server: asyncio.Server | None = None
+        # Pluggable GET route handlers: path → handler callable.
+        self._get_handlers: dict[str, GetHandler] = {}
 
     async def start(self) -> None:
         """Bind to the unix socket and begin accepting connections."""
@@ -75,6 +86,15 @@ class DaemonServer:
         )
         os.chmod(self._socket_path, 0o600)
         log.info("daemon.server.started", socket_path=self._socket_path)
+
+    def add_get_handler(self, path: str, handler: GetHandler) -> None:
+        """Register a GET handler for *path*.
+
+        The handler receives no arguments and must return response body bytes.
+        Handlers are matched by exact path.  Registered handlers take priority
+        over the built-in /health and /events/subscribe routes.
+        """
+        self._get_handlers[path] = handler
 
     async def stop(self) -> None:
         """Gracefully shut down, waiting for in-flight requests."""
@@ -117,6 +137,32 @@ class DaemonServer:
             body = b""
             if content_length > 0:
                 body = await reader.readexactly(content_length)
+
+            # --- Registered GET handlers (Phase 059+ extensible) ---
+            if method == "GET" and path in self._get_handlers:
+                handler = self._get_handlers[path]
+                try:
+                    response_body = await handler()
+                except Exception:
+                    log.exception("daemon.server.get_handler_error", path=path)
+                    writer.write(
+                        _http_response(
+                            500,
+                            [("Content-Type", "application/json")],
+                            b'{"error": "Internal Server Error"}',
+                        )
+                    )
+                    await writer.drain()
+                    return
+                writer.write(
+                    _http_response(
+                        200,
+                        [("Content-Type", "application/json")],
+                        response_body,
+                    )
+                )
+                await writer.drain()
+                return
 
             # --- GET /health (plain HTTP — not JSON-RPC) ---
             if method == "GET" and path == "/health":
