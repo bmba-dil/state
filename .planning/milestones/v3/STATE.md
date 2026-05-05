@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v3
 milestone_name: — Provider Routing + Model Profiles
-status: planning
-last_updated: "2026-05-05T02:12:08.003Z"
-last_activity: 2026-04-22 — Migrated to milestone-scoped layout
+status: shipped
+last_updated: "2026-05-05T06:00:00.000Z"
+last_activity: 2026-05-04 — v3 squash-commit delivery (7/9 phases)
 ---
 
 # STATE: v3 — Provider Routing + Model Profiles
 
 **Milestone:** v3
 **Phase range:** 023–031
-**Status:** Ready to plan
-**Phases complete:** 0 / 9
-**Last activity:** 2026-04-22 — Migrated to milestone-scoped layout
+**Status:** Shipped (7/9 phases; 030/031 deferred)
+**Phases complete:** 7 / 9
+**Last activity:** 2026-05-04 — Squash commit `5720e5d` delivering phases 023-029
 
 ---
 
@@ -21,12 +21,12 @@ last_activity: 2026-04-22 — Migrated to milestone-scoped layout
 
 | Phase | Slug | Status |
 |-------|------|--------|
-| 023 | shared-httpx-asyncclient-connection-pool | Not started |
-| 024 | litellm-wrapper | Not started |
-| 025 | direct-anthropic-sdk-escape-hatch | Not started |
-| 026 | oauth-stealth-bypass-guard | Not started |
-| 027 | model-profile-resolver | Not started |
-| 028 | cost-accounting-request | Not started |
-| 029 | thinking-budget-tag-propagation | Not started |
-| 030 | cache-control-marker-end-end | Not started |
-| 031 | provider-parity-matrix-tests | Not started |
+| 023 | shared-httpx-asyncclient-connection-pool | Complete |
+| 024 | litellm-wrapper | Complete |
+| 025 | direct-anthropic-sdk-escape-hatch | Complete |
+| 026 | oauth-stealth-bypass-guard | Complete (missing VERIFICATION/SECURITY) |
+| 027 | model-profile-resolver | Complete |
+| 028 | cost-accounting-request | Complete |
+| 029 | thinking-budget-tag-propagation | Complete |
+| 030 | cache-control-marker-end-end | Deferred (release-time) |
+| 031 | provider-parity-matrix-tests | Deferred (release-time smoke) |

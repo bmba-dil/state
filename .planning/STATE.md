@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v6
 milestone_name: — State Daemon
-status: v5 milestone complete
-last_updated: "2026-05-05T04:18:38.322Z"
+status: v3 + v4 + v5 + v6 milestones complete
+last_updated: "2026-05-05T06:00:00.000Z"
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-04 — v5 (DAG Scheduler) and v6 (State Daemon) shipped. 4 / 27 milestones complete. v5 delivered 9 phases, 130 tests across scheduler/reactive/CLI. All 7 DAG requirements satisfied. v6 delivered 10 phases, 27 daemon commits, ~3,443 LoC src, ~250 tests. All 8 v6-scoped requirements (DAE-01, DAE-03..DAE-09) satisfied; DAE-02 deferred to v7.
+**Last updated:** 2026-05-05 — v3 (Provider Routing), v4 (Worktree + Snapshot), v5 (DAG Scheduler), and v6 (State Daemon) all shipped. 6 / 27 milestones complete. v3 delivered 7 phases (023-029, 030/031 deferred), 14 plans, 494 tests. v4 delivered 9 phases (032-040), 55 tests. v5 delivered 9 phases, 130 tests. v6 delivered 10 phases, ~250 tests. All v5+v6 requirements satisfied; v3 PRV-01..PRV-08 satisfied (PRV-09 deferred in 030).
 
 ---
 
@@ -27,29 +27,29 @@ last_updated: "2026-05-05T04:18:38.322Z"
 
 ## Current Position
 
-**Current tier:** Tier 1 → Tier 2 transition (v1 ✓, v2 ✓, v5 ✓, v6 ✓ — 1 left to close Tier 1)
+**Current tier:** Tier 1 complete → Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓)
 **Last shipped milestone:** v6 — State Daemon (HTTP + SSE + Mode Middleware) — Complete (shipped 2026-05-04)
-**Active milestone:** v3 — Provider Routing + Model Profiles — phases 023–031 (9 phases)
-**Active phase:** 023 — (next up; not yet planned)
-**Previous milestones:** v1 (Event Store Foundation), v2 (Auth Coverage), v5 (DAG Scheduler), v6 (State Daemon)
+**Active milestone:** v7 — Per-Session Worker — next unblocked Tier 2 milestone
+**Active phase:** 060 — (next up; not yet planned)
+**Previous milestones:** v1 (Event Store Foundation), v2 (Auth Coverage), v3 (Provider Routing), v4 (Worktree + Snapshot), v5 (DAG Scheduler), v6 (State Daemon)
 
-**Phases complete:** 45 / 256 (v1: 11, v2: 15, v5: 9, v6: 10)
-**Milestones complete:** 4 / 27
+**Phases complete:** 61 / 256 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10)
+**Milestones complete:** 6 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[#########......................................................] 18%
+[###########....................................................] 24%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
 
-- v3 — Provider Routing + Model Profiles — **active** (soft-depended on v2 for cred testing; v2 now shipped)
-- v4 — Worktree + Snapshot Service — independent
-- v5 — DAG Scheduler — independent (event stream from v1 available)
+- v7 — Per-Session Worker — depends on v6 daemon (v6 shipped)
+- v8 — Plugin Server Hooks (9 hooks) — depends on v7
+- v9 — Plugin TUI Bundle — depends on v7
 
-v3, v4, v5 can run concurrently.
+v3, v4, v5 are shipped. Tier 2 (v6–v13) is the active tier.
 
 ### Critical path preview
 
@@ -67,18 +67,24 @@ A1 (= v1) and A2 (= v2) now complete.
 | Roadmap created | 2026-04-22 |
 | v1 shipped | 2026-04-26 (merged to main 2026-04-28) |
 | v2 shipped | 2026-05-03 (tagged v2) |
+| v3 shipped | 2026-05-04 (squash-commit, 7/9 phases) |
+| v4 shipped | 2026-05-04 (squash-commit, 9/9 phases) |
+| v5 shipped | 2026-05-04 |
 | v6 shipped | 2026-05-04 |
 | Phases defined | 256 |
 | Milestones defined | 27 |
 | v1 requirements captured | 221 |
 | Coverage | 100% |
 | P0 pitfalls identified | 16 |
-| P0 pitfalls closed | 11 / 16 (P0-9 in v1; P0-1..P0-8 + P0-13 + P0-14 in v2; P0-15 in v6) |
-| Milestones shipped | 3 / 27 |
+| P0 pitfalls closed | 12 / 16 (P0-9 in v1; P0-1..P0-8 + P0-13 + P0-14 in v2; P0-10 in v4; P0-15 in v6; P0-16 in v5) |
+| Milestones shipped | 6 / 27 |
 | v1-milestone phases shipped | 11 / 11 |
 | v2-milestone phases shipped | 15 / 15 (12 + 3 gap-closure) |
+| v3-milestone phases shipped | 7 / 9 (030/031 deferred) |
+| v4-milestone phases shipped | 9 / 9 |
+| v5-milestone phases shipped | 9 / 9 |
 | v6-milestone phases shipped | 10 / 10 |
-| Total project phases shipped | 36 / 256 |
+| Total project phases shipped | 61 / 256 |
 | v1 commits | 67 |
 | v2 commits (since v1 tag) | 153 |
 | v6 commits (daemon dir) | 27 |
@@ -117,10 +123,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Next actions (when resuming or starting)
 
-1. **Run `/gsd:autonomous --from 023`** — start v3 (Provider Routing + Model Profiles). v2's auth credentials now available for provider tests.
-2. **In parallel:** v4 (Worktree + Snapshot) and v5 (DAG Scheduler) are independent of v3.
-3. **v7 (Per-Session Worker):** now unblocked (v6 daemon shipped). Run `/gsd:autonomous --from 060 --to 067`.
-4. **Optional cleanup:** v6 shipped; old phase branches safe to clean.
+1. **Run `/gsd:autonomous --from 060 --to 067`** — start v7 (Per-Session Worker). v6 daemon unblocks this.
+2. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
+3. **Optional cleanup:** v3/v4/v5/v6 shipped; old phase branches safe to clean.
 
 ### v6 milestone delivered
 
@@ -146,7 +151,8 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 - `.planning/milestones/v2/` — v2 milestone artifacts (Complete)
 - `.planning/milestones/v5/` — v5 milestone artifacts (Shipped)
 - `.planning/milestones/v6/` — v6 milestone artifacts (Shipped)
-- `.planning/milestones/v3/` — v3 milestone artifacts (Active)
+- `.planning/milestones/v3/` — v3 milestone artifacts (Shipped)
+- `.planning/milestones/v4/` — v4 milestone artifacts (Shipped)
 - `.planning/milestones/v6-MILESTONE-AUDIT.md` — v6 audit (passed)
 - `.planning/milestones/v2-{ROADMAP,REQUIREMENTS,MILESTONE-AUDIT}.md` — flat v2 archives
 - `.planning/research/` — SUMMARY, ARCHITECTURE, FEATURES, PITFALLS, STACK
@@ -155,9 +161,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Tier boundary gates
 
-- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v5 ✓ — 2 left (v3, v4).** Tier 2 (v6–v13) started with v6 daemon shipping early as unblocked critical path for v7.
+- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).** Tier 2 (v6–v13) active with v6 shipped.
 - **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ — 7 left (v7–v13).**
 
 ---
 
-*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v2 shipped: 2026-05-03 — v6 shipped: 2026-05-04*
+*State initialized: 2026-04-22 — v1 shipped: 2026-04-26 — v2 shipped: 2026-05-03 — v3/v4/v5/v6 shipped: 2026-05-04*

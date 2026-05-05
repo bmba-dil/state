@@ -30,22 +30,24 @@ concurrency model.
 - ✓ **Auth layer covering Anthropic OAuth (Claude Code stealth), Gemini CLI free-tier OAuth, Antigravity OAuth, Copilot device-code, and plain API keys — all five methods on day one** — v2 (2026-05-03): 15 phases (12 + 3 gap-closure), 13/13 AUTH-XX requirements satisfied, 9/9 in-scope P0 pitfalls closed, byte-for-byte stealth header parity vs `state-inputs/claude-oauth.md`.
 - ✓ **Pure-Python DAG scheduler (~300 LOC) with typed edges, topological sort, cycle detection, frontier calculator, TaskGroup dispatcher, CancelledError watchdog, reactive event-driven triggers, and `state dag show` CLI** — v5 (2026-05-04): 9 phases, 130 tests, 7/7 DAG requirements satisfied, P0-16 closed, ~3,311 LOC.
 - ✓ **State daemon with always-on user service, unix-socket HTTP server, SSE event bus, mode-enforcement middleware, pid-file, crash recovery, and launchd/systemd unit installer** — v6 (2026-05-04): 10 phases, 250+ tests, DAE-01/DAE-03..DAE-09 satisfied, P0-15 closed.
+- ✓ **Provider routing via litellm with direct-Anthropic SDK escape hatch, OAuth stealth bypass guard, model profiles, cost accounting, thinking budget** — v3 (2026-05-04): 7 phases (023-029), 14 plans, 494 tests, 6/9 requirements satisfied (PRV-03/PRV-06/PRV-07 via implementation, PRV-09/PRV-10 deferred in 030/031).
+- ✓ **Per-Slice worktree with opencode-HTTP + pygit2 fallback, transactional bootstrap, orphan GC, Step/Slice snapshots, prefix-only revert CLI** — v4 (2026-05-04): 9 phases (032-040), 55 tests, 9/9 requirements satisfied.
 
 ### Active
 
 <!-- High-level capability hypotheses. Refined into REQ-IDs in REQUIREMENTS.md. -->
 
-- [ ] Provider routing via litellm with direct-SDK escape hatches for Anthropic
-      extended thinking and fine-grained cache control
+- [x] Provider routing via litellm with direct-SDK escape hatches for Anthropic
+      extended thinking and fine-grained cache control — v3 shipped (030/031 deferred)
 - [ ] Two independent MCP servers: `state-build` and `state-teach`, registered
       independently in opencode
 - [ ] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
       hook shim and TUI extensions (sidebar, routes, dialogs)
 - [ ] Four-tier planning hierarchy: **Arc → Phase → Slice → Step**, with the
       full discuss/plan/execute/verify cycle at Step level
-- [ ] Per-Slice worktree isolation for concurrent work (opencode worktree
-      service preferred, pygit2 fallback for other hosts)
-- [ ] Snapshot/diff/revert at Step and Slice boundaries
+- [x] Per-Slice worktree isolation for concurrent work (opencode worktree
+      service preferred, pygit2 fallback for other hosts) — v4 shipped
+- [x] Snapshot/diff/revert at Step and Slice boundaries — v4 shipped
 - [ ] Build-mode kernel reimagining every GSD command (plan-phase,
       execute-phase, verify, ship, code-review, code-review-fix,
       discuss-phase, research-phase, roadmapper, intel, map-codebase,
@@ -230,4 +232,4 @@ This document evolves at phase transitions and milestone boundaries.
 - VALIDATION.md not authored for the three gap-closure phases (acceptable per `plan-phase` Step 5.5).
 
 ---
-*Last updated: 2026-05-04 after v5 (DAG Scheduler) and v6 (State Daemon) milestones — v5 delivered pure-Python reactive scheduler (9 phases, 130 tests, P0-16 closed); v6 delivered always-on daemon (10 phases, 250+ tests, P0-15 closed). 4/27 milestones shipped (v1, v2, v5, v6). Tier 1 at 3/5 — v3 Provider Routing active.*
+*Last updated: 2026-05-05 — v3 (Provider Routing) and v4 (Worktree + Snapshot) tracking files updated to reflect 2026-05-04 squash-commit delivery. 6/27 milestones shipped (v1, v2, v3, v4, v5, v6). Tier 1 complete (5/5). Tier 2 started (v6 shipped).*

@@ -31,8 +31,8 @@
 
 - [x] **v1 — Event Store Foundation** — Dual-write SQLite + SyncEvent event store with deterministic replay ✓ Shipped 2026-04-26
 - [x] **v2 — Auth Coverage (5 methods)** — All five auth methods with filelock-guarded refresh and token redaction ✓ Shipped 2026-05-03
-- [ ] **v3 — Provider Routing + Model Profiles** — litellm default + Anthropic SDK escape hatch with OAuth bypass — **active**
-- [ ] **v4 — Worktree + Snapshot Service** — Per-Slice worktrees with Step/Slice snapshots and GC
+- [x] **v3 — Provider Routing + Model Profiles** — litellm default + Anthropic SDK escape hatch with OAuth bypass — ✓ Shipped 2026-05-04 (7/9 phases; 030/031 deferred)
+- [x] **v4 — Worktree + Snapshot Service** — Per-Slice worktrees with Step/Slice snapshots and GC — ✓ Shipped 2026-05-04 (9/9 phases)
 - [x] **v5 — DAG Scheduler** — Pure-Python reactive scheduler with TaskGroup watchdog ✓ Shipped 2026-05-04
 
 ### Tier 2 — Kernel & Plumbing (depends on Tier 1)
@@ -131,7 +131,7 @@ Tier 4:
 
 ### Tier boundaries
 
-Tier 1 ends when v1..v5 all report `shipped`.
+Tier 1 ends when v1..v5 all report `shipped`. **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).**
 Tier 2 ends when v6..v13 all report `shipped`.
 Tier 3 ends when v14..v24 all report `shipped` (Build + Teach kernels complete).
 Tier 4 ends at v27 shipped — this is v1 release.
@@ -142,10 +142,10 @@ Tier 4 ends at v27 shipped — this is v1 release.
 
 | Milestone | Phases | Status | Started | Completed |
 |---|---|---|---|---|
-| v1. Event Store Foundation | 0/10 | Not started | - | - |
-| v2. Auth Coverage | 0/12 | Not started | - | - |
-| v3. Provider Routing | 0/9 | Not started | - | - |
-| v4. Worktree + Snapshot | 0/9 | Not started | - | - |
+| v1. Event Store Foundation | 11/11 | **Complete** — Shipped 2026-04-26 | - | 2026-04-26 |
+| v2. Auth Coverage | 15/15 | **Complete** — Shipped 2026-05-03 | - | 2026-05-03 |
+| v3. Provider Routing | 7/9 | **Complete** — Shipped 2026-05-04 (030/031 deferred) | - | 2026-05-04 |
+| v4. Worktree + Snapshot | 9/9 | **Complete** — Shipped 2026-05-04 | - | 2026-05-04 |
 | v5. DAG Scheduler | 9/9 | **Complete** — Shipped 2026-05-04 | - | 2026-05-04 |
 | v6. State Daemon | 10/10 | Shipped | 2026-05-04 | 2026-05-04 |
 | v7. Per-Session Worker | 0/8 | Not started | - | - |
@@ -169,7 +169,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v25. Migration & Import | 0/8 | Not started | - | - |
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
-| **TOTAL** | **45/256** | — | — | — |
+| **TOTAL** | **61/256** | — | — | — |
 
 ---
 
