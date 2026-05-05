@@ -32,26 +32,30 @@ Plans:
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 042
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 043-01-PLAN.md — Implement detect_cycles with DFS 3-color marking, TDD with 8 cycle-detection tests
+- [x] 043-01-PLAN.md — Implement detect_cycles with DFS 3-color marking, TDD with 8 cycle-detection tests
 
 #### Phase 044 — Frontier calculator (unblocked set per tick)
 **Goal:** `frontier(state)` — all IDLE nodes whose `blocks`/`data` predecessors are DONE.
 **Depends on:** 041
 **Requirements:** DAG-01, DAG-02
 **Parallelizable:** yes
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 044-01-PLAN.md — Implement frontier() function with TDD (17 tests)
+- [x] 044-01-PLAN.md — Implement frontier() function with TDD (17 tests)
 
 #### Phase 045 — Dispatcher (group by Slice → TaskGroup per Slice, concurrency cap)
 **Goal:** `asyncio.gather` across Slices with cap; serial within Slice; configurable cap in `config.toml`.
 **Depends on:** 044
 **Requirements:** DAG-02
 **Parallelizable:** no
+**Plans:** 1 plan
+
+Plans:
+- [ ] 045-01-PLAN.md — Implement DAGScheduler.tick() with frontier grouping, asyncio.gather dispatch, SchedulerConfig from config.toml
 
 #### Phase 046 — TaskGroup watchdog (P0-16 defence)
 **Goal:** Nested TaskGroup regression harness; watchdog detects `CancelledError` swallow via exception group inspection; fails loud.
