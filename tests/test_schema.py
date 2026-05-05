@@ -18,6 +18,7 @@ from src.state_core.schema import (
     AnyStateEvent,
     ModeConfig,
     validate_mode_config,
+    validate_subtree_path,
     ArcCreatedData,
     ArcCreatedEvent,
     ArcRetiredData,
@@ -784,6 +785,57 @@ class TestValidateModeConfig:
         """validate_mode_config raises ValueError on extra fields."""
         with pytest.raises(ValueError, match="Invalid mode config"):
             validate_mode_config({"mode": "build", "x": 1})
+
+
+# -- validate_subtree_path tests -------------------------------------------------------
+
+
+class TestValidateSubtreePath:
+    """validate_subtree_path() — subtree boundary enforcement."""
+
+    def test_build_path_allowed_in_build_mode(self) -> None:
+        """validate_subtree_path('.state/build/foo.json', 'build') does NOT raise."""
+        validate_subtree_path(".state/build/foo.json", "build")
+
+    def test_build_path_rejected_in_teach_mode(self) -> None:
+        """validate_subtree_path('.state/build/foo.json', 'teach') raises ValueError."""
+        with pytest.raises(ValueError, match=r"(?=.*teach)(?=.*build)"):
+            validate_subtree_path(".state/build/foo.json", "teach")
+
+    def test_teach_path_allowed_in_teach_mode(self) -> None:
+        """validate_subtree_path('.state/teach/bar.json', 'teach') does NOT raise."""
+        validate_subtree_path(".state/teach/bar.json", "teach")
+
+    def test_teach_path_rejected_in_build_mode(self) -> None:
+        """validate_subtree_path('.state/teach/bar.json', 'build') raises ValueError."""
+        with pytest.raises(ValueError, match=r"(?=.*build)(?=.*teach)"):
+            validate_subtree_path(".state/teach/bar.json", "build")
+
+    def test_shared_root_events_allowed_in_build(self) -> None:
+        """validate_subtree_path('.state/events.sqlite', 'build') does NOT raise (shared root)."""
+        validate_subtree_path(".state/events.sqlite", "build")
+
+    def test_shared_root_modejson_allowed_in_teach(self) -> None:
+        """validate_subtree_path('.state/mode.json', 'teach') does NOT raise (shared root)."""
+        validate_subtree_path(".state/mode.json", "teach")
+
+    def test_build_path_allowed_in_both_mode(self) -> None:
+        """validate_subtree_path('.state/build/', 'both') does NOT raise."""
+        validate_subtree_path(".state/build/", "both")
+
+    def test_teach_path_allowed_in_both_mode(self) -> None:
+        """validate_subtree_path('.state/teach/', 'both') does NOT raise."""
+        validate_subtree_path(".state/teach/", "both")
+
+    def test_path_input_allowed(self) -> None:
+        """validate_subtree_path(Path('.state/build/x'), 'build') does NOT raise."""
+        from pathlib import Path
+        validate_subtree_path(Path(".state/build/x"), "build")
+
+    def test_exact_dir_name_rejected(self) -> None:
+        """validate_subtree_path('.state/build', 'teach') raises ValueError (exact dir name)."""
+        with pytest.raises(ValueError, match=r"(?=.*teach)(?=.*build)"):
+            validate_subtree_path(".state/build", "teach")
 
 
 # -- Smoke and import tests ------------------------------------------------------------
