@@ -699,9 +699,11 @@ class DAGScheduler:
         self,
         concurrency_cap: int = 4,
         step_executor: StepExecutor | None = None,
+        on_scheduler_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> None:
         self.concurrency_cap = max(1, min(concurrency_cap, 64))
         self._executor: StepExecutor = step_executor or _default_step_executor
+        self._on_scheduler_event = on_scheduler_event
 
     async def tick(self, nodes: list[Node], edges: list[Edge]) -> list[str]:
         """Compute frontier, group by Slice, dispatch up to cap.
@@ -732,6 +734,38 @@ class DAGScheduler:
 
         dispatched: list[str] = []
 
+        # ── Post-tick diagnostics (DAG-05, DAG-06) ──────────────────────
+        # Run diagnostics before dispatch so silent deadlock (which
+        # requires an empty frontier) is always detected.  Wrap in
+        # try/except so diagnostics failure never blocks the scheduler.
+        try:
+            if self._on_scheduler_event is not None:
+                # Priority inversion: nodes in frontier blocked only by soft edges
+                inversions = detect_priority_inversion(nodes, edges)
+                for inv in inversions:
+                    await self._on_scheduler_event(
+                        "state.scheduler.priority_inversion",
+                        {"node_id": inv["node_id"],
+                         "soft_edges": inv["soft_edges"],
+                         "critical_path": inv["critical_path"]},
+                    )
+
+                # Silent deadlock: all in-progress stuck on missing/descoped
+                deadlock = detect_silent_deadlock(nodes, edges)
+                if deadlock is not None:
+                    await self._on_scheduler_event(
+                        "state.scheduler.deadlock",
+                        {
+                            "deadlocked_nodes": deadlock["deadlocked_nodes"],
+                            "missing_predecessors": deadlock["missing_predecessors"],
+                            "descoped_predecessors": deadlock["descoped_predecessors"],
+                        },
+                    )
+        except Exception:
+            # Diagnostics failure must never abort a tick.  No log here to
+            # avoid coupling scheduler to structlog — caller instruments.
+            pass
+
         if not slice_entries:
             return dispatched
 
@@ -748,8 +782,6 @@ class DAGScheduler:
                 for _, slice_nodes in slice_entries:
                     tg.create_task(_run_slice(slice_nodes))
         except BaseExceptionGroup as eg:
-            # P0-16 defence: inspect for swallowed CancelledError
-            # before re-raising.
             _inspect_for_cancelled(eg)
             raise
 

@@ -1076,3 +1076,88 @@ class TestSilentDeadlockDetection:
         assert result["deadlocked_nodes"] == ["x"]
         assert set(result["missing_predecessors"]) == {"ghost"}
         assert set(result["descoped_predecessors"]) == {"z"}
+
+
+# -- DAGScheduler diagnostic integration tests (DAG-05, DAG-06) --------------
+
+
+class TestSchedulerDiagnostics:
+    """Async tests for DAGScheduler.tick() post-tick diagnostic emission."""
+
+    @pytest.mark.asyncio
+    async def test_tick_emits_priority_inversion_event(self) -> None:
+        """Critical-path node with unfulfilled soft edge emits event via callback."""
+        events: list[tuple[str, dict[str, Any]]] = []
+
+        async def capture(event_type: str, data: dict[str, Any]) -> None:
+            events.append((event_type, data))
+
+        scheduler = DAGScheduler(
+            concurrency_cap=4,
+            step_executor=None,
+            on_scheduler_event=capture,
+        )
+
+        a = Node(id="a", kind="step", status="done")
+        b = Node(id="b", kind="step", status="idle")
+        c = Node(id="c", kind="step", status="idle")
+        edges = [
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="soft"),
+        ]
+
+        await scheduler.tick([a, b, c], edges)
+
+        # Find priority inversion event
+        pi_events = [e for e in events if e[0] == "state.scheduler.priority_inversion"]
+        assert len(pi_events) == 1
+        assert pi_events[0][1]["node_id"] == "c"
+        assert pi_events[0][1]["critical_path"] is True
+        assert "b" in pi_events[0][1]["soft_edges"]
+
+    @pytest.mark.asyncio
+    async def test_tick_emits_deadlock_event(self) -> None:
+        """Empty frontier + in_progress stuck on descoped predecessor emits deadlock event."""
+        events: list[tuple[str, dict[str, Any]]] = []
+
+        async def capture(event_type: str, data: dict[str, Any]) -> None:
+            events.append((event_type, data))
+
+        scheduler = DAGScheduler(
+            concurrency_cap=4,
+            step_executor=None,
+            on_scheduler_event=capture,
+        )
+
+        # Use a descoped (failed) predecessor rather than missing source
+        # so frontier() doesn't raise ValueError in tick().
+        y = Node(id="y", kind="step", status="failed")
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="y", target_node="x", kind="blocks"),
+        ]
+
+        await scheduler.tick([y, x], edges)
+
+        deadlock_events = [e for e in events if e[0] == "state.scheduler.deadlock"]
+        assert len(deadlock_events) == 1
+        assert deadlock_events[0][1]["deadlocked_nodes"] == ["x"]
+        assert deadlock_events[0][1]["descoped_predecessors"] == ["y"]
+
+    @pytest.mark.asyncio
+    async def test_tick_no_callback_no_emit(self) -> None:
+        """DAGScheduler without on_scheduler_event skips detection (no crash)."""
+        scheduler = DAGScheduler(concurrency_cap=4)
+
+        # Use a descoped (failed) predecessor so frontier doesn't raise
+        # on missing source, but deadlock conditions are still met
+        z = Node(id="z", kind="step", status="failed")
+        x = Node(id="x", kind="step", status="in_progress")
+        edges = [
+            Edge(source_node="z", target_node="x", kind="blocks"),
+        ]
+
+        # Should not crash — detection is skipped (callback is None)
+        result = await scheduler.tick([z, x], edges)
+        # Frontier: z is failed (excluded), x is blocked (z not done) → empty
+        assert result == []
