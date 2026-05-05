@@ -2,6 +2,7 @@
 
 Task 055.1: Service Template Generator
 Task 055.2: Install/Uninstall Commands
+Task 055.3: CLI Integration
 """
 
 from __future__ import annotations
@@ -15,7 +16,10 @@ from unittest import mock
 from xml.etree import ElementTree as ET
 
 import pytest
+import typer
+from typer.testing import CliRunner
 
+from src.state_daemon.cli import app as daemon_app
 from src.state_daemon.service import (
     _PLIST_PATH,
     _UNIT_PATH,
@@ -276,3 +280,97 @@ class TestCurrentPlatformName:
         with mock.patch("src.state_daemon.service.sys.platform", "linux"):
             assert "Linux" in current_platform_name()
             assert "systemd" in current_platform_name()
+
+
+# ---------------------------------------------------------------------------
+# Task 055.3 — CLI Integration
+# ---------------------------------------------------------------------------
+
+
+class TestCliInstall:
+    """Test ``state daemon install`` CLI command (mocked service layer)."""
+
+    @pytest.fixture
+    def runner(self) -> CliRunner:
+        return CliRunner()
+
+    def test_install_success(self, runner: CliRunner) -> None:
+        with mock.patch("src.state_daemon.cli.install_service") as mock_install:
+            result = runner.invoke(daemon_app, ["install"])
+            assert result.exit_code == 0, f"CLI failed: {result.output}"
+            assert "installed" in result.output.lower()
+            mock_install.assert_called_once()
+
+    def test_install_file_not_found(self, runner: CliRunner) -> None:
+        with mock.patch(
+            "src.state_daemon.cli.install_service",
+            side_effect=FileNotFoundError("launchctl not found"),
+        ):
+            result = runner.invoke(daemon_app, ["install"])
+            assert result.exit_code == 1
+            assert "not found" in result.output.lower()
+
+    def test_install_permission_denied(self, runner: CliRunner) -> None:
+        with mock.patch(
+            "src.state_daemon.cli.install_service",
+            side_effect=PermissionError("access denied"),
+        ):
+            result = runner.invoke(daemon_app, ["install"])
+            assert result.exit_code == 1
+            assert "permission" in result.output.lower()
+
+    def test_install_unexpected_error(self, runner: CliRunner) -> None:
+        with mock.patch(
+            "src.state_daemon.cli.install_service",
+            side_effect=RuntimeError("disk full"),
+        ):
+            result = runner.invoke(daemon_app, ["install"])
+            assert result.exit_code == 1
+
+
+class TestCliUninstall:
+    """Test ``state daemon uninstall`` CLI command (mocked service layer)."""
+
+    @pytest.fixture
+    def runner(self) -> CliRunner:
+        return CliRunner()
+
+    def test_uninstall_success(self, runner: CliRunner) -> None:
+        with mock.patch("src.state_daemon.cli.uninstall_service") as mock_uninstall:
+            result = runner.invoke(daemon_app, ["uninstall"])
+            assert result.exit_code == 0, f"CLI failed: {result.output}"
+            assert "uninstalled" in result.output.lower()
+            mock_uninstall.assert_called_once()
+
+    def test_uninstall_error(self, runner: CliRunner) -> None:
+        with mock.patch(
+            "src.state_daemon.cli.uninstall_service",
+            side_effect=RuntimeError("not installed"),
+        ):
+            result = runner.invoke(daemon_app, ["uninstall"])
+            assert result.exit_code == 1
+
+
+class TestDaemonAppRegistered:
+    """Verify ``state daemon`` appears in the main Typer CLI."""
+
+    def test_daemon_group_visible(self) -> None:
+        from src.state_cli.main import app as main_app
+
+        runner = CliRunner()
+        result = runner.invoke(main_app, ["daemon", "--help"])
+        assert result.exit_code == 0
+        assert "install" in result.output
+        assert "uninstall" in result.output
+
+    def test_install_help(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(daemon_app, ["install", "--help"])
+        assert result.exit_code == 0
+        assert "launchd" in result.output.lower() or "plist" in result.output.lower() or "service" in result.output.lower()
+
+    def test_uninstall_help(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(daemon_app, ["uninstall", "--help"])
+        assert result.exit_code == 0
+        assert "unload" in result.output.lower() or "remove" in result.output.lower()

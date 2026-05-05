@@ -27,6 +27,10 @@ app.add_typer(auth_app)
 from src.state_cli.snapshot import app as snapshot_app  # noqa: E402
 app.add_typer(snapshot_app)
 
+# Phase 055 — daemon sub-app
+from src.state_daemon.cli import app as daemon_app  # noqa: E402
+app.add_typer(daemon_app)
+
 
 @db_app.command(name="init")
 def db_init() -> None:
