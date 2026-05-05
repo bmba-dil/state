@@ -1,6 +1,7 @@
 /** Permission ask hook — gray-area routing */
 
 import type { Hooks } from "@opencode-ai/plugin";
+import { log } from "../logger.js";
 
 export const permissionAsk: NonNullable<
   Hooks["permission.ask"]
@@ -14,19 +15,17 @@ export const permissionAsk: NonNullable<
 
   if (isStateInternal) {
     output.status = "allow";
-    console.log(
-      JSON.stringify({
-        source: "@state/opencode-plugin",
-        hook: "permission.ask",
-        type: "permission.decided",
-        permissionID: input.id,
-        permissionType: input.type,
-        decision: "allow",
-        reason: "state internal",
-        mode,
-        timestamp: Date.now(),
-      })
-    );
+    log({
+      source: "@state/opencode-plugin",
+      hook: "permission.ask",
+      type: "permission.decided",
+      permissionID: input.id,
+      permissionType: input.type,
+      decision: "allow",
+      reason: "state internal",
+      mode,
+      timestamp: Date.now(),
+    });
     return;
   }
 
@@ -38,33 +37,29 @@ export const permissionAsk: NonNullable<
 
   if (isStatePath) {
     output.status = "allow";
-    console.log(
-      JSON.stringify({
-        source: "@state/opencode-plugin",
-        hook: "permission.ask",
-        type: "permission.decided",
-        permissionID: input.id,
-        permissionType: input.type,
-        decision: "allow",
-        reason: ".state/ path write within scope",
-        mode,
-        timestamp: Date.now(),
-      })
-    );
-    return;
-  }
-
-  console.log(
-    JSON.stringify({
+    log({
       source: "@state/opencode-plugin",
       hook: "permission.ask",
       type: "permission.decided",
       permissionID: input.id,
       permissionType: input.type,
-      decision: "ask",
-      reason: "default opencode permission flow",
+      decision: "allow",
+      reason: ".state/ path write within scope",
       mode,
       timestamp: Date.now(),
-    })
-  );
+    });
+    return;
+  }
+
+  log({
+    source: "@state/opencode-plugin",
+    hook: "permission.ask",
+    type: "permission.decided",
+    permissionID: input.id,
+    permissionType: input.type,
+    decision: "ask",
+    reason: "default opencode permission flow",
+    mode,
+    timestamp: Date.now(),
+  });
 };

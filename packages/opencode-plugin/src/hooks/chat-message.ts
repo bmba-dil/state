@@ -2,6 +2,7 @@
 
 import type { Hooks } from "@opencode-ai/plugin";
 import type { Part, UserMessage } from "@opencode-ai/sdk";
+import { log } from "../logger.js";
 
 type StateMode = "build" | "teach" | "kernel";
 
@@ -54,16 +55,14 @@ function injectBuildHint(parts: Part[], message: UserMessage): void {
 }
 
 function recordTeachObservation(text: string): void {
-  console.log(
-    JSON.stringify({
-      source: "@state/opencode-plugin",
-      hook: "chat.message",
-      type: "observation",
-      mode: "teach",
-      text: text.slice(0, 200),
-      timestamp: Date.now(),
-    })
-  );
+  log({
+    source: "@state/opencode-plugin",
+    hook: "chat.message",
+    type: "observation",
+    mode: "teach",
+    text: text.slice(0, 200),
+    timestamp: Date.now(),
+  });
 }
 
 export const chatMessage: NonNullable<Hooks["chat.message"]> = async (

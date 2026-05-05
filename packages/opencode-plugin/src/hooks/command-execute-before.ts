@@ -2,6 +2,7 @@
 
 import type { Hooks } from "@opencode-ai/plugin";
 import type { Part } from "@opencode-ai/sdk";
+import { log } from "../logger.js";
 
 type StateMode = "build" | "teach" | "kernel";
 
@@ -45,14 +46,12 @@ export const commandExecuteBefore: NonNullable<
     return;
   }
 
-  console.log(
-    JSON.stringify({
-      source: "@state/opencode-plugin",
-      hook: "command.execute.before",
-      type: "command.gated",
-      command: input.command,
-      mode,
-      timestamp: Date.now(),
-    })
-  );
+  log({
+    source: "@state/opencode-plugin",
+    hook: "command.execute.before",
+    type: "command.gated",
+    command: input.command,
+    mode,
+    timestamp: Date.now(),
+  });
 };

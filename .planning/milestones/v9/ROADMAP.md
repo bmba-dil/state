@@ -12,56 +12,75 @@
 **Depends on:** 068
 **Requirements:** TUI-01
 **Parallelizable:** yes
-**Plans:** 1 plan (Wave 1)
-- [ ] 080-01-PLAN.md — Create theme.json + tui.ts (TuiPluginModule scaffold) + re-export from index.ts
+**Plans:** 1/1 plans complete
+- [x] 080-01-PLAN.md — Create theme.json + tui.ts (TuiPluginModule scaffold) + re-export from index.ts
 
 #### Phase 081 — Sidebar slot (`sidebar_content`) — mode-aware renderer
 **Goal:** Reads `.state/mode.json` at render; conditional render build-tree vs concept-state.
 **Depends on:** 080, 054
 **Requirements:** TUI-02
 **Parallelizable:** yes with P3..P5
+**Plans:** 1 plan
+- [ ] 081-01-PLAN.md — SidebarContentRenderer SolidJS component + tui.ts integration
 
 #### Phase 082 — Build-progress sub-component (current Step + Slice DAG mini-view)
 **Goal:** Subscribes to daemon SSE; renders Step status colors + Slice DAG thumbnail.
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P4, P5
+**Plans:** 1/1 plans complete
+- [x] 082-01-PLAN.md — BuildProgress SolidJS component + event wiring + tui.ts integration
 
 #### Phase 083 — Teach-concept sub-component (current concept + mastery bar)
 **Goal:** Subscribes to daemon SSE; renders concept card + Kolb stage + mastery bar.
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P3, P5
+**Plans:** 1/1 plans complete
+- [x] 083-01-PLAN.md — TeachConcept SolidJS component + event wiring + sidebar-content-renderer integration
 
 #### Phase 084 — Statusline (`sidebar_footer` / `home_footer`)
 **Goal:** One-line mode + scope + provider + session cost; subscribes to cost events.
 **Depends on:** 080
 **Requirements:** TUI-03
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+- [x] 084-01-PLAN.md — Statusline component (state + SSE wiring + render) + tui.ts integration + tests
 
 #### Phase 085 — Toast notifications (`ui.toast`)
 **Goal:** Slice completion, drill availability, gray-area decisions, auth refresh; de-dup.
 **Depends on:** 080
 **Requirements:** TUI-04
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+- [x] 085-01-PLAN.md — Toast notification handler (SSE event subscriptions → de-dup → api.ui.toast dispatch)
 
 #### Phase 086 — Plugin install script (`TuiPluginInstallOptions`)
 **Goal:** Auto-registers plugin + MCP servers in `opencode.json` on first run.
 **Depends on:** 079
 **Requirements:** TUI-05
 **Parallelizable:** yes
+**Plans:** 1/1 plans complete
+Plans:
+- [x] 086-01-PLAN.md — Add first-run auto-install hook to createTuiPlugin + unit tests
 
 #### Phase 087 — Prompt hint slot (`session_prompt_right`)
 **Goal:** Shows model + token cost + Step N.m indicator.
 **Depends on:** 084
 **Requirements:** TUI-03
 **Parallelizable:** yes
+**Plans:** 1 plan
+Plans:
+- [ ] 087-01-PLAN.md — PromptHint component (model · cost · step counter) + SSE event wiring + tui.ts integration
 
 #### Phase 088 — Bun test suite for TUI components
-**Goal:** `bun test` unit tests for sidebar/statusline/toast logic.
+**Goal:** Comprehensive `bun test` unit tests for all five TUI components (sidebar-content-renderer, build-progress, teach-concept, statusline, toast) with cross-component integration test and >80% coverage.
 **Depends on:** 081..P8
-**Requirements:** (verifier)
+**Requirements:** VERIFIER-088
 **Parallelizable:** no (final)
+**Plans:** 1 plan
+Plans:
+- [ ] 088-01-PLAN.md — Deepen unit tests + cross-component integration test + coverage verification
 
 ---
 
