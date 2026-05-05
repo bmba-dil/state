@@ -356,7 +356,16 @@ def detect_cycles(edges: list[Edge]) -> list[list[str]]:
 
 
 class DAGScheduler:
-    """Reactive DAG scheduler that computes unblocked Steps on state change."""
+    """Reactive DAG scheduler that computes unblocked Steps on state change.
+
+    On each tick:
+    1. Compute frontier() — all unblocked nodes
+    2. Group by Slice (via _slice_key)
+    3. Sort steps within each Slice (via _parse_sort_key)
+    4. Dispatch up to concurrency_cap Slices concurrently (via asyncio.gather)
+    5. Steps within a Slice execute sequentially
+    6. Return dispatched node IDs
+    """
 
     def __init__(
         self,
@@ -367,8 +376,49 @@ class DAGScheduler:
         self._executor: StepExecutor = step_executor or _default_step_executor
 
     async def tick(self, nodes: list[Node], edges: list[Edge]) -> list[str]:
-        """Return all Step IDs ready for concurrent dispatch."""
-        ...
+        """Compute frontier, group by Slice, dispatch up to cap.
+
+        Args:
+            nodes: All DAG nodes (any status — frontier filters to unblocked).
+            edges: All DAG edges (blocks/data/soft).
+
+        Returns:
+            Node IDs that were dispatched in this tick.
+        """
+        ready = frontier(nodes, edges)
+
+        # Group by Slice
+        by_slice: dict[str, list[Node]] = {}
+        for node in ready:
+            key = _slice_key(node.id)
+            if key not in by_slice:
+                by_slice[key] = []
+            by_slice[key].append(node)
+
+        # Sort steps within each Slice for serial execution
+        for key in by_slice:
+            by_slice[key].sort(key=lambda n: _parse_sort_key(n.id))
+
+        # Select up to concurrency_cap Slices
+        slice_entries = list(by_slice.items())[: self.concurrency_cap]
+
+        dispatched: list[str] = []
+
+        if not slice_entries:
+            return dispatched
+
+        async def _run_slice(slice_nodes: list[Node]) -> None:
+            """Execute steps within a Slice sequentially."""
+            for node in slice_nodes:
+                dispatched.append(node.id)
+                await self._executor(node)
+
+        # Concurrent dispatch across Slices
+        await asyncio.gather(
+            *(_run_slice(slice_nodes) for _, slice_nodes in slice_entries)
+        )
+
+        return dispatched
 
 
 async def _default_step_executor(node: Node) -> None:
