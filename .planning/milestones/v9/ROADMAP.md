@@ -36,6 +36,8 @@
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P3, P5
+**Plans:** 1 plan
+- [ ] 083-01-PLAN.md — TeachConcept SolidJS component + event wiring + sidebar-content-renderer integration
 
 #### Phase 084 — Statusline (`sidebar_footer` / `home_footer`)
 **Goal:** One-line mode + scope + provider + session cost; subscribes to cost events.
