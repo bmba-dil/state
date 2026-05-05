@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry
+from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry, topo_sort
 
 
 # -- Edge model tests ------------------------------------------------------------
@@ -149,3 +149,119 @@ class TestNodeRegistry:
         registry.register(Node(id="step-1", kind="step"))
         assert "step-1" in registry
         assert "nonexistent" not in registry
+
+
+# -- TopoSort tests --------------------------------------------------------------
+
+
+class TestTopoSort:
+    """Tests for topo_sort Kahn's algorithm with stable ordering."""
+
+    def test_linear_chain(self) -> None:
+        """a->b->c returns [a, b, c]."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        e1 = Edge(source_node="a", target_node="b", kind="blocks")
+        e2 = Edge(source_node="b", target_node="c", kind="blocks")
+        result = topo_sort([e1, e2], [a, b, c])
+        assert [n.id for n in result] == ["a", "b", "c"]
+
+    def test_diamond_dag(self) -> None:
+        """a->{b,c}->d: d last, a first, b and c between."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        d = Node(id="d", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="a", target_node="c", kind="blocks"),
+            Edge(source_node="b", target_node="d", kind="blocks"),
+            Edge(source_node="c", target_node="d", kind="blocks"),
+        ]
+        result = topo_sort(edges, [a, b, c, d])
+        ids = [n.id for n in result]
+        assert ids[0] == "a"
+        assert ids[-1] == "d"
+        assert set(ids[1:3]) == {"b", "c"}
+
+    def test_empty_input(self) -> None:
+        """No nodes, no edges returns empty list."""
+        result = topo_sort([], [])
+        assert result == []
+
+    def test_single_node(self) -> None:
+        """One node with no edges returns [node]."""
+        n = Node(id="step-1", kind="step")
+        result = topo_sort([], [n])
+        assert len(result) == 1
+        assert result[0].id == "step-1"
+
+    def test_unconnected_nodes(self) -> None:
+        """Two nodes, no edges — both returned (order stable)."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        result = topo_sort([], [a, b])
+        assert len(result) == 2
+        assert {n.id for n in result} == {"a", "b"}
+
+    def test_stable_frontier_ordering(self) -> None:
+        """Nodes with no edges sort by (slice_id, step_id) from node.id."""
+        arc = Node(id="arc-1", kind="arc")
+        phase = Node(id="arc-1/phase-1", kind="phase")
+        slice_ = Node(id="arc-1/phase-1/slice-1", kind="slice")
+        step1 = Node(id="arc-1/phase-1/slice-1/step-1", kind="step")
+        step2 = Node(id="arc-1/phase-1/slice-1/step-2", kind="step")
+        nodes = [step2, slice_, arc, step1, phase]  # deliberate non-sorted input
+        result = topo_sort([], nodes)
+        assert [n.id for n in result] == [
+            "arc-1",
+            "arc-1/phase-1",
+            "arc-1/phase-1/slice-1",
+            "arc-1/phase-1/slice-1/step-1",
+            "arc-1/phase-1/slice-1/step-2",
+        ]
+
+    def test_stable_frontier_steps_only(self) -> None:
+        """Two steps with no edges — sorted by step_id."""
+        step_b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step")
+        step_a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step")
+        result = topo_sort([], [step_b, step_a])
+        assert [n.id for n in result] == [
+            "arc-1/phase-1/slice-1/step-a",
+            "arc-1/phase-1/slice-1/step-b",
+        ]
+
+    def test_cycle_triangle_raises(self) -> None:
+        """a->b->c->a cycle raises ValueError."""
+        a = Node(id="a", kind="step")
+        b = Node(id="b", kind="step")
+        c = Node(id="c", kind="step")
+        edges = [
+            Edge(source_node="a", target_node="b", kind="blocks"),
+            Edge(source_node="b", target_node="c", kind="blocks"),
+            Edge(source_node="c", target_node="a", kind="blocks"),
+        ]
+        with pytest.raises(ValueError, match="Cycle detected"):
+            topo_sort(edges, [a, b, c])
+
+    def test_cycle_self_loop_raises(self) -> None:
+        """Self-loop n->n raises ValueError."""
+        n = Node(id="n", kind="step")
+        edge = Edge(source_node="n", target_node="n", kind="blocks")
+        with pytest.raises(ValueError, match="Cycle detected"):
+            topo_sort([edge], [n])
+
+    def test_missing_source_node_raises(self) -> None:
+        """Edge with source not in nodes raises ValueError."""
+        a = Node(id="a", kind="step")
+        edge = Edge(source_node="ghost", target_node="a", kind="blocks")
+        with pytest.raises(ValueError, match="ghost"):
+            topo_sort([edge], [a])
+
+    def test_missing_target_node_raises(self) -> None:
+        """Edge with target not in nodes raises ValueError."""
+        a = Node(id="a", kind="step")
+        edge = Edge(source_node="a", target_node="ghost", kind="blocks")
+        with pytest.raises(ValueError, match="ghost"):
+            topo_sort([edge], [a])
