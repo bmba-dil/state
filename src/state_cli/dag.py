@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
 
 import typer
 from rich.console import Console
-from rich.text import Text
 
 from src.state_core.scheduler import Edge, Node, topo_sort
 
@@ -112,8 +110,6 @@ def _render_box_lines(
 
     Returns [top_line, content_line, bottom_line].
     """
-    outer_w = inner_width + 2
-
     top = bc["tl"] + bc["h"] * inner_width + bc["tr"]
     bottom = bc["bl"] + bc["h"] * inner_width + bc["br"]
 
@@ -257,16 +253,14 @@ def render_dag(
         row_nodes = depth_rows[depth_idx]
         next_row_nodes = depth_rows[depth_idx + 1]
 
-        # Build connector line using a character grid approach.
-        # We need the max visual width (without Rich tags) for alignment.
-        # Use the next row's text width as reference.
-        max_next_line = max(
-            (len(_render_box_lines(n, inner_width, bc)[0]) for n in next_row_nodes),
-            default=0,
-        )
-        # Estimate width: 2 + sum(box widths + gaps)
+        # Compute connector grid width as the max of both the current
+        # and next row widths. Source nodes may be at positions that
+        # extend beyond the next row's end.
+        n_cur = len(row_nodes)
         n_next = len(next_row_nodes)
-        total_plain_width = 2 + n_next * outer_width + max(0, (n_next - 1) * gap)
+        cur_width = 2 + n_cur * outer_width + max(0, (n_cur - 1) * gap)
+        next_width = 2 + n_next * outer_width + max(0, (n_next - 1) * gap)
+        total_plain_width = max(cur_width, next_width)
 
         connector: list[str] = [" "] * total_plain_width
 
@@ -390,8 +384,8 @@ def show(
                       if flag]
     if len(active_filters) > 1:
         typer.echo(
-            f"Error: --arc, --phase, and --slice are mutually exclusive. "
-            f"Only one filter may be specified at a time.",
+            "Error: --arc, --phase, and --slice are mutually exclusive. "
+            "Only one filter may be specified at a time.",
             err=True,
         )
         raise typer.Exit(code=2)
@@ -404,19 +398,19 @@ def show(
     elif file is not None:
         try:
             data = json.loads(Path(file).read_text(encoding="utf-8"))
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             typer.echo(f"Error: File not found: {file}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
         except json.JSONDecodeError as exc:
             typer.echo(f"Error: Invalid JSON in {file}: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
 
         try:
             nodes = [Node(**n) for n in data.get("nodes", [])]
             edges = [Edge(**e) for e in data.get("edges", [])]
         except Exception as exc:
             typer.echo(f"Error: Invalid DAG data in {file}: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
     else:
         dag_path = Path(".state/dag.json")
         if not dag_path.is_file():
@@ -429,20 +423,20 @@ def show(
             data = json.loads(dag_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             typer.echo(f"Error loading DAG state: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
         try:
             nodes = [Node(**n) for n in data.get("nodes", [])]
             edges = [Edge(**e) for e in data.get("edges", [])]
         except Exception as exc:
             typer.echo(f"Error: Invalid DAG state: {exc}", err=True)
-            raise typer.Exit(code=1)
+            raise typer.Exit(code=1) from exc
 
     # Render
     try:
         result = render_dag(nodes, edges, filter_kind=filter_kind)
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
 
     console = Console(width=200, soft_wrap=True)
     if result:
