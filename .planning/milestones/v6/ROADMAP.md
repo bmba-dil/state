@@ -74,7 +74,7 @@
 **Depends on:** 013, 050
 **Requirements:** AUTH-07, AUTH-08 (runtime wiring)
 **Parallelizable:** no (integration)
-**Plans:** 1 (all complete) — [059-1-SUMMARY.md](phases/059-auth-manager-wiring-into-daemon/059-1-SUMMARY.md)
+**Plans:** 1/1 plans complete
 
 ---
 
