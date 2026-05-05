@@ -43,8 +43,9 @@
 **Requirements:** DAE-06
 **Parallelizable:** yes with 053
 
-#### Phase 055 — launchd plist + systemd --user unit + installer
+#### Phase 055 — launchd plist + systemd --user unit + installer ✅
 **Goal:** `state daemon install` drops plist/unit, enables at login; uninstall removes.
+**Status:** Complete (2026-05-05)
 **Depends on:** 051
 **Requirements:** DAE-01
 **Parallelizable:** yes
@@ -56,14 +57,16 @@
 **Requirements:** DAE-07
 **Parallelizable:** yes
 
-#### Phase 057 — Crash recovery (replay STATE.md projection + resume in-flight Steps)
+#### Phase 057 — Crash recovery (replay STATE.md projection + resume in-flight Steps) ✅
 **Goal:** On start, read last events, rebuild STATE.md projection, find Steps in `executing`/`verifying` → resume from last checkpoint.
+**Status:** Complete (2026-05-05)
 **Depends on:** 007, 038
 **Requirements:** DAE-08
 **Parallelizable:** no
 
-#### Phase 058 — CLI: `state daemon start|stop|restart|status|logs`
+#### Phase 058 — CLI: `state daemon start|stop|restart|status|logs` ✅
 **Goal:** Typer commands; `status` shows pid + start_time + events-count + mode; `logs` tails daemon.log.
+**Status:** Complete (2026-05-04)
 **Depends on:** 051, 055
 **Requirements:** DAE-09
 **Parallelizable:** yes

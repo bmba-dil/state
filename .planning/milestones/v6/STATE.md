@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v3
 milestone_name: — Provider Routing + Model Profiles
-status: executing
-last_updated: "2026-05-05T02:09:20.390Z"
-last_activity: 2026-05-05 — Phase 059 completed (auth-manager-wiring-into-daemon)
+status: complete
+last_updated: "2026-05-04T12:25:00.000Z"
+last_activity: 2026-05-05 — Phase 058 completed (cli-state-daemon-start-stop)
 ---
 
 # STATE: v6 — State Daemon (HTTP + SSE + Mode Middleware)
 
 **Milestone:** v6
 **Phase range:** 050–059
-**Status:** In progress
-**Phases complete:** 8 / 10
-**Last activity:** 2026-05-05 — Phase 059 completed (auth-manager-wiring-into-daemon)
+**Status:** Complete
+**Phases complete:** 10 / 10
+**Last activity:** 2026-05-05 — Phase 058 completed (cli-state-daemon-start-stop)
 
 ---
 
@@ -28,6 +28,6 @@ last_activity: 2026-05-05 — Phase 059 completed (auth-manager-wiring-into-daem
 | 054 | sse-bus-broadcast-endpoint | Complete |
 | 055 | launchd-plist-systemd-user-unit | Complete |
 | 056 | structlog-rotatingfilehandler-log-rotation-config | Complete |
-| 057 | crash-recovery | Not started |
-| 058 | cli-state-daemon-start-stop | Not started |
+| 057 | crash-recovery | Complete |
+| 058 | cli-state-daemon-start-stop | Complete |
 | 059 | auth-manager-wiring-into-daemon | Complete |
