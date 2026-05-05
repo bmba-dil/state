@@ -29,8 +29,9 @@
 **Requirements:** DAE-04
 **Parallelizable:** yes
 
-#### Phase 053 — Mode-enforcement HTTP middleware (canonical gate)
+#### Phase 053 — Mode-enforcement HTTP middleware (canonical gate) ✅
 **Goal:** Every request carries `mode` header; validator against `.state/mode.json` rejects mismatches with 403; **authoritative mode-isolation point**.
+**Status:** Complete (2026-05-04)
 **Depends on:** 050, 004
 **Requirements:** DAE-05, MODE-05
 **Parallelizable:** no (depends on v11 schema too — soft dep)
