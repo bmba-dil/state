@@ -3,7 +3,8 @@
 On daemon start, replays all events through the CQRS projector (Phase 008)
 to rebuild the steps/slices/concepts cache tables, then queries for Steps
 that were in 'executing' or 'verifying' status at crash time.  These
-in-flight Steps are flagged for resume so work is not lost.
+in-flight Steps are resumed: ``state.step.resumed`` events are emitted to
+the event store so the worker agent can pick up where it left off.
 
 The last replayed event ULID is tracked as a recovery bookmark, enabling
 incremental recovery in future optimizations.
@@ -14,12 +15,15 @@ without snapshots via best-effort resume.
 
 from __future__ import annotations
 
+import os
 import structlog
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import aiosqlite
 
 from state_core.database import get_connection
+from state_core.events import SqliteEventStore
 from state_core.projector import Projector
 
 log = structlog.get_logger(__name__)
@@ -33,6 +37,51 @@ class InFlightStep:
     status: str  # 'executing' or 'verifying'
     slice_id: str | None = None
     title: str | None = None
+
+
+@dataclass
+class ResumeAction:
+    """Result of resuming a single in-flight Step.
+
+    Attributes:
+        step_id: The Step that was resumed.
+        status: Pre-crash status ('executing' or 'verifying').
+        snapshot_available: Whether a worktree snapshot was found
+            for this step (Phase 038 soft dep).
+    """
+
+    step_id: str
+    status: str
+    snapshot_available: bool = False
+
+
+def _check_snapshot(snapshot_root: Path, step_id: str) -> bool:
+    """Check whether a worktree snapshot directory exists for *step_id*.
+
+    Snapshots are expected at ``{snapshot_root}/{step_id}/``.
+    This is a best-effort check — the snapshot directory may exist
+    but be incomplete.  The worker agent handles the actual restore.
+
+    Args:
+        snapshot_root: Root directory for snapshots.
+        step_id: The step ID to look up.
+
+    Returns:
+        True if a subdirectory exists for this step, False otherwise.
+    """
+    snapshot_dir = snapshot_root / step_id
+    if snapshot_dir.is_dir():
+        log.debug(
+            "crash_recovery.snapshot_found",
+            step_id=step_id,
+            path=str(snapshot_dir),
+        )
+        return True
+    log.debug(
+        "crash_recovery.snapshot_not_found",
+        step_id=step_id,
+    )
+    return False
 
 
 @dataclass
@@ -158,47 +207,92 @@ class CrashRecovery:
 
     async def resume_in_flight(
         self,
+        store: SqliteEventStore,
         in_flight: list[InFlightStep],
-    ) -> list[str]:
+        *,
+        snapshot_root: str | Path | None = None,
+    ) -> list[ResumeAction]:
         """Resume in-flight Steps after crash recovery.
 
-        For each in-flight Step, logs the resume action and emits a
-        ``state.step.resumed`` event to the event store so the worker
-        can pick up where it left off.
+        For each in-flight Step:
 
-        Snapshot integration (Phase 038, soft dep):
-        - If a worktree snapshot exists, the worker should restore from it.
-        - If no snapshot exists, the worker resumes with current working
-          tree state (best-effort).
+        1. Checks for a worktree snapshot (Phase 038, soft dep):
+           if ``snapshot_root`` is provided and a snapshot subdirectory
+           exists for the step, the worker should restore from it.
+           Otherwise, resume with bare working tree state.
+        2. Emits a ``state.step.resumed`` event to the event store with
+           the pre-crash status and snapshot availability so the worker
+           agent can pick up where it left off.
 
         Args:
-            in_flight: List of InFlightStep records to resume.
+            store: The event store for emitting ``state.step.resumed`` events.
+            in_flight: InFlightStep records to resume (pre-crash status).
+            snapshot_root: Root directory for worktree snapshots
+                (defaults to ``.state/snapshots``).  If a subdirectory
+                matching the step ID exists, a snapshot is available.
 
         Returns:
-            List of Step IDs that were successfully resumed.
+            List of ResumeAction records describing the outcome for
+            each resumed step.
 
-        Note:
-            Event emission requires the store to be passed separately
-            (not stored in CrashRecovery) to avoid coupling the recovery
-            manager to a specific event store instance.  Callers should
-            use ``store.append()`` to persist ``state.step.resumed`` events.
+        Raises:
+            RuntimeError: If event emission fails for any step (the caller
+                should treat this as a fatal error — the event store may
+                be corrupt).
         """
-        resumed: list[str] = []
+        if snapshot_root is None:
+            snapshot_root = Path(os.getcwd()) / ".state" / "snapshots"
+        elif isinstance(snapshot_root, str):
+            snapshot_root = Path(snapshot_root)
+        # Ensure snapshot_root is Path from here on
+        snapshot_root = snapshot_root  # type: Path
+
+        actions: list[ResumeAction] = []
         for step in in_flight:
+            snapshot_available = _check_snapshot(snapshot_root, step.step_id)
+
             log.info(
                 "crash_recovery.resuming_step",
                 step_id=step.step_id,
                 status=step.status,
-                slice_id=step.slice_id,
+                snapshot_available=snapshot_available,
             )
-            resumed.append(step.step_id)
 
-        if resumed:
+            try:
+                await store.append(
+                    aggregate_type="step",
+                    aggregate_id=step.step_id,
+                    event_type="state.step.resumed",
+                    data={
+                        "step_id": step.step_id,
+                        "pre_crash_status": step.status,
+                        "reason": "crash_recovery",
+                        "snapshot_available": snapshot_available,
+                    },
+                )
+            except Exception:
+                log.critical(
+                    "crash_recovery.resume_event_failed",
+                    step_id=step.step_id,
+                    exc_info=True,
+                )
+                raise
+
+            actions.append(ResumeAction(
+                step_id=step.step_id,
+                status=step.status,
+                snapshot_available=snapshot_available,
+            ))
+
+        if actions:
             log.info(
                 "crash_recovery.resume_complete",
-                count=len(resumed),
+                count=len(actions),
+                executing=sum(1 for a in actions if a.status == "executing"),
+                verifying=sum(1 for a in actions if a.status == "verifying"),
+                with_snapshot=sum(1 for a in actions if a.snapshot_available),
             )
         else:
             log.info("crash_recovery.resume_noop")
 
-        return resumed
+        return actions

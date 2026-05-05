@@ -2,7 +2,8 @@
 
 Covers: recover() with clean state, with events creating in-flight steps,
 rebuild failure handling, _find_in_flight_steps, _get_last_event_id,
-resume_in_flight edge cases, and RecoveryResult dataclass.
+resume_in_flight with event emission + snapshot integration,
+ResumeAction dataclass, edge cases.
 """
 
 from __future__ import annotations
@@ -16,7 +17,12 @@ import pytest
 from src.state_core.events import SqliteEventStore
 from src.state_core.migrations import migrate
 from src.state_core.projector import Projector
-from src.state_daemon.recovery import CrashRecovery, InFlightStep, RecoveryResult
+from src.state_daemon.recovery import (
+    CrashRecovery,
+    InFlightStep,
+    RecoveryResult,
+    ResumeAction,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -333,35 +339,228 @@ class TestInFlightStep:
         assert step.title == "My Step"
 
 
-# ── Resume Logic ───────────────────────────────────────────────────────────
+# ── ResumeAction Dataclass ────────────────────────────────────────────────
+
+
+class TestResumeAction:
+    """ResumeAction dataclass."""
+
+    def test_defaults(self) -> None:
+        action = ResumeAction(step_id="s1", status="executing")
+        assert action.step_id == "s1"
+        assert action.status == "executing"
+        assert action.snapshot_available is False
+
+    def test_with_snapshot(self) -> None:
+        action = ResumeAction(step_id="s2", status="verifying", snapshot_available=True)
+        assert action.step_id == "s2"
+        assert action.status == "verifying"
+        assert action.snapshot_available is True
+
+
+# ── Resume Logic: Event Emission ───────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 class TestResumeInFlight:
-    """resume_in_flight behaviour."""
+    """resume_in_flight with event emission via store."""
 
     async def test_empty_list_noop(
-        self, recovery: CrashRecovery,
+        self, store: SqliteEventStore, recovery: CrashRecovery,
     ) -> None:
-        result = await recovery.resume_in_flight([])
+        result = await recovery.resume_in_flight(store, [])
         assert result == []
 
-    async def test_single_step_resumed(
-        self, recovery: CrashRecovery,
+    async def test_single_step_emits_event(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
     ) -> None:
         steps = [InFlightStep(step_id="s1", status="executing")]
-        result = await recovery.resume_in_flight(steps)
-        assert result == ["s1"]
+        result = await recovery.resume_in_flight(store, steps)
+        assert len(result) == 1
+        assert result[0].step_id == "s1"
+        assert result[0].status == "executing"
+        assert result[0].snapshot_available is False
 
-    async def test_multiple_steps_resumed(
-        self, recovery: CrashRecovery,
+    async def test_multiple_steps_emit_events(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
     ) -> None:
         steps = [
             InFlightStep(step_id="s1", status="executing"),
             InFlightStep(step_id="s2", status="verifying"),
         ]
-        result = await recovery.resume_in_flight(steps)
-        assert result == ["s1", "s2"]
+        result = await recovery.resume_in_flight(store, steps)
+        assert len(result) == 2
+        assert result[0].step_id == "s1"
+        assert result[0].status == "executing"
+        assert result[1].step_id == "s2"
+        assert result[1].status == "verifying"
+
+    async def test_events_are_persisted(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+    ) -> None:
+        """state.step.resumed events are actually written to the event store."""
+        steps = [InFlightStep(step_id="s3", status="executing")]
+        await recovery.resume_in_flight(store, steps)
+
+        # Read back the event via the store
+        events = await store.read_events()
+        resumed_events = [e for e in events if e["type"] == "state.step.resumed"]
+        assert len(resumed_events) == 1
+        assert resumed_events[0]["aggregate_id"] == "s3"
+        assert resumed_events[0]["data"]["pre_crash_status"] == "executing"
+        assert resumed_events[0]["data"]["reason"] == "crash_recovery"
+
+    async def test_event_data_includes_snapshot_flag(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+    ) -> None:
+        """Resumed event data includes snapshot_available flag."""
+        steps = [InFlightStep(step_id="s4", status="verifying")]
+        await recovery.resume_in_flight(store, steps)
+
+        events = await store.read_events()
+        resumed = [e for e in events if e["type"] == "state.step.resumed"]
+        assert len(resumed) == 1
+        assert resumed[0]["data"]["snapshot_available"] is False
+        assert resumed[0]["data"]["pre_crash_status"] == "verifying"
+
+    async def test_respects_step_status_from_input(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+    ) -> None:
+        """Each event records the pre-crash status from InFlightStep."""
+        steps = [
+            InFlightStep(step_id="exec-1", status="executing"),
+            InFlightStep(step_id="ver-1", status="verifying"),
+        ]
+        await recovery.resume_in_flight(store, steps)
+
+        events = await store.read_events()
+        resumed = sorted(
+            [e for e in events if e["type"] == "state.step.resumed"],
+            key=lambda e: e["aggregate_id"],
+        )
+        assert len(resumed) == 2
+        assert resumed[0]["data"]["pre_crash_status"] == "executing"
+        assert resumed[1]["data"]["pre_crash_status"] == "verifying"
+
+
+# ── Resume Logic: Snapshot Integration ─────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestSnapshotIntegration:
+    """Snapshot detection during resume (Phase 038 soft dep)."""
+
+    async def test_no_snapshot_available(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+        tmp_path: Path,
+    ) -> None:
+        """No snapshot dir → snapshot_available=False."""
+        snapshot_root = tmp_path / "snapshots"
+        snapshot_root.mkdir()
+
+        steps = [InFlightStep(step_id="s1", status="executing")]
+        result = await recovery.resume_in_flight(
+            store, steps, snapshot_root=snapshot_root,
+        )
+        assert len(result) == 1
+        assert result[0].snapshot_available is False
+
+    async def test_snapshot_available(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+        tmp_path: Path,
+    ) -> None:
+        """When snapshot dir exists → snapshot_available=True."""
+        snapshot_root = tmp_path / "snapshots"
+        snapshot_root.mkdir()
+        (snapshot_root / "s2").mkdir()
+
+        steps = [InFlightStep(step_id="s2", status="executing")]
+        result = await recovery.resume_in_flight(
+            store, steps, snapshot_root=snapshot_root,
+        )
+        assert len(result) == 1
+        assert result[0].snapshot_available is True
+
+    async def test_mixed_snapshot_availability(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+        tmp_path: Path,
+    ) -> None:
+        """Some steps have snapshots, some don't."""
+        snapshot_root = tmp_path / "snapshots"
+        snapshot_root.mkdir()
+        (snapshot_root / "s-with").mkdir()
+        # s-without has no snapshot dir
+
+        steps = [
+            InFlightStep(step_id="s-with", status="executing"),
+            InFlightStep(step_id="s-without", status="verifying"),
+        ]
+        result = await recovery.resume_in_flight(
+            store, steps, snapshot_root=snapshot_root,
+        )
+        assert len(result) == 2
+        with_snapshot = [r for r in result if r.snapshot_available]
+        without_snapshot = [r for r in result if not r.snapshot_available]
+        assert len(with_snapshot) == 1
+        assert with_snapshot[0].step_id == "s-with"
+        assert len(without_snapshot) == 1
+        assert without_snapshot[0].step_id == "s-without"
+
+    async def test_snapshot_flag_in_event_data(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+        tmp_path: Path,
+    ) -> None:
+        """Event data reflects snapshot availability."""
+        snapshot_root = tmp_path / "snapshots"
+        snapshot_root.mkdir()
+        (snapshot_root / "snap-step").mkdir()
+
+        steps = [InFlightStep(step_id="snap-step", status="executing")]
+        await recovery.resume_in_flight(
+            store, steps, snapshot_root=snapshot_root,
+        )
+
+        events = await store.read_events()
+        resumed = [e for e in events if e["type"] == "state.step.resumed"]
+        assert len(resumed) == 1
+        assert resumed[0]["data"]["snapshot_available"] is True
+
+    async def test_default_snapshot_root(
+        self, store: SqliteEventStore, recovery: CrashRecovery,
+    ) -> None:
+        """Default snapshot_root is .state/snapshots (best-effort)."""
+        steps = [InFlightStep(step_id="s-default", status="executing")]
+        result = await recovery.resume_in_flight(store, steps)
+        # Default root (.state/snapshots) probably doesn't exist in tests,
+        # so snapshot_available should be False.
+        assert len(result) == 1
+        assert result[0].snapshot_available is False
+
+
+# ── Resume Logic: Failure Handling ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+class TestResumeFailure:
+    """Crash recovery handles resume event emission failures."""
+
+    async def test_event_emission_failure_raises(
+        self, recovery: CrashRecovery,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When store.append raises, resume_in_flight propagates the error."""
+        # Create a store that will fail on append
+        class FailingStore:
+            async def append(self, *args: Any, **kwargs: Any) -> str:
+                raise RuntimeError("simulated store failure")
+
+            async def read_events(self, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+                return []
+
+        store = FailingStore()
+        steps = [InFlightStep(step_id="s1", status="executing")]
+        with pytest.raises(RuntimeError, match="simulated store failure"):
+            await recovery.resume_in_flight(store, steps)
 
 
 # ── Rebuild Failure Handling ──────────────────────────────────────────────
