@@ -101,7 +101,7 @@ function truncate(text: string, maxLen = 28): string {
  * Splits at word boundaries where possible; truncates individual words
  * with U+2026 ellipsis if they exceed maxLen. Returns at most maxLines lines.
  */
-function splitDescription(text: string, maxLen = 28, maxLines = 3): string[] {
+export function splitDescription(text: string, maxLen = 28, maxLines = 3): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let current = "";

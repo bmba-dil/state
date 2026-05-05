@@ -65,7 +65,7 @@ const COLORS: Record<string, string> = {
 /* ── Utilities ──────────────────────────────────────────────────── */
 
 /** Truncate text to `maxLen` characters, appending U+2026 ellipsis if needed. */
-function truncate(text: string, maxLen = 28): string {
+export function truncate(text: string, maxLen = 28): string {
   if (text.length <= maxLen) return text;
   return text.slice(0, maxLen - 1) + "\u2026";
 }

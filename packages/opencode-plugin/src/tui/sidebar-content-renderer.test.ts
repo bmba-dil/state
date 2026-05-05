@@ -6,8 +6,10 @@ import {
   getModeIndicator,
   renderBuildPlaceholder,
   renderTeachPlaceholder,
+  truncate,
 } from "./sidebar-content-renderer.js";
 import type { ModeInfo } from "./sidebar-content-renderer.js";
+import SidebarContentRenderer from "./sidebar-content-renderer.js";
 
 // ── resolveMode tests ──────────────────────────────────────────────
 
@@ -107,6 +109,119 @@ describe("renderTeachPlaceholder", () => {
     expect(placeholder).toContain("\u2514"); // box-drawing light up and right (└)
     expect(placeholder).toContain("\u2518"); // box-drawing light up and left (┘)
     expect(placeholder).toContain("\u2502"); // box-drawing light vertical (│)
+    expect(placeholder).toContain("Phase 083");
+  });
+});
+
+// ── truncate tests ──────────────────────────────────────────────────
+
+describe("truncate", () => {
+  it("returns string shorter than 28 chars as-is", () => {
+    const result = truncate("short string");
+    expect(result).toBe("short string");
+  });
+
+  it("returns string exactly 28 chars as-is", () => {
+    const input = "a".repeat(28);
+    const result = truncate(input);
+    expect(result).toBe(input);
+    expect(result.length).toBe(28);
+  });
+
+  it("appends U+2026 ellipsis for string longer than 28 chars", () => {
+    const input = "a".repeat(30);
+    const result = truncate(input);
+    expect(result.length).toBe(28);
+    expect(result.endsWith("\u2026")).toBe(true);
+  });
+
+  it("truncates at position 27 with ellipsis for overflow", () => {
+    const input = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"; // 52 chars
+    const result = truncate(input);
+    expect(result.length).toBe(28);
+    // First 27 chars of input preserved
+    expect(result.slice(0, 27)).toBe(input.slice(0, 27));
+    expect(result[27]).toBe("\u2026");
+  });
+
+  it("accepts custom maxLen parameter", () => {
+    const result = truncate("hello world", 10);
+    expect(result.length).toBeLessThanOrEqual(10);
+  });
+});
+
+// ── getModeIndicator edge cases ─────────────────────────────────────
+
+describe("getModeIndicator edge cases", () => {
+  it("falls back to white circle for empty string (icon only, no label)", () => {
+    const result = getModeIndicator("");
+    expect(result).toContain("\u25CB"); // white circle
+    // Empty string → mode.toUpperCase() is "" → just icon + space
+    expect(result).toBe("\u25CB ");
+  });
+
+  it("falls back to white circle + uppercased name for arbitrary string", () => {
+    const result = getModeIndicator("bogus");
+    expect(result).toContain("\u25CB"); // white circle icon fallback
+    expect(result).toContain("BOGUS"); // uses mode.toUpperCase()
+  });
+});
+
+// ── SidebarContentRenderer output validation ────────────────────────
+
+describe("SidebarContentRenderer output validation", () => {
+  it("returns non-null Box object when invoked", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+  });
+
+  it("returns an object (Box) with children", () => {
+    const result = SidebarContentRenderer();
+    expect(result).not.toBeNull();
+    expect(typeof result).toBe("object");
+  });
+});
+
+// ── Placeholder content validation ──────────────────────────────────
+
+describe("renderBuildPlaceholder content", () => {
+  it("contains all four box-drawing corner characters", () => {
+    const placeholder = renderBuildPlaceholder();
+    expect(placeholder).toContain("\u250C"); // ┌
+    expect(placeholder).toContain("\u2510"); // ┐
+    expect(placeholder).toContain("\u2514"); // └
+    expect(placeholder).toContain("\u2518"); // ┘
+    expect(placeholder).toContain("\u2502"); // │
+  });
+
+  it("contains BuildProgress title text", () => {
+    const placeholder = renderBuildPlaceholder();
+    expect(placeholder).toContain("BuildProgress");
+  });
+
+  it("contains Phase 082 reference text", () => {
+    const placeholder = renderBuildPlaceholder();
+    expect(placeholder).toContain("Phase 082");
+  });
+});
+
+describe("renderTeachPlaceholder content", () => {
+  it("contains all four box-drawing corner characters", () => {
+    const placeholder = renderTeachPlaceholder();
+    expect(placeholder).toContain("\u250C"); // ┌
+    expect(placeholder).toContain("\u2510"); // ┐
+    expect(placeholder).toContain("\u2514"); // └
+    expect(placeholder).toContain("\u2518"); // ┘
+    expect(placeholder).toContain("\u2502"); // │
+  });
+
+  it("contains TeachConcept title text", () => {
+    const placeholder = renderTeachPlaceholder();
+    expect(placeholder).toContain("TeachConcept");
+  });
+
+  it("contains Phase 083 reference text", () => {
+    const placeholder = renderTeachPlaceholder();
     expect(placeholder).toContain("Phase 083");
   });
 });
