@@ -36,28 +36,33 @@
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P3, P5
-**Plans:** 1 plan
-- [ ] 083-01-PLAN.md — TeachConcept SolidJS component + event wiring + sidebar-content-renderer integration
+**Plans:** 1/1 plans complete
+- [x] 083-01-PLAN.md — TeachConcept SolidJS component + event wiring + sidebar-content-renderer integration
 
 #### Phase 084 — Statusline (`sidebar_footer` / `home_footer`)
 **Goal:** One-line mode + scope + provider + session cost; subscribes to cost events.
 **Depends on:** 080
 **Requirements:** TUI-03
 **Parallelizable:** yes
-**Plans:** 1 plan
-- [ ] 084-01-PLAN.md — Statusline component (state + SSE wiring + render) + tui.ts integration + tests
+**Plans:** 1/1 plans complete
+- [x] 084-01-PLAN.md — Statusline component (state + SSE wiring + render) + tui.ts integration + tests
 
 #### Phase 085 — Toast notifications (`ui.toast`)
 **Goal:** Slice completion, drill availability, gray-area decisions, auth refresh; de-dup.
 **Depends on:** 080
 **Requirements:** TUI-04
 **Parallelizable:** yes
+**Plans:** 1 plan
+- [ ] 085-01-PLAN.md — Toast notification handler (SSE event subscriptions → de-dup → api.ui.toast dispatch)
 
 #### Phase 086 — Plugin install script (`TuiPluginInstallOptions`)
 **Goal:** Auto-registers plugin + MCP servers in `opencode.json` on first run.
 **Depends on:** 079
 **Requirements:** TUI-05
 **Parallelizable:** yes
+**Plans:** 1 plan
+Plans:
+- [ ] 086-01-PLAN.md — Add first-run auto-install hook to createTuiPlugin + unit tests
 
 #### Phase 087 — Prompt hint slot (`session_prompt_right`)
 **Goal:** Shows model + token cost + Step N.m indicator.
