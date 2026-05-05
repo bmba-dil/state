@@ -1173,3 +1173,122 @@ class TestModeReload:
         assert mod.get_current_mode() == "both"
         # Default mode.json should have been created
         assert (state_dir / "mode.json").exists()
+
+
+# ===========================================================================
+# Task 104-01 — Mode activation event emission from daemon SIGHUP handler
+# ===========================================================================
+
+
+class TestModeActivatedEvent:
+    """Tests for state.mode.activated event emission via _emit_mode_event()."""
+
+    @pytest.mark.asyncio
+    async def test_emit_mode_event_writes_to_store(self, tmp_path: Path, monkeypatch) -> None:
+        """_emit_mode_event() appends a state.mode.activated event to the store."""
+        from src.state_core.events import SqliteEventStore
+
+        # Use temp directory for isolated SQLite
+        db_path = str(tmp_path / "events.sqlite")
+        monkeypatch.setenv("STATE_DB_PATH", db_path)
+
+        store = SqliteEventStore()
+
+        # Patch the module-level _event_store so _emit_mode_event can use it
+        import src.state_daemon.orchestrator as orch
+        orch._event_store = store
+
+        # Call the emitter directly
+        await orch._emit_mode_event("build", "teach")
+
+        # Read back the event
+        events = await store.read_events()
+        assert len(events) == 1
+        event = events[0]
+        assert event["type"] == "state.mode.activated"
+        assert event["aggregate_type"] == "mode"
+        assert event["aggregate_id"] == "mode-teach"
+        assert event["mode"] == "kernel"
+
+        # Verify data payload
+        import json as _json
+        data = _json.loads(event["data"]) if isinstance(event["data"], str) else event["data"]
+        assert data["old_mode"] == "build"
+        assert data["new_mode"] == "teach"
+
+    @pytest.mark.asyncio
+    async def test_emit_mode_event_aggregate_id_per_new_mode(self, tmp_path: Path, monkeypatch) -> None:
+        """aggregate_id follows the pattern 'mode-{new_mode}'."""
+        from src.state_core.events import SqliteEventStore
+
+        db_path = str(tmp_path / "events.sqlite")
+        monkeypatch.setenv("STATE_DB_PATH", db_path)
+
+        store = SqliteEventStore()
+
+        import src.state_daemon.orchestrator as orch
+        orch._event_store = store
+
+        await orch._emit_mode_event("teach", "build")
+        await orch._emit_mode_event("build", "both")
+
+        events = await store.read_events()
+        assert len(events) == 2
+        assert events[0]["aggregate_id"] == "mode-build"
+        assert events[1]["aggregate_id"] == "mode-both"
+
+    @pytest.mark.asyncio
+    async def test_emit_mode_event_mode_is_kernel(self, tmp_path: Path, monkeypatch) -> None:
+        """Event is emitted with mode='kernel' for cross-mode visibility."""
+        from src.state_core.events import SqliteEventStore
+
+        db_path = str(tmp_path / "events.sqlite")
+        monkeypatch.setenv("STATE_DB_PATH", db_path)
+
+        store = SqliteEventStore()
+
+        import src.state_daemon.orchestrator as orch
+        orch._event_store = store
+
+        await orch._emit_mode_event("build", "teach")
+
+        events = await store.read_events()
+        assert events[0]["mode"] == "kernel"
+
+    @pytest.mark.asyncio
+    async def test_emit_mode_event_no_store_is_noop(self) -> None:
+        """_emit_mode_event() is a no-op when _event_store is None."""
+        import src.state_daemon.orchestrator as orch
+
+        orch._event_store = None
+
+        # Should not raise — just log warning
+        await orch._emit_mode_event("build", "teach")
+
+    @pytest.mark.asyncio
+    async def test_emit_mode_event_preserves_fields(self, tmp_path: Path, monkeypatch) -> None:
+        """_emit_mode_event() preserves all required fields in the event."""
+        from src.state_core.events import SqliteEventStore
+
+        db_path = str(tmp_path / "events.sqlite")
+        monkeypatch.setenv("STATE_DB_PATH", db_path)
+
+        store = SqliteEventStore()
+
+        import src.state_daemon.orchestrator as orch
+        orch._event_store = store
+
+        await orch._emit_mode_event("build", "teach")
+
+        events = await store.read_events()
+        event = events[0]
+
+        # Verify all required envelope fields are present
+        assert "id" in event
+        assert "seq" in event
+        assert "ts" in event
+        assert "aggregate_type" in event
+        assert "aggregate_id" in event
+        assert "type" in event
+        assert "data" in event
+        assert "mode" in event
