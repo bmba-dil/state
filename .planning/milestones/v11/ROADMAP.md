@@ -15,14 +15,19 @@
 **Plans:** 2 plans
 
 Plans:
-- [ ] 097-01-PLAN.md — Canonical ModeConfig + validator in schema.py
-- [ ] 097-02-PLAN.md — CLI `state mode init` command
+- [x] 097-01-PLAN.md — Canonical ModeConfig + validator in schema.py
+- [x] 097-02-PLAN.md — CLI `state mode init` command
 
 #### Phase 098 — Directory-presence signal (`.state/build/` vs `.state/teach/`)
 **Goal:** Daemon refuses writes into the wrong subtree; `state mode init` bootstraps structure.
 **Depends on:** 097
 **Requirements:** MODE-02
 **Parallelizable:** yes with P3
+**Plans:** 2 plans
+
+Plans:
+- [ ] 098-01-PLAN.md — Core subtree constants + validate_subtree_path() + CLI subtree bootstrap
+- [ ] 098-02-PLAN.md — Daemon middleware subtree enforcement (validate_daemon_path)
 
 #### Phase 099 — MCP registration toggle (`config` hook)
 **Goal:** Plugin reads `.state/mode.json` at boot; `config` hook returns enabled/disabled for each server; hot-reload on mode change.
