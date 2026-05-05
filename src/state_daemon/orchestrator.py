@@ -22,6 +22,7 @@ from state_core.observability import assert_redactor_attached, install
 from state_core.reconciler import StartupReconciler
 from state_core.sync_mirror import SyncEventMirror
 
+from src.state_daemon.logging import configure_daemon_logging
 from src.state_daemon.middleware import ModeMiddleware, load_mode_config
 from src.state_daemon.pid import acquire_pid_file, release_pid_file
 from src.state_daemon.router import JsonRpcRouter
@@ -39,12 +40,19 @@ _pid_path: str | None = None
 
 
 async def startup() -> None:
-    """Run the full startup sequence: redactor → import → repair → migrate → reconciler → HTTP server.
+    """Run the full startup sequence: redactor → logging → import → repair → migrate → reconciler → HTTP server.
 
     Step 0 (Phase 020 / AUTH-10) installs the root-logger token
     redactor and self-checks that it is attached. If the redactor
     is not attached, RedactorNotAttached fires and the daemon
     process exits before any other I/O (P0-14 defense layer 2).
+
+    Step 0.0-logging (Phase 056 / DAE-07) configures structured daemon
+    logging with rotation, redaction, and configurable output mode
+    (JSON for production, human-readable for dev).  Must run AFTER the
+    redactor is attached (so the file handler inherits redaction) and
+    BEFORE any I/O-driven steps (so all subsequent log records land in
+    .state/logs/daemon.log).
 
     Step 0.5 (Phase 021 / AUTH-11) runs the opencode auth.json
     importer. It MUST run AFTER the redactor is attached (so any
@@ -79,6 +87,12 @@ async def startup() -> None:
     # exits with a non-zero status. P0-14 secret-leak prevention (defense layer 2).
     install()
     assert_redactor_attached()
+
+    # Step 0.0-logging (Phase 056 / DAE-07): configure daemon structured logging
+    # with rotation, redaction, and mode selection.  Must run AFTER redactor install
+    # (so the file handler inherits redaction) and BEFORE pid acquisition (so
+    # startup messages are captured in the log file).
+    configure_daemon_logging()
 
     # Step 0.0 (Phase 051 / DAE-03): acquire pid file BEFORE any network bind.
     # P0-15 defense: stale pid detection prevents a zombie pid-file from blocking
@@ -149,6 +163,13 @@ async def startup() -> None:
     router = JsonRpcRouter()
     project_root = os.environ.get("STATE_PROJECT_ROOT", os.getcwd())
     socket_path = os.environ.get("STATE_DAEMON_SOCKET", resolve_socket_path(project_root))
+
+    log.info(
+        "daemon.startup.begin",
+        pid=os.getpid(),
+        project_root=project_root,
+        socket_path=socket_path,
+    )
 
     # Step 4.5 (Phase 053): Load mode config and wrap router with
     # ModeMiddleware — the 6th layer of defense-in-depth for mode
