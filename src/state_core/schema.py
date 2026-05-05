@@ -446,8 +446,16 @@ class DrillGradedData(BaseModel):
 
 
 class ModeActivatedData(BaseModel):
+    """Payload for state.mode.activated events.
+
+    Carries the mode transition: old_mode is the mode before the change,
+    new_mode is the mode after. Both accept any string — validation of
+    mode values happens at the ModeConfig level, not here.
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
-    mode_value: str
+    old_mode: str
+    new_mode: str
 
 
 class DecisionAskedData(BaseModel):
