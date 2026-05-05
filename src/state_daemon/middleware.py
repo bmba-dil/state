@@ -1,0 +1,235 @@
+"""Mode-enforcement HTTP middleware for the state daemon.
+
+Provides mode configuration loading (``ModeConfig``) and the
+``ModeMiddleware`` callable that wraps the JSON-RPC router to
+enforce ``X-State-Mode`` header validation — the 6th layer of
+defense-in-depth for mode isolation.
+
+Reads ``.state/mode.json`` from the project root; rejects
+cross-mode write operations with HTTP 403 before they reach
+any JSON-RPC handler.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Callable, Awaitable
+from typing import Literal
+
+import structlog
+from pydantic import BaseModel, ValidationError
+
+log = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Mode configuration model
+# ---------------------------------------------------------------------------
+
+
+class ModeConfig(BaseModel):
+    """Persisted mode configuration from ``.state/mode.json``.
+
+    Only ``build``, ``teach``, and ``both`` are storable modes.
+    ``kernel`` is an internal-only mode (valid for ``is_valid_mode()``
+    but not persistable).
+    """
+
+    mode: Literal["build", "teach", "both"]
+
+
+# ---------------------------------------------------------------------------
+# Cached mode config — loaded once at daemon startup
+# ---------------------------------------------------------------------------
+
+_config: ModeConfig | None = None
+
+
+def load_mode_config(root: str) -> ModeConfig:
+    """Read ``.state/mode.json`` from *root*, validate with Pydantic, and cache.
+
+    If the file is missing, creates a default ``{"mode": "both"}``
+    config (permissive — both build and teach allowed).  This default
+    is written to disk so subsequent reads are fast.
+
+    Raises:
+        ValueError: if the file exists but contains invalid JSON or
+                    an unsupported mode value.
+    """
+    global _config
+
+    mode_path = os.path.join(root, ".state", "mode.json")
+    os.makedirs(os.path.dirname(mode_path), exist_ok=True)
+
+    if not os.path.isfile(mode_path):
+        default = ModeConfig(mode="both")
+        with open(mode_path, "w", encoding="utf-8") as f:
+            json.dump({"mode": "both"}, f)
+        os.chmod(mode_path, 0o600)
+        _config = default
+        log.info(
+            "daemon.middleware.mode_config_created",
+            mode="both",
+            path=mode_path,
+        )
+        return default
+
+    try:
+        with open(mode_path, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {mode_path}: {e}") from e
+
+    try:
+        cfg = ModeConfig(**raw)
+    except ValidationError as e:
+        raise ValueError(f"Invalid mode config in {mode_path}: {e}") from e
+
+    _config = cfg
+    log.info("daemon.middleware.mode_config_loaded", mode=cfg.mode, path=mode_path)
+    return cfg
+
+
+def get_current_mode() -> str:
+    """Return the active mode string.
+
+    Returns ``"both"`` if ``load_mode_config()`` has not been called yet.
+    """
+    if _config is None:
+        return "both"
+    return _config.mode
+
+
+# ---------------------------------------------------------------------------
+# Mode validation helpers
+# ---------------------------------------------------------------------------
+
+_VALID_MODES: frozenset[str] = frozenset({"build", "teach", "both", "kernel"})
+
+_READ_METHODS: frozenset[str] = frozenset({"GET", "HEAD"})
+
+# POST paths that are read-only (no write side effects).
+_READ_POST_PATHS: frozenset[str] = frozenset({"/health"})
+
+
+def is_valid_mode(mode: str) -> bool:
+    """Return ``True`` if *mode* is a recognised mode string.
+
+    Valid modes: ``build``, ``teach``, ``both``, ``kernel``.
+    """
+    return mode in _VALID_MODES
+
+
+def _is_read_operation(method: str, path: str) -> bool:
+    """Heuristic: determine if a request is read-only.
+
+    GET and HEAD are always reads.
+    POST to ``/health`` is considered a read.
+    All other POST/PUT/PATCH/DELETE are writes.
+    """
+    if method in _READ_METHODS:
+        return True
+    if method == "POST" and path in _READ_POST_PATHS:
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Router type (extended to support middleware status codes)
+# ---------------------------------------------------------------------------
+
+# The router receives (method, path, headers, body) and returns either
+# plain bytes (for HTTP 200/204) or a (status_code, bytes) tuple so
+# middleware can signal rejection status codes to the server.
+Router = Callable[
+    [str, str, dict[str, str], bytes],
+    Awaitable[bytes | tuple[int, bytes]],
+]
+
+
+# ---------------------------------------------------------------------------
+# Mode enforcement middleware
+# ---------------------------------------------------------------------------
+
+
+class ModeMiddleware:
+    """Callable middleware that enforces ``X-State-Mode`` header validity.
+
+    Wraps an inner router.  On mode mismatch for write operations,
+    returns ``(403, body)`` — the server detects the tuple and uses
+    the provided status code instead of the default 200.
+
+    Rules (in order):
+    1. Missing or invalid ``X-State-Mode`` → 400.
+    2. Active mode is ``both`` → allow all.
+    3. Request mode is ``kernel`` → allow all.
+    4. Modes match → allow.
+    5. Mismatch + read operation → allow.
+    6. Mismatch + write operation → 403.
+    """
+
+    def __init__(self, router: Router, config: ModeConfig) -> None:
+        self._router = router
+        self._config = config
+
+    async def __call__(
+        self,
+        method: str,
+        path: str,
+        headers: dict[str, str],
+        body: bytes,
+    ) -> bytes | tuple[int, bytes]:
+        # --- Extract X-State-Mode header ---
+        # Headers are lowercased by DaemonServer._handle_connection.
+        request_mode = headers.get("x-state-mode", "").strip()
+        active_mode = self._config.mode
+
+        if not request_mode:
+            return _reject(400, "missing_mode_header", request_mode="", active_mode=active_mode)
+
+        if not is_valid_mode(request_mode):
+            return _reject(400, "invalid_mode_header", request_mode=request_mode, active_mode=active_mode)
+
+        # --- Mode decision tree ---
+        # "both" allows everything
+        if active_mode == "both":
+            return await self._router(method, path, headers, body)
+
+        # kernel always allowed
+        if request_mode == "kernel":
+            return await self._router(method, path, headers, body)
+
+        # Same mode — allow
+        if request_mode == active_mode:
+            return await self._router(method, path, headers, body)
+
+        # Mismatch — read operations still allowed
+        if _is_read_operation(method, path):
+            return await self._router(method, path, headers, body)
+
+        # Mismatch + write — reject
+        return _reject(403, "cross_mode_rejected", request_mode=request_mode, active_mode=active_mode)
+
+
+# ---------------------------------------------------------------------------
+# Rejection helpers
+# ---------------------------------------------------------------------------
+
+
+def _reject(
+    status: int,
+    error: str,
+    request_mode: str = "",
+    active_mode: str = "",
+) -> tuple[int, bytes]:
+    """Build a mode-enforcement rejection response.
+
+    Returns a ``(status_code, body_bytes)`` tuple that the server
+    detects and translates to the correct HTTP status line.
+    """
+    payload = {
+        "error": error,
+        "request_mode": request_mode,
+        "active_mode": active_mode,
+    }
+    return (status, json.dumps(payload).encode())
