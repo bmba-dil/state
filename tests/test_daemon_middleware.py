@@ -1127,3 +1127,49 @@ class TestEventTypeMiddleware:
         result = await mw("POST", "/", {"x-state-mode": "build"}, body)
         status, resp_body = result
         assert json.loads(resp_body)["error"] == "cross_mode_event_rejected"
+
+
+# ===========================================================================
+# Task 103-01 — Daemon mode reload via load_mode_config
+# ===========================================================================
+
+
+class TestModeReload:
+    """Daemon mode reload via load_mode_config."""
+
+    def test_reload_updates_config(self, tmp_path: Path) -> None:
+        """load_mode_config() re-reads mode.json and updates global _config."""
+        import src.state_daemon.middleware as mod
+
+        mod._config = None
+
+        state_dir = tmp_path / ".state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        # Write initial mode
+        (state_dir / "mode.json").write_text(json.dumps({"mode": "build"}))
+        # Load it
+        cfg = mod.load_mode_config(str(tmp_path))
+        assert cfg.mode == "build"
+        assert mod.get_current_mode() == "build"
+
+        # Simulate mode set: overwrite mode.json
+        (state_dir / "mode.json").write_text(json.dumps({"mode": "teach"}))
+        # Reload — should pick up new mode
+        cfg2 = mod.load_mode_config(str(tmp_path))
+        assert cfg2.mode == "teach"
+        assert mod.get_current_mode() == "teach"
+
+    def test_reload_handles_missing_file(self, tmp_path: Path) -> None:
+        """load_mode_config() creates default 'both' when file is missing."""
+        import src.state_daemon.middleware as mod
+
+        mod._config = None
+
+        state_dir = tmp_path / ".state"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        # No mode.json initially
+        cfg = mod.load_mode_config(str(tmp_path))
+        assert cfg.mode == "both"
+        assert mod.get_current_mode() == "both"
+        # Default mode.json should have been created
+        assert (state_dir / "mode.json").exists()
