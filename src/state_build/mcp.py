@@ -27,33 +27,34 @@ class SkeletonResponse(BaseModel):
 
     tool: str
     status: str = "not_implemented"
+    task_id: str | None = None
 
 
 # ── Planning tools ────────────────────────────────────────────
 
 
 @mcp.tool()
-def plan_step() -> SkeletonResponse:
+def plan_step(task_id: str | None = None) -> SkeletonResponse:
     """Create step plan from discuss context. Returns structured task list."""
-    return SkeletonResponse(tool="plan_step")
+    return SkeletonResponse(tool="plan_step", task_id=task_id)
 
 
 @mcp.tool()
-def execute_step() -> SkeletonResponse:
+def execute_step(task_id: str | None = None) -> SkeletonResponse:
     """Execute planned step tasks. Reports progress per task."""
-    return SkeletonResponse(tool="execute_step")
+    return SkeletonResponse(tool="execute_step", task_id=task_id)
 
 
 @mcp.tool()
-def verify_step() -> SkeletonResponse:
+def verify_step(task_id: str | None = None) -> SkeletonResponse:
     """Goal-backward verification of step outputs. Returns pass/gap status."""
-    return SkeletonResponse(tool="verify_step")
+    return SkeletonResponse(tool="verify_step", task_id=task_id)
 
 
 @mcp.tool()
-def discuss_step() -> SkeletonResponse:
+def discuss_step(task_id: str | None = None) -> SkeletonResponse:
     """Surface implementation decisions for a step. Returns grey-area table."""
-    return SkeletonResponse(tool="discuss_step")
+    return SkeletonResponse(tool="discuss_step", task_id=task_id)
 
 
 @mcp.tool()
@@ -96,18 +97,18 @@ def snapshot_revert() -> SkeletonResponse:
 
 
 @mcp.tool()
-def code_review() -> SkeletonResponse:
+def code_review(task_id: str | None = None) -> SkeletonResponse:
     """Review staged changes for bugs and quality. Returns structured findings."""
-    return SkeletonResponse(tool="code_review")
+    return SkeletonResponse(tool="code_review", task_id=task_id)
 
 
 # ── Session and debugging tools ───────────────────────────────
 
 
 @mcp.tool()
-def debug_session() -> SkeletonResponse:
+def debug_session(task_id: str | None = None) -> SkeletonResponse:
     """Start or resume a persistent debug session. Returns session ID."""
-    return SkeletonResponse(tool="debug_session")
+    return SkeletonResponse(tool="debug_session", task_id=task_id)
 
 
 @mcp.tool()
