@@ -73,16 +73,20 @@ Plans:
 **Depends on:** 045, 009
 **Requirements:** DAG-04
 **Parallelizable:** no
-**Plans:** 1 plans
+**Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 047-01-PLAN.md — ReactiveTrigger with post-commit callback filtering and async tick dispatch
+- [x] 047-01-PLAN.md — ReactiveTrigger with post-commit callback filtering and async tick dispatch
 
 #### Phase 048 — Priority inversion + silent deadlock detection
 **Goal:** Heuristic: if critical-path Step is blocked on `soft` edge, warn; if all in-flight are blocked on descoped/missing predecessors, emit `state.scheduler.deadlock` → TUI surfaces.
 **Depends on:** 047
 **Requirements:** DAG-05, DAG-06
 **Parallelizable:** yes
+**Plans:** 1 plan (not started)
+
+Plans:
+- [ ] 048-01-PLAN.md — Detection functions (priority inversion + silent deadlock), scheduler event schema, post-tick diagnostic integration
 
 #### Phase 049 — CLI: `state dag show [--arc|--phase|--slice]` ASCII renderer
 **Goal:** Box-drawing rendering with status colors; Hypothesis property test: any valid graph renders without crash.
@@ -92,7 +96,7 @@ Plans:
 **Plans:** 1/1 plans complete
 
 Plans:
-- [ ] 049-01-PLAN.md — DAG CLI module with render_dag engine, show command, Hypothesis property test
+- [x] 049-01-PLAN.md — DAG CLI module with render_dag engine, show command, Hypothesis property test
 
 ---
 
