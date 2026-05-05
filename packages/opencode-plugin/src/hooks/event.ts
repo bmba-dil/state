@@ -3,6 +3,7 @@
 import type { Hooks } from "@opencode-ai/plugin";
 import { log } from "../logger.js";
 import { readModeConfig, getMcpServersForMode } from "./config.js";
+import { resetModeCache } from "../mode-reader.js";
 
 /**
  * state.mode.activated handler: re-reads mode.json and computes
@@ -20,6 +21,7 @@ export const event: NonNullable<Hooks["event"]> = async (input) => {
 
   const cwd = process.cwd();
   const mode = await readModeConfig(cwd);
+  resetModeCache();
   const servers = getMcpServersForMode(mode);
 
   log({
