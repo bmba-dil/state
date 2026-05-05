@@ -10,8 +10,8 @@ import json
 from pathlib import Path
 
 import pytest
-
 from mcp.server.fastmcp import FastMCP
+
 from state_teach.mcp import check_mode_gate, mcp
 
 
@@ -68,3 +68,26 @@ def test_mode_gate_invalid_json(tmp_path: Path) -> None:
     with pytest.raises(SystemExit) as exc_info:
         check_mode_gate(tmp_path)
     assert exc_info.value.code == 1
+
+
+def test_mode_gate_invalid_mode_value(tmp_path: Path) -> None:
+    """check_mode_gate exits with code 1 when mode.json has an unsupported mode value."""
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    mode_file = state_dir / "mode.json"
+    mode_file.write_text(json.dumps({"mode": "kernel"}))
+
+    with pytest.raises(SystemExit) as exc_info:
+        check_mode_gate(tmp_path)
+    assert exc_info.value.code == 1
+
+
+def test_import_lint_clean() -> None:
+    """state_teach.mcp must not introduce cross-mode import violations."""
+    from state_core.import_lint import lint
+
+    result = lint()
+    assert result.exit_code == 0, (
+        f"Found {len(result.violations)} cross-mode import violations:\n"
+        + "\n".join(str(v) for v in result.violations)
+    )
