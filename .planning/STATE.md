@@ -8,7 +8,7 @@ last_updated: "2026-05-04T23:15:00.000Z"
 
 # STATE: state
 
-**Last updated:** 2026-05-04 — v6 (State Daemon) shipped. 3 / 27 milestones complete. v6 delivered 10 phases, 27 daemon commits, ~3,443 LoC src, ~250 tests. All 8 v6-scoped requirements (DAE-01, DAE-03..DAE-09) satisfied; DAE-02 deferred to v7.
+**Last updated:** 2026-05-04 — v5 (DAG Scheduler) and v6 (State Daemon) shipped. 4 / 27 milestones complete. v5 delivered 9 phases, 130 tests across scheduler/reactive/CLI. All 7 DAG requirements satisfied. v6 delivered 10 phases, 27 daemon commits, ~3,443 LoC src, ~250 tests. All 8 v6-scoped requirements (DAE-01, DAE-03..DAE-09) satisfied; DAE-02 deferred to v7.
 
 ---
 
@@ -27,20 +27,20 @@ last_updated: "2026-05-04T23:15:00.000Z"
 
 ## Current Position
 
-**Current tier:** Tier 1 → Tier 2 transition (v1 ✓, v2 ✓, v6 ✓ — 2 left to close Tier 1)
+**Current tier:** Tier 1 → Tier 2 transition (v1 ✓, v2 ✓, v5 ✓, v6 ✓ — 1 left to close Tier 1)
 **Last shipped milestone:** v6 — State Daemon (HTTP + SSE + Mode Middleware) — Complete (shipped 2026-05-04)
 **Active milestone:** v3 — Provider Routing + Model Profiles — phases 023–031 (9 phases)
 **Active phase:** 023 — (next up; not yet planned)
-**Previous milestones:** v1 (Event Store Foundation), v2 (Auth Coverage), v6 (State Daemon)
+**Previous milestones:** v1 (Event Store Foundation), v2 (Auth Coverage), v5 (DAG Scheduler), v6 (State Daemon)
 
-**Phases complete:** 36 / 256 (v1: 11, v2: 15, v6: 10)
-**Milestones complete:** 3 / 27
+**Phases complete:** 45 / 256 (v1: 11, v2: 15, v5: 9, v6: 10)
+**Milestones complete:** 4 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[#######.......................................................] 14%
+[#########......................................................] 18%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)

@@ -1,5 +1,21 @@
 # MILESTONES: state
 
+## v5 DAG Scheduler (Shipped: 2026-05-04)
+
+**Phases completed:** 9 phases, 9 plans
+**Tests:** 130 passed | **Lines of Python:** ~1,500 (scheduler, reactive, CLI)
+
+**Key accomplishments:**
+
+- Pure-Python DAG scheduler — Edge/Node/NodeRegistry types, Kahn's topological sort, DFS cycle detection, frontier calculator, async TaskGroup dispatcher with concurrency cap
+- P0-16 closed — CancelledError swallow watchdog preventing silent scheduler deadlock
+- Reactive event-driven triggers — zero-polling subscription to v1 event store
+- Priority inversion + silent deadlock detection with `on_scheduler_event` callback
+- `state dag show` CLI with Unicode box-drawing, 6 status colors, JSON DAG loading, Hypothesis property tests
+- DAG-01 through DAG-07 satisfied (all 7 v5 requirements)
+
+---
+
 ## v6 State Daemon (Shipped: 2026-05-04)
 
 **Phases completed:** 10 phases, 10 plans
@@ -112,7 +128,7 @@
 | v2 Auth Coverage (5 Methods + Multi-Cred) | 15/15 | **Complete** — Shipped 2026-05-03 |
 | v3 Provider Routing + Model Profiles | 0/9 | Not started |
 | v4 Worktree + Snapshot Service | 0/9 | Not started |
-| v5 DAG Scheduler | 0/9 | Not started |
+| v5 DAG Scheduler | 9/9 | **Complete** — Shipped 2026-05-04 |
 | v6 State Daemon (HTTP + SSE + Mode Middleware) | 10/10 | **Complete** — Shipped 2026-05-04 |
 | v7 Per-Session Worker | 0/8 | Not started |
 | v8 Plugin Server Hooks (all 9) | 0/12 | Not started |
@@ -135,6 +151,6 @@
 | v25 Migration & Import | 0/8 | Not started |
 | v26 Portability Shims | 0/8 | Not started |
 | v27 Release & Packaging | 0/10 | Not started |
-| **TOTAL** | **36/256** | — |
+| **TOTAL** | **45/256** | — |
 
 *See `_archived/ROADMAP.md` for the pre-migration monolithic roadmap including DAG, tier boundaries, and revision history.*
