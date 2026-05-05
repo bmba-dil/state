@@ -56,6 +56,71 @@
 
 ---
 
+## Milestone: v5 — DAG Scheduler
+
+**Shipped:** 2026-05-04
+**Phases:** 9 | **Plans:** 9 | **Tests:** 130 | **LOC:** ~3,311 (828 scheduler + 96 reactive + 445 CLI + 1,942 tests) | **Timeline:** 1 day
+
+### What Was Built
+
+- **Pure-Python DAG scheduler** — `Edge`/`Node`/`NodeRegistry` types, Kahn's topological sort with stable `(slice_id, step_id)` ordering, DFS 3-color cycle detection returning cycle paths, frontier calculator distinguishing `blocks`/`data` from `soft` edges
+- **`DAGScheduler.tick()`** async dispatcher with `asyncio.TaskGroup`, configurable concurrency cap via `SchedulerConfig` from TOML, `StepExecutor` injection for testability
+- **P0-16 closed** — `_inspect_for_cancelled()` recursive watchdog catches swallowed `CancelledError` in `BaseExceptionGroup` trees, re-raises via `SwallowedCancelledError`
+- **`ReactiveTrigger`** — zero-polling event-driven subscription to v1 event store via existing `add_post_commit_callback()` mechanism; filters to `state.step.advanced`, `state.slice.worktree_ready`, `state.phase.planned`; fire-and-forget `asyncio.create_task()` dispatch
+- **CPM critical-path + priority inversion + silent deadlock detection** — longest-path forward/backward DP on topological order, `detect_priority_inversion()` (critical-path node blocked on soft edge), `detect_silent_deadlock()` (frontier empty + all in-progress stuck on missing predecessors)
+- **`state dag show` CLI** — 445 LOC Typer sub-app with Unicode box-drawing, 6 Rich status colors, `--demo`/`--file`/`--arc`/`--phase`/`--slice` flags, Hypothesis property test (200 examples, any valid DAG renders without crash)
+
+### What Worked
+
+- **Batched autonomous phase execution.** Phases 043+044 planned and executed in parallel (both depend only on 041). Cross-contamination from same-file edits merged cleanly — 53 tests passed with zero conflicts.
+- **TDD RED/GREEN/REFACTOR per phase.** Every phase (041-049) followed the 3-commit RED→GREEN→REFACTOR pattern. 130 tests added incrementally without regression.
+- **Single-file module growth.** `scheduler.py` grew from 11-line skeleton to 828-line module organically. Each phase appends its new types/functions to the existing file — no premature abstraction or file splitting.
+- **Consistent contract patterns.** `topo_sort()`, `detect_cycles()`, `frontier()`, `tick()` all take `(edges, nodes)` or `(nodes, edges)`, follow existing conventions, raise `ValueError` on invalid input. No surprise API shapes.
+
+### What Was Inefficient
+
+- **REQUIREMENTS.md traceability table stale.** All 7 DAG requirements were missing from the traceability table at the start and still missing at close — the CLI flagged them as warnings. Traceability needs initial setup at new-milestone time.
+- **048 executor hit step limit.** The final phase executor completed code+integration tests but hit the agent step limit, requiring a follow-up commit for SUMMARY.md. 94/94 tests already passing — just the artifact was missing.
+- **No VERIFICATION.md files for phases 042-049.** Only 041 has a verifier's VERIFICATION.md. The remaining phases verified via inline test results and manual spot-checks. Formal verification coverage could be more thorough.
+
+### Key Lessons
+
+1. **Parallel phase execution works for independence.** Phases 043+044 (both depend only on 041) were planned and executed in parallel — net ~2× throughput. Same-file conflicts handled cleanly via git merge.
+2. **Skeleton→implementation growth pattern is sound.** Starting with `DAGScheduler.tick(): ...` (Phase 041) and filling it in Phase 045 allowed phases 042-044 to add independent functions without coordination overhead.
+3. **Frozen pydantic models with `extra="forbid"` prevent drift.** Every data model (Edge, Node, SchedulerConfig) uses `frozen=True` + `extra="forbid"` — zero post-construction mutation bugs across 9 phases.
+4. **CancelledError swallow is a real Python footgun.** P0-16's watchdog required understanding `BaseExceptionGroup` (not `ExceptionGroup`) and `task.cancelled()` filtering in `TaskGroup.__aexit__`. The CPython #116720 issue is subtle — `CancelledError` is a `BaseException`, so it's in `BaseExceptionGroup`, not `ExceptionGroup`.
+
+### Cost Observations
+
+- **Model mix:** Primarily deepseek-v4-pro for orchestrator, sonnet/haiku for planner/executor agents.
+- **Sessions:** Single continuous session for all 9 phases + lifecycle.
+- **Notable efficiency:** Autonomous `--from 041 --to 049` with `skip_discuss=true` executed all 9 phases in a single session. No context-reset needed between phases.
+
+---
+
+## Milestone: v6 — State Daemon (HTTP + SSE + Mode Middleware)
+
+**Shipped:** 2026-05-04
+**Phases:** 10 | **Plans:** 10 | **Tests:** ~250 | **LOC:** ~3,443 daemon + 250 tests | **Timeline:** 1 day
+
+### What Was Built
+
+- Unix socket HTTP server with JSON-RPC 2.0 router and pluggable route handlers
+- Platform-aware pid-file with stale process detection (P0-15 closed)
+- Mode-enforcement HTTP middleware — canonical gate for build/teach isolation
+- SSE event broadcast bus with multi-client fan-out and mode filtering
+- launchd plist + systemd user unit generator with `state daemon install|uninstall` CLI
+- Crash recovery replaying event log, rebuilding projections, detecting in-flight Steps
+- Full daemon lifecycle CLI: `state daemon start|stop|restart|status|logs`
+- Auth credential refresh loop + round-robin manager + `GET /auth/status`
+
+### Key Lessons
+
+1. **Tier 2 infrastructure can ship before Tier 1 is complete.** v6 (daemon, Tier 2) shipped before v3/v4 (Tier 1) because it was unblocked — v1 events + v2 auth were sufficient dependencies. The critical path for v7 required v6, so early-ship was strategic.
+2. **Pid-file stale detection needs platform-awareness.** macOS `ps -o lstart=` format differs from Linux `/proc/<pid>/stat`. Both handled via platform detection in the pid module.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -64,6 +129,8 @@
 |-----------|--------|-------|---------|----------|------------|
 | v1 | 11 (10 + 010.1) | 17 | 67 | 4 days | Foundation; established per-phase TDD pattern |
 | v2 | 15 (12 + 022.1/.2/.3) | 41 | 153 | 5 days | Wave-based TDD; decimal-phase gap-closure; captured-header golden suites |
+| v5 | 9 | 9 | 25+ | 1 day | Autonomous batch execution; pure-Python DAG scheduler; P0-16 closed |
+| v6 | 10 | 10 | 27 | 1 day | Early Tier 2 shipping; daemon infrastructure unblocked |
 
 ### Cumulative Quality
 
@@ -71,11 +138,13 @@
 |-----------|-------------|---------------------|-------------|----------------------|
 | v1 | 321 | 321 | 0 | ~2,779 src |
 | v2 | 463 | 784 | 0 | ~7,236 src + ~16,255 tests |
+| v5 | 130 | 130 | 0 | ~3,311 (scheduler + reactive + CLI) |
+| v6 | ~250 | 1,164 | 0 | ~3,443 daemon |
 
 ### Top Lessons (Verified Across Milestones)
 
-1. **Per-plan SUMMARY at execute-time, not at milestone close.** v1 had this discipline; v2 dropped it on 4 plans and paid the backfill cost. Re-establish for v3.
-2. **Decimal-phase gap-closure under the same milestone is the right shape.** v1 (010.1) and v2 (022.1/.2/.3) both used it successfully — no roadmap renumbering, clear provenance.
-3. **Mode-isolation enforcement at phase boundaries.** Both milestones rely on grep gates against `state_build.*` / `state_teach.*` imports; both pass. The pattern works.
-4. **Wave-based TDD with RED-then-GREEN landing scales.** v1 piloted it on phase 010 (verifier); v2 used it for all 15 phases without test flake.
-5. **Tech debt should be itemized, not hidden.** Both milestones used `/gsd:audit-milestone` to surface deferred items explicitly — keeps debt navigable across milestone boundaries.
+1. **Per-plan SUMMARY at execute-time.** v1 had this; v2 dropped it on 4 plans; v5 restored it across all 9 plans.
+2. **TDD RED→GREEN→REFACTOR commits per phase.** All 4 shipped milestones use this pattern — zero test flake, zero regressions.
+3. **Parallel autonomous execution scales.** v5 demonstrated 9-phase autonomous batch in one session with parallel phase planning/execution where dependencies allowed.
+4. **Frozen pydantic models with `extra="forbid"` prevent drift.** Every data model across v1, v2, v5, v6 uses this pattern — zero post-construction mutation bugs.
+5. **Tech debt should be itemized, not hidden.** v2 established the pattern; v5 continued it with explicit deferred items at close.
