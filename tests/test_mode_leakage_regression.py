@@ -27,8 +27,10 @@ import pytest
 from pydantic import ValidationError
 
 from src.state_core.schema import (
+    BUILD_ONLY_EVENT_PREFIXES,
     BUILD_SUBTREE,
     ModeConfig,
+    TEACH_ONLY_EVENT_PREFIXES,
     TEACH_SUBTREE,
     validate_mode_config,
     validate_subtree_path,
@@ -279,6 +281,300 @@ class TestLayer6ImportLint:
         assert result.exit_code == 0, (
             f"Found {len(result.violations)} cross-mode import violations:\n"
             + "\n".join(str(v) for v in result.violations)
+        )
+
+
+# ===========================================================================
+# Layer 5 — Daemon HTTP middleware, the canonical gate (Phase 101)
+# ===========================================================================
+
+
+def _make_echo_router():
+    """Create a simple router that echoes the body back as JSON."""
+
+    async def _router(
+        method: str, path: str, headers: dict[str, str], body: bytes
+    ) -> bytes:
+        return json.dumps({"echo": body.decode()}).encode()
+
+    return _router
+
+
+def _build_emit_body(event_type: str, extra_params: dict | None = None) -> bytes:
+    """Build a ``state.emit`` JSON-RPC POST body with the given event type."""
+    params: dict[str, object] = {"type": event_type}
+    if extra_params:
+        params.update(extra_params)
+    return json.dumps({"method": "state.emit", "params": params}).encode()
+
+
+class TestLayer5DaemonMiddleware:
+    """Validate daemon middleware rejects all illegal cross-mode requests.
+
+    Tests the canonical gate: ``ModeMiddleware.__call__()`` invoked directly
+    with method/path/headers/body — no socket or network involved.
+    """
+
+    # ── Helpers for building middleware under test ───────────────────────
+
+    @staticmethod
+    def _mw(mode: str):
+        """Build a ModeMiddleware instance with the given active mode."""
+        from src.state_daemon.middleware import ModeMiddleware
+
+        return ModeMiddleware(_make_echo_router(), ModeConfig(mode=mode))
+
+    @staticmethod
+    def _rejection(result) -> tuple[int, dict]:
+        """Assert result is a rejection tuple and return (status, data)."""
+        assert isinstance(result, tuple), f"Expected rejection tuple, got {type(result)}"
+        status, body = result
+        return status, json.loads(body)
+
+    # ── Header mismatch → 403 ───────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "active_mode,header_mode,method,expected_status",
+        [
+            ("build", "teach", "POST", 403),
+            ("build", "teach", "PUT", 403),
+            ("build", "teach", "PATCH", 403),
+            ("build", "teach", "DELETE", 403),
+            ("teach", "build", "POST", 403),
+            ("teach", "build", "PUT", 403),
+            ("teach", "build", "PATCH", 403),
+            ("teach", "build", "DELETE", 403),
+        ],
+    )
+    async def test_cross_mode_write_rejected_403(
+        self, active_mode: str, header_mode: str, method: str, expected_status: int
+    ) -> None:
+        """Cross-mode writes (POST/PUT/PATCH/DELETE) are rejected with 403."""
+        mw = self._mw(active_mode)
+        result = await mw(method, "/", {"x-state-mode": header_mode}, b'{"test": 1}')
+        status, data = self._rejection(result)
+        assert status == expected_status
+        assert data["error"] == "cross_mode_rejected"
+        assert data["request_mode"] == header_mode
+        assert data["active_mode"] == active_mode
+
+    # ── Header mismatch + read → allowed ────────────────────────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "method",
+        ["GET", "HEAD"],
+    )
+    async def test_cross_mode_read_allowed(self, method: str) -> None:
+        """GET/HEAD with cross-mode header passes through (reads allowed)."""
+        mw = self._mw("build")
+        result = await mw(method, "/", {"x-state-mode": "teach"}, b"")
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_mismatch_get_with_body_allowed(self) -> None:
+        """GET with mismatched mode and body still passes (GET is always read)."""
+        mw = self._mw("build")
+        result = await mw("GET", "/", {"x-state-mode": "teach"}, b'{"test": 1}')
+        assert isinstance(result, bytes)
+
+    # ── Same-mode → allowed ─────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "active_mode,header_mode",
+        [("build", "build"), ("teach", "teach")],
+    )
+    async def test_same_mode_write_allowed(
+        self, active_mode: str, header_mode: str
+    ) -> None:
+        """Same-mode writes pass through to the router."""
+        mw = self._mw(active_mode)
+        result = await mw(method="POST", path="/", headers={"x-state-mode": header_mode}, body=b'{"test": 1}')
+        assert isinstance(result, bytes)
+
+    # ── Missing/invalid header → 400 ────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_missing_header_returns_400(self) -> None:
+        """Missing X-State-Mode header returns HTTP 400."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {}, b'{"test": 1}')
+        status, data = self._rejection(result)
+        assert status == 400
+        assert data["error"] == "missing_mode_header"
+
+    @pytest.mark.asyncio
+    async def test_empty_header_returns_400(self) -> None:
+        """Empty X-State-Mode value returns HTTP 400."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": ""}, b"{}")
+        status, data = self._rejection(result)
+        assert status == 400
+        assert data["error"] == "missing_mode_header"
+
+    @pytest.mark.asyncio
+    async def test_invalid_header_returns_400(self) -> None:
+        """Invalid X-State-Mode value returns HTTP 400."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": "fakemode"}, b"{}")
+        status, data = self._rejection(result)
+        assert status == 400
+        assert data["error"] == "invalid_mode_header"
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_header_returns_400(self) -> None:
+        """Whitespace-only X-State-Mode is treated as missing → 400."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": "   "}, b"{}")
+        status, data = self._rejection(result)
+        assert status == 400
+        assert data["error"] == "missing_mode_header"
+
+    # ── Kernel bypass ───────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_kernel_bypasses_build_mode(self) -> None:
+        """X-State-Mode: kernel bypasses all mode checks in build-active daemon."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": "kernel"}, b'{"test": 1}')
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_kernel_bypasses_teach_mode(self) -> None:
+        """X-State-Mode: kernel bypasses all mode checks in teach-active daemon."""
+        mw = self._mw("teach")
+        result = await mw("POST", "/", {"x-state-mode": "kernel"}, b'{"test": 1}')
+        assert isinstance(result, bytes)
+
+    # ── Both mode → allow all ───────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "header_mode",
+        ["build", "teach", "kernel", "both"],
+    )
+    async def test_both_active_allows_all_headers(self, header_mode: str) -> None:
+        """Active mode 'both' allows all X-State-Mode header values."""
+        mw = self._mw("both")
+        result = await mw("POST", "/", {"x-state-mode": header_mode}, b'{"test": 1}')
+        assert isinstance(result, bytes)  # pass through
+
+    # ── Event-type rejection: build mode rejects teach events ────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "state.concept.introduced",
+            "state.concept.observed",
+            "state.concept.drilled",
+            "state.concept.mastered",
+            "state.concept.reviewed",
+            "state.drill.prepared",
+            "state.drill.submitted",
+            "state.drill.graded",
+        ],
+    )
+    async def test_build_mode_rejects_teach_event(self, event_type: str) -> None:
+        """Build mode rejects all 8 teach-only event types with 403."""
+        mw = self._mw("build")
+        body = _build_emit_body(event_type)
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        status, data = self._rejection(result)
+        assert status == 403
+        assert data["error"] == "cross_mode_event_rejected"
+        assert data["event_type"] == event_type
+
+    # ── Event-type rejection: teach mode rejects build events ────────────
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "event_type",
+        [
+            "state.arc.created",
+            "state.phase.planned",
+            "state.slice.shipped",
+            "state.step.executed",
+        ],
+    )
+    async def test_teach_mode_rejects_build_event(self, event_type: str) -> None:
+        """Teach mode rejects build-only event types with 403."""
+        mw = self._mw("teach")
+        body = _build_emit_body(event_type)
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        status, data = self._rejection(result)
+        assert status == 403
+        assert data["error"] == "cross_mode_event_rejected"
+        assert data["event_type"] == event_type
+
+    # ── Allowed event paths ─────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_build_mode_allows_build_event(self) -> None:
+        """Build mode + build-only event + matching header → allowed."""
+        mw = self._mw("build")
+        body = _build_emit_body("state.arc.created")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_teach_mode_allows_teach_event(self) -> None:
+        """Teach mode + teach-only event + matching header → allowed."""
+        mw = self._mw("teach")
+        body = _build_emit_body("state.concept.introduced")
+        result = await mw("POST", "/", {"x-state-mode": "teach"}, body)
+        assert isinstance(result, bytes)
+
+    # ── Non-emit / malformed body passes through ────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_non_emit_post_passes_through(self) -> None:
+        """Non-state.emit POST body bypasses event-type check."""
+        mw = self._mw("build")
+        body = json.dumps({"method": "ping", "params": {}}).encode()
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_passes_through(self) -> None:
+        """Malformed JSON body does not crash middleware; passes through."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, b"not json{")
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_empty_body_passes_through(self) -> None:
+        """Empty body on same-mode POST passes through."""
+        mw = self._mw("build")
+        result = await mw("POST", "/", {"x-state-mode": "build"}, b"")
+        assert isinstance(result, bytes)
+
+    @pytest.mark.asyncio
+    async def test_emit_with_null_type_passes_through(self) -> None:
+        """state.emit with null type field passes through (treated as empty)."""
+        mw = self._mw("build")
+        body = json.dumps({"method": "state.emit", "params": {"type": None}}).encode()
+        result = await mw("POST", "/", {"x-state-mode": "build"}, body)
+        assert isinstance(result, bytes)
+
+    # ── Mode-specific prefix coverage ────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_build_mode_rejects_teach_prefix_count(self) -> None:
+        """Build-mode daemon has exactly 2 teach-only event prefixes."""
+        from src.state_core.schema import TEACH_ONLY_EVENT_PREFIXES
+
+        assert TEACH_ONLY_EVENT_PREFIXES == frozenset({"state.concept.", "state.drill."})
+
+    @pytest.mark.asyncio
+    async def test_teach_mode_rejects_build_prefix_count(self) -> None:
+        """Teach-mode daemon has exactly 4 build-only event prefixes."""
+        from src.state_core.schema import BUILD_ONLY_EVENT_PREFIXES
+
+        assert BUILD_ONLY_EVENT_PREFIXES == frozenset(
+            {"state.arc.", "state.phase.", "state.slice.", "state.step."}
         )
 
 
