@@ -28,6 +28,8 @@
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P4, P5
+**Plans:** 1 plan
+- [ ] 082-01-PLAN.md — BuildProgress SolidJS component + event wiring + tui.ts integration
 
 #### Phase 083 — Teach-concept sub-component (current concept + mastery bar)
 **Goal:** Subscribes to daemon SSE; renders concept card + Kolb stage + mastery bar.
