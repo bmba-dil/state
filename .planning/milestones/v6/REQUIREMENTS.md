@@ -6,7 +6,7 @@
 
 ### Kernel: Daemon (A6)
 
-- [ ] **DAE-01**: Always-on user service (launchd plist on macOS, systemd --user unit on Linux)
+- [x] **DAE-01**: Always-on user service (launchd plist on macOS, systemd --user unit on Linux) ✓ (Phase 055, 2026-05-05)
 - [ ] **DAE-02**: Per-session worker spawned by plugin shim; shares event store with daemon via HTTP+SSE
 - [x] **DAE-03**: pid-file includes process `start_time_ns`; stale-pid detection via `/proc` (Linux) or `ps` (macOS) ✓ (Phase 051, 2026-05-05)
 - [x] **DAE-04**: Unix socket at `$XDG_RUNTIME_DIR/state-<projecthash>.sock` (fallback `/tmp/state-<user>-<hash>.sock`) ✓ (Phase 052, 2026-05-04)
