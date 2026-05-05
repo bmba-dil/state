@@ -67,8 +67,8 @@ function createTuiPlugin(): TuiPlugin {
         JSON.stringify({
           source: "@state/opencode-plugin/tui",
           type: "event.session.status",
-          sessionID: (event as Record<string, unknown>).sessionID,
-          status: (event as Record<string, unknown>).status,
+          sessionID: event.properties.sessionID,
+          status: event.properties.status,
         })
       );
     });
