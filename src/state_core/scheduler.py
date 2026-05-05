@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import tomllib
+from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 # -- Type literals -------------------------------------------------------------
 
@@ -39,6 +43,10 @@ class Node(BaseModel):
     id: str
     kind: Literal["arc", "phase", "slice", "step"]
     status: Literal["idle", "pending", "in_progress", "done", "blocked", "failed"] = "idle"
+
+
+StepExecutor = Callable[[Node], Awaitable[None]]
+"""Async callable that executes a single Step. Injected for testability."""
 
 
 # -- Node registry -----------------------------------------------------------
@@ -116,6 +124,27 @@ def _parse_sort_key(node_id: str) -> tuple[str, str]:
     if not slice_part and not step_part:
         return ("", node_id)
     return (slice_part, step_part)
+
+
+def _slice_key(node_id: str) -> str:
+    """Extract Slice prefix from node ID for dispatch grouping.
+
+    Returns the path component up to and including 'slice-N'.
+    Falls back to the full node_id if no 'slice-N' component is found
+    (e.g., standalone arc/phase nodes group individually).
+
+    >>> _slice_key("arc-1/phase-1/slice-1/step-2")
+    'arc-1/phase-1/slice-1'
+    >>> _slice_key("arc-1/phase-1/slice-1")
+    'arc-1/phase-1/slice-1'
+    >>> _slice_key("arc-1/phase-1")
+    'arc-1/phase-1'
+    """
+    parts = node_id.split("/")
+    for i, part in enumerate(parts):
+        if part.startswith("slice-"):
+            return "/".join(parts[: i + 1])
+    return node_id
 
 
 def topo_sort(edges: list[Edge], nodes: list[Node]) -> list[Node]:
@@ -329,6 +358,54 @@ def detect_cycles(edges: list[Edge]) -> list[list[str]]:
 class DAGScheduler:
     """Reactive DAG scheduler that computes unblocked Steps on state change."""
 
-    async def tick(self, arc_id: str) -> list[str]:
+    def __init__(
+        self,
+        concurrency_cap: int = 4,
+        step_executor: StepExecutor | None = None,
+    ) -> None:
+        self.concurrency_cap = max(1, min(concurrency_cap, 64))
+        self._executor: StepExecutor = step_executor or _default_step_executor
+
+    async def tick(self, nodes: list[Node], edges: list[Edge]) -> list[str]:
         """Return all Step IDs ready for concurrent dispatch."""
         ...
+
+
+async def _default_step_executor(node: Node) -> None:
+    """Default no-op step executor — used when none is injected."""
+    pass
+
+
+class SchedulerConfig(BaseModel):
+    """Scheduler configuration loaded from .state/config.toml [scheduler] section."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    concurrency_cap: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description="Maximum number of Slices to dispatch concurrently per tick.",
+    )
+
+
+def load_scheduler_config(config_path: Path | None = None) -> SchedulerConfig:
+    """Load scheduler config from .state/config.toml, falling back to defaults."""
+    defaults = SchedulerConfig()
+    path = config_path or Path(".state/config.toml")
+
+    if not path.is_file():
+        return defaults
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+        data = tomllib.loads(raw)
+        scheduler_data = data.get("scheduler", {})
+        if not isinstance(scheduler_data, dict):
+            return defaults
+        merged = defaults.model_dump() | {
+            k: v for k, v in scheduler_data.items() if k in defaults.model_fields
+        }
+        return SchedulerConfig(**merged)
+    except (tomllib.TOMLDecodeError, OSError, ValueError):
+        return defaults

@@ -8,10 +8,27 @@ Requires: pytest. All tests are synchronous (no async needed).
 
 from __future__ import annotations
 
+import asyncio
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from src.state_core.scheduler import Edge, EdgeKind, Node, NodeRegistry, topo_sort, frontier, detect_cycles
+from src.state_core.scheduler import (
+    DAGScheduler,
+    Edge,
+    EdgeKind,
+    Node,
+    NodeRegistry,
+    SchedulerConfig,
+    StepExecutor,
+    detect_cycles,
+    frontier,
+    load_scheduler_config,
+    topo_sort,
+)
 
 
 # -- Edge model tests ------------------------------------------------------------
@@ -530,5 +547,213 @@ class TestCycleDetection:
         # Verify that there's at least one cycle path containing 'a'
         a_cycle = any("a" in c for c in result)
         assert a_cycle is True
+
+
+# -- DAGScheduler dispatcher tests ----------------------------------------------
+
+
+class TestDispatcher:
+    """Async tests for DAGScheduler.tick() — frontier grouping + asyncio.gather dispatch.
+
+    All tests use self-contained inline fixtures. The mock step executor
+    records dispatched node IDs so we can assert dispatch order and
+    concurrency cap enforcement.
+    """
+
+    @pytest.mark.asyncio
+    async def test_tick_empty_frontier(self) -> None:
+        """Empty nodes/edges → tick() returns []."""
+        scheduler = DAGScheduler(concurrency_cap=4)
+        result = await scheduler.tick([], [])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_tick_single_slice_single_step(self) -> None:
+        """One idle step, no edges → dispatches that step, returns [step.id]."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        step = Node(id="arc-1/phase-1/slice-1/step-1", kind="step", status="idle")
+        result = await scheduler.tick([step], [])
+        assert result == ["arc-1/phase-1/slice-1/step-1"]
+        assert recorded == ["arc-1/phase-1/slice-1/step-1"]
+
+    @pytest.mark.asyncio
+    async def test_tick_single_slice_multiple_steps_serial(self) -> None:
+        """Two idle steps in same Slice, no deps → both dispatched in step_id order."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        step_a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step", status="idle")
+        step_b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step", status="idle")
+        result = await scheduler.tick([step_a, step_b], [])
+        # Both steps dispatched
+        assert set(result) == {
+            "arc-1/phase-1/slice-1/step-a",
+            "arc-1/phase-1/slice-1/step-b",
+        }
+        # Within a Slice, steps execute sequentially (step-a before step-b by sort)
+        assert recorded == [
+            "arc-1/phase-1/slice-1/step-a",
+            "arc-1/phase-1/slice-1/step-b",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tick_blocks_edge_not_done_blocks(self) -> None:
+        """A(idle)→blocks→B(idle) → only A dispatched (B blocked)."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step", status="idle")
+        b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step", status="idle")
+        e = Edge(source_node="arc-1/phase-1/slice-1/step-a", target_node="arc-1/phase-1/slice-1/step-b", kind="blocks")
+        result = await scheduler.tick([a, b], [e])
+        assert result == ["arc-1/phase-1/slice-1/step-a"]
+        assert recorded == ["arc-1/phase-1/slice-1/step-a"]
+
+    @pytest.mark.asyncio
+    async def test_tick_done_unblocks_successor(self) -> None:
+        """A(done)→blocks→B(idle) → B dispatched."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step", status="done")
+        b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step", status="idle")
+        e = Edge(source_node="arc-1/phase-1/slice-1/step-a", target_node="arc-1/phase-1/slice-1/step-b", kind="blocks")
+        result = await scheduler.tick([a, b], [e])
+        assert result == ["arc-1/phase-1/slice-1/step-b"]
+        assert recorded == ["arc-1/phase-1/slice-1/step-b"]
+
+    @pytest.mark.asyncio
+    async def test_tick_multiple_slices_under_cap(self) -> None:
+        """Two Slices, each with one idle step, cap=4 → both dispatched concurrently."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        s1 = Node(id="arc-1/phase-1/slice-1/step-1", kind="step", status="idle")
+        s2 = Node(id="arc-1/phase-1/slice-2/step-1", kind="step", status="idle")
+        result = await scheduler.tick([s1, s2], [])
+        assert set(result) == {
+            "arc-1/phase-1/slice-1/step-1",
+            "arc-1/phase-1/slice-2/step-1",
+        }
+
+    @pytest.mark.asyncio
+    async def test_tick_multiple_slices_over_cap(self) -> None:
+        """5 Slices, cap=2 → only 2 Slices dispatched; IDs belong to ≤ 2 distinct Slices."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=2, step_executor=record)
+        steps = [
+            Node(id=f"arc-1/phase-1/slice-{i}/step-1", kind="step", status="idle")
+            for i in range(1, 6)
+        ]
+        result = await scheduler.tick(steps, [])
+        # At most 2 Slices dispatched
+        dispatched_slices = {nid.rsplit("/", 1)[0] for nid in result}
+        assert len(dispatched_slices) <= 2
+
+    @pytest.mark.asyncio
+    async def test_tick_excludes_done_and_failed(self) -> None:
+        """One done node, one failed node, no edges → tick() returns []."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        done = Node(id="arc-1/phase-1/slice-1/step-1", kind="step", status="done")
+        failed = Node(id="arc-1/phase-1/slice-1/step-2", kind="step", status="failed")
+        result = await scheduler.tick([done, failed], [])
+        assert result == []
+        assert recorded == []
+
+    @pytest.mark.asyncio
+    async def test_tick_soft_edge_does_not_block(self) -> None:
+        """A(idle)→soft→B(idle) → both dispatched (soft doesn't block)."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step", status="idle")
+        b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step", status="idle")
+        e = Edge(source_node="arc-1/phase-1/slice-1/step-a", target_node="arc-1/phase-1/slice-1/step-b", kind="soft")
+        result = await scheduler.tick([a, b], [e])
+        assert set(result) == {
+            "arc-1/phase-1/slice-1/step-a",
+            "arc-1/phase-1/slice-1/step-b",
+        }
+
+    @pytest.mark.asyncio
+    async def test_tick_data_edge_done_unblocks(self) -> None:
+        """A(done)→data→B(idle) → B dispatched."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        a = Node(id="arc-1/phase-1/slice-1/step-a", kind="step", status="done")
+        b = Node(id="arc-1/phase-1/slice-1/step-b", kind="step", status="idle")
+        e = Edge(source_node="arc-1/phase-1/slice-1/step-a", target_node="arc-1/phase-1/slice-1/step-b", kind="data")
+        result = await scheduler.tick([a, b], [e])
+        assert result == ["arc-1/phase-1/slice-1/step-b"]
+        assert recorded == ["arc-1/phase-1/slice-1/step-b"]
+
+    @pytest.mark.asyncio
+    async def test_tick_concurrency_cap_from_constructor(self) -> None:
+        """Instantiate DAGScheduler(concurrency_cap=1), 3 idle steps in 3 Slices → only 1 Slice dispatched."""
+        recorded: list[str] = []
+
+        async def record(node: Node) -> None:
+            recorded.append(node.id)
+
+        scheduler = DAGScheduler(concurrency_cap=1, step_executor=record)
+        steps = [
+            Node(id=f"arc-1/phase-1/slice-{i}/step-1", kind="step", status="idle")
+            for i in range(1, 4)
+        ]
+        result = await scheduler.tick(steps, [])
+        # With cap=1, only 1 Slice dispatched
+        dispatched_slices = {nid.rsplit("/", 1)[0] for nid in result}
+        assert len(dispatched_slices) == 1
+
+    @pytest.mark.asyncio
+    async def test_tick_step_executor_receives_node(self) -> None:
+        """Mock executor asserts it received the correct Node object (not just ID)."""
+        received_nodes: list[Node] = []
+
+        async def record(node: Node) -> None:
+            received_nodes.append(node)
+
+        scheduler = DAGScheduler(concurrency_cap=4, step_executor=record)
+        step = Node(id="arc-1/phase-1/slice-1/step-1", kind="step", status="idle")
+        result = await scheduler.tick([step], [])
+        assert len(result) == 1
+        assert len(received_nodes) == 1
+        received = received_nodes[0]
+        assert received.id == "arc-1/phase-1/slice-1/step-1"
+        assert received.kind == "step"
+        assert received.status == "idle"
 
 
