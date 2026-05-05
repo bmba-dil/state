@@ -28,8 +28,8 @@
 **Depends on:** 081
 **Requirements:** TUI-02
 **Parallelizable:** yes with P4, P5
-**Plans:** 1 plan
-- [ ] 082-01-PLAN.md — BuildProgress SolidJS component + event wiring + tui.ts integration
+**Plans:** 1/1 plans complete
+- [x] 082-01-PLAN.md — BuildProgress SolidJS component + event wiring + tui.ts integration
 
 #### Phase 083 — Teach-concept sub-component (current concept + mastery bar)
 **Goal:** Subscribes to daemon SSE; renders concept card + Kolb stage + mastery bar.
@@ -42,6 +42,8 @@
 **Depends on:** 080
 **Requirements:** TUI-03
 **Parallelizable:** yes
+**Plans:** 1 plan
+- [ ] 084-01-PLAN.md — Statusline component (state + SSE wiring + render) + tui.ts integration + tests
 
 #### Phase 085 — Toast notifications (`ui.toast`)
 **Goal:** Slice completion, drill availability, gray-area decisions, auth refresh; de-dup.
