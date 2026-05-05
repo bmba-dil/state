@@ -779,3 +779,116 @@ class TestValidateDaemonPath:
         # Default "both" mode allows both subtrees
         validate_daemon_path(".state/build/foo")
         validate_daemon_path(".state/teach/bar")
+
+
+# ===========================================================================
+# Task 101-01.1 — Event-type prefix sets + _extract_event_type() helper
+# ===========================================================================
+
+
+class TestEventPrefixSets:
+    """Tests for TEACH_ONLY_EVENT_PREFIXES and BUILD_ONLY_EVENT_PREFIXES."""
+
+    def test_teach_only_prefixes_is_frozenset(self) -> None:
+        """TEACH_ONLY_EVENT_PREFIXES is a frozenset with correct values."""
+        from src.state_core.schema import TEACH_ONLY_EVENT_PREFIXES
+
+        assert isinstance(TEACH_ONLY_EVENT_PREFIXES, frozenset)
+        assert TEACH_ONLY_EVENT_PREFIXES == {"state.concept.", "state.drill."}
+
+    def test_build_only_prefixes_is_frozenset(self) -> None:
+        """BUILD_ONLY_EVENT_PREFIXES is a frozenset with correct values."""
+        from src.state_core.schema import BUILD_ONLY_EVENT_PREFIXES
+
+        assert isinstance(BUILD_ONLY_EVENT_PREFIXES, frozenset)
+        assert BUILD_ONLY_EVENT_PREFIXES == {
+            "state.arc.", "state.phase.", "state.slice.", "state.step."
+        }
+
+    def test_frozensets_are_hashable(self) -> None:
+        """Frozensets can be used as dict keys or set members."""
+        from src.state_core.schema import TEACH_ONLY_EVENT_PREFIXES, BUILD_ONLY_EVENT_PREFIXES
+
+        # Verify they are hashable (can be dict keys and set members)
+        d = {TEACH_ONLY_EVENT_PREFIXES: "teach", BUILD_ONLY_EVENT_PREFIXES: "build"}
+        assert d[TEACH_ONLY_EVENT_PREFIXES] == "teach"
+        assert d[BUILD_ONLY_EVENT_PREFIXES] == "build"
+
+        s = {TEACH_ONLY_EVENT_PREFIXES, BUILD_ONLY_EVENT_PREFIXES}
+        assert len(s) == 2
+
+
+class TestExtractEventType:
+    """Tests for _extract_event_type() JSON-RPC body parser."""
+
+    def test_extracts_event_type_from_state_emit(self) -> None:
+        """_extract_event_type returns 'state.concept.introduced' for valid body."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({
+            "method": "state.emit",
+            "params": {"type": "state.concept.introduced"},
+        }).encode()
+        result = _extract_event_type(body)
+        assert result == "state.concept.introduced"
+
+    def test_returns_none_for_non_state_emit(self) -> None:
+        """_extract_event_type returns None for non-state.emit methods."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({"method": "ping", "id": 1}).encode()
+        result = _extract_event_type(body)
+        assert result is None
+
+    def test_returns_none_for_malformed_json(self) -> None:
+        """_extract_event_type returns None for malformed JSON (no crash)."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        result = _extract_event_type(b"not json")
+        assert result is None
+
+    def test_returns_empty_string_for_missing_type(self) -> None:
+        """_extract_event_type returns '' when params.type is missing."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({"method": "state.emit"}).encode()
+        result = _extract_event_type(body)
+        assert result == ""
+
+    def test_returns_none_for_non_dict_payload(self) -> None:
+        """_extract_event_type returns None when JSON is not a dict."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps([1, 2, 3]).encode()
+        result = _extract_event_type(body)
+        assert result is None
+
+    def test_returns_empty_string_for_null_type(self) -> None:
+        """_extract_event_type returns '' when params exists but type is None."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({
+            "method": "state.emit",
+            "params": {"type": None},
+        }).encode()
+        result = _extract_event_type(body)
+        assert result == ""
+
+    def test_returns_empty_string_for_missing_params(self) -> None:
+        """_extract_event_type returns '' when params key is missing from state.emit."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({"method": "state.emit", "id": 1}).encode()
+        result = _extract_event_type(body)
+        assert result == ""
+
+    def test_returns_empty_string_for_non_dict_params(self) -> None:
+        """_extract_event_type returns '' when params is not a dict (state.emit with bad params)."""
+        from src.state_daemon.middleware import _extract_event_type
+
+        body = json.dumps({
+            "method": "state.emit",
+            "params": "string_not_dict",
+        }).encode()
+        result = _extract_event_type(body)
+        assert result == ""

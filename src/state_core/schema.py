@@ -39,6 +39,14 @@ TEACH_SUBTREE: str = ".state/teach"
 SUBTREE_DIRS: dict[str, str] = {"build": BUILD_SUBTREE, "teach": TEACH_SUBTREE}
 """Mapping from persistable mode value to its subtree directory."""
 
+TEACH_ONLY_EVENT_PREFIXES: frozenset[str] = frozenset({"state.concept.", "state.drill."})
+"""Event-type prefixes restricted to teach mode. Rejected when active mode is 'build'."""
+
+BUILD_ONLY_EVENT_PREFIXES: frozenset[str] = frozenset(
+    {"state.arc.", "state.phase.", "state.slice.", "state.step."}
+)
+"""Event-type prefixes restricted to build mode. Rejected when active mode is 'teach'."""
+
 AggregateType = Literal[
     "arc",
     "phase",

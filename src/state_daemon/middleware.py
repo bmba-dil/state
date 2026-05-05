@@ -21,7 +21,13 @@ from collections.abc import Callable, Awaitable
 
 import structlog
 from pydantic import ValidationError
-from src.state_core.schema import ALL_RECOGNISED_MODES, ModeConfig, validate_subtree_path
+from src.state_core.schema import (
+    ALL_RECOGNISED_MODES,
+    BUILD_ONLY_EVENT_PREFIXES,
+    ModeConfig,
+    TEACH_ONLY_EVENT_PREFIXES,
+    validate_subtree_path,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -155,6 +161,38 @@ def _is_read_operation(method: str, path: str) -> bool:
     if method == "POST" and path in _READ_POST_PATHS:
         return True
     return False
+
+
+def _extract_event_type(body: bytes) -> str | None:
+    """Extract the event type from a JSON-RPC ``state.emit`` request body.
+
+    Parses the JSON body to find ``params.type`` when the method is
+    ``"state.emit"``.  Returns ``None`` for any other method, malformed
+    JSON, or missing type field — the caller decides how to handle.
+
+    Args:
+        body: Raw HTTP request body bytes.
+
+    Returns:
+        The event type string (e.g. ``"state.concept.introduced"``),
+        or ``None`` if extraction is not applicable.
+    """
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    if payload.get("method") != "state.emit":
+        return None
+
+    params = payload.get("params")
+    if not isinstance(params, dict):
+        return ""  # state.emit without proper params — treat as no event type
+
+    return params.get("type") or ""  # None/null type → ""
 
 
 # ---------------------------------------------------------------------------
