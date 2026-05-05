@@ -13,6 +13,7 @@ import {
   toastMessageForStepEnded,
   toastMessageForStepFailed,
   toastMessageForServerConnected,
+  toastMessageForSessionError,
   toastVariantForEvent,
   toastDurationForEvent,
   truncateToastMessage,
@@ -311,5 +312,207 @@ describe("de-dup integration", () => {
     // Second occurrence within 10s — SHOULD be suppressed
     const second = shouldSuppressToast(msg, history, 2000);
     expect(second).toBe(true);
+  });
+});
+
+// ── toastMessageForSessionError tests ──────────────────────────────
+
+describe("toastMessageForSessionError", () => {
+  it('returns "AuthError: token expired" when error has name and message', () => {
+    const event = {
+      id: "ev7",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+        error: { name: "AuthError", message: "token expired" },
+      },
+    };
+    const msg = toastMessageForSessionError(event);
+    expect(msg).toBe("AuthError: token expired");
+  });
+
+  it('returns "AuthError" when error has name only (no message)', () => {
+    const event = {
+      id: "ev8",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+        error: { name: "AuthError", message: "" },
+      },
+    };
+    const msg = toastMessageForSessionError(event);
+    expect(msg).toBe("AuthError");
+  });
+
+  it('returns "Session error" when event has no error object', () => {
+    const event = {
+      id: "ev9",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+      } as any,
+    };
+    const msg = toastMessageForSessionError(event);
+    expect(msg).toBe("Session error");
+  });
+
+  it("uses only first line of multi-line error.message", () => {
+    const event = {
+      id: "ev10",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+        error: {
+          name: "RuntimeError",
+          message: "first line\nsecond line\nthird line",
+        },
+      },
+    };
+    const msg = toastMessageForSessionError(event);
+    // Only first line used, truncated to 40 chars
+    expect(msg).toContain("RuntimeError");
+    expect(msg).not.toContain("second line");
+    expect(msg).not.toContain("third line");
+  });
+
+  it("uses error.name over error.type when both present", () => {
+    const event = {
+      id: "ev11",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+        error: { name: "AuthError", type: "SomeType", message: "token expired" },
+      },
+    };
+    const msg = toastMessageForSessionError(event);
+    expect(msg).toContain("AuthError");
+    expect(msg).not.toContain("SomeType");
+  });
+
+  it("uses error.type when error.name is absent", () => {
+    const event = {
+      id: "ev12",
+      type: "session.error" as const,
+      properties: {
+        timestamp: 1234567890,
+        error: { type: "FallbackType", message: "something happened" },
+      },
+    };
+    const msg = toastMessageForSessionError(event);
+    expect(msg).toContain("FallbackType");
+    expect(msg).toContain("something happened");
+  });
+});
+
+// ── truncateToastMessage custom maxLen tests ───────────────────────
+
+describe("truncateToastMessage custom maxLen", () => {
+  it("truncates to custom maxLen=20 with U+2026 ellipsis", () => {
+    const msg = "This is a long toast message";
+    const result = truncateToastMessage(msg, 20);
+    expect(result.length).toBe(20);
+    expect(result.endsWith("\u2026")).toBe(true);
+  });
+
+  it("returns as-is when message equals custom maxLen=10", () => {
+    const msg = "1234567890"; // exactly 10 chars
+    const result = truncateToastMessage(msg, 10);
+    expect(result).toBe(msg);
+    expect(result.length).toBe(10);
+  });
+
+  it("returns short message as-is with custom maxLen=100", () => {
+    const msg = "short";
+    const result = truncateToastMessage(msg, 100);
+    expect(result).toBe("short");
+  });
+
+  it("uses default 40 when maxLen not specified", () => {
+    const msg = "a".repeat(50);
+    const result = truncateToastMessage(msg);
+    expect(result.length).toBe(40);
+  });
+});
+
+// ── recordToast race-condition de-dup tests ────────────────────────
+
+describe("recordToast race condition", () => {
+  it("records two messages at near-simultaneous times as distinct entries", () => {
+    const history = freshHistory();
+    recordToast("message A", history, 1000);
+    recordToast("message B", history, 1001);
+    expect(history.has("message A")).toBe(true);
+    expect(history.has("message B")).toBe(true);
+    expect(history.get("message A")).toBe(1000);
+    expect(history.get("message B")).toBe(1001);
+  });
+
+  it("prunes entries older than 10s from the timestamp", () => {
+    const history = new Map<string, number>();
+    history.set("old1", 0);
+    history.set("old2", 500);
+    history.set("recent", 9500);
+
+    // now=12000: old1 diff=12000 (prune), old2 diff=11500 (prune), recent diff=2500 (keep)
+    recordToast("new", history, 12000);
+
+    expect(history.has("old1")).toBe(false);
+    expect(history.has("old2")).toBe(false);
+    expect(history.has("recent")).toBe(true);
+    expect(history.has("new")).toBe(true);
+  });
+
+  it("does not prune entries younger than 10s", () => {
+    const history = new Map<string, number>();
+    history.set("msg1", 5000);
+    history.set("msg2", 9000);
+
+    // now=10000: msg1 diff=5000 (keep), msg2 diff=1000 (keep)
+    recordToast("msg3", history, 10000);
+
+    expect(history.has("msg1")).toBe(true);
+    expect(history.has("msg2")).toBe(true);
+    expect(history.has("msg3")).toBe(true);
+  });
+});
+
+// ── shouldSuppressToast boundary tests ─────────────────────────────
+
+describe("shouldSuppressToast boundary", () => {
+  it("suppresses at t=9999 within 10s window", () => {
+    const history = new Map<string, number>();
+    history.set("test msg", 0);
+    // diff = 9999 < 10000 → suppress
+    expect(shouldSuppressToast("test msg", history, 9999)).toBe(true);
+  });
+
+  it("does not suppress at t=10000 (at boundary, outside window)", () => {
+    const history = new Map<string, number>();
+    history.set("test msg", 0);
+    // diff = 10000 >= 10000 → allow
+    expect(shouldSuppressToast("test msg", history, 10000)).toBe(false);
+  });
+
+  it("does not suppress at t=10001 (past boundary)", () => {
+    const history = new Map<string, number>();
+    history.set("test msg", 0);
+    // diff = 10001 >= 10000 → allow
+    expect(shouldSuppressToast("test msg", history, 10001)).toBe(false);
+  });
+});
+
+// ── TOAST_HISTORY clears correctly ─────────────────────────────────
+
+describe("TOAST_HISTORY persistence tests", () => {
+  it("TOAST_HISTORY is a Map instance", () => {
+    TOAST_HISTORY.clear();
+    expect(TOAST_HISTORY).toBeInstanceOf(Map);
+  });
+
+  it("clearing TOAST_HISTORY results in size 0", () => {
+    TOAST_HISTORY.set("test1", 1000);
+    TOAST_HISTORY.set("test2", 2000);
+    TOAST_HISTORY.clear();
+    expect(TOAST_HISTORY.size).toBe(0);
   });
 });
