@@ -32,6 +32,10 @@ Plans:
 **Depends on:** 041
 **Requirements:** DAG-01
 **Parallelizable:** yes with 042
+**Plans:** 1 plan
+
+Plans:
+- [ ] 043-01-PLAN.md — Implement detect_cycles with DFS 3-color marking, TDD with 8 cycle-detection tests
 
 #### Phase 044 — Frontier calculator (unblocked set per tick)
 **Goal:** `frontier(state)` — all IDLE nodes whose `blocks`/`data` predecessors are DONE.
