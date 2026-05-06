@@ -25,7 +25,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 116-01-PLAN.md — Register 14 skeleton teach-mode tools with ≤80-word descriptions + budget verification tests
+- [x] 116-01-PLAN.md — Register 15 skeleton @mcp.tool() functions with ≤80-token descriptions + tiktoken budget verification tests
 
 #### Phase 117 — Opencode `question` tool binding wrapper
 **Goal:** `ask_structured(questions: list[Question])` → typed answers via `client.question.ask(...)`.
