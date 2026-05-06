@@ -1,12 +1,12 @@
 ---
 gsd_state_version: 1.0
 status: v11 milestone complete
-last_updated: 2026-05-05T23:52:22.225Z
+last_updated: 2026-05-06T00:11:50.156Z
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-05 — Phase 115 (MCP server scaffold) complete. v13 first phase shipped. 11 / 27 milestones complete. v11 delivered 9 phases (097–105), all 6 mode-enforcement layers implemented. v12 (state-build MCP) and v13 (state-teach MCP) in progress — v13 Phase 115 complete.
+**Last updated:** 2026-05-06 — Phase 116 (15 skeleton tools) complete. v13: 2 phases shipped. 11 / 27 milestones complete. v11 delivered 9 phases (097–105), all 6 mode-enforcement layers implemented. v12 (state-build MCP) and v13 (state-teach MCP) in progress — v13 Phase 115 and Phase 116 complete.
 
 ---
 
@@ -28,10 +28,10 @@ last_updated: 2026-05-05T23:52:22.225Z
 **Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓, v9 ✓, v10 ✓)
 **Last shipped milestone:** v11 — Mode Enforcement — Shipped 2026-05-05
 **Active milestone:** v12 (state-build MCP) and v13 (state-teach MCP) — both in progress
-**Active phase:** None (Phase 115 complete — 1/1 plan done)
+**Active phase:** None (Phase 116 complete — 1/1 plan done)
 **Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement)
 
-**Phases complete:** 107 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 1)
+**Phases complete:** 108 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 2)
 **Milestones complete:** 11 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
