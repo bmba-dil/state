@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from state_teach.mcp import check_mode_gate, mcp
+from state_teach.mcp import SkeletonResponse, check_mode_gate, mcp
 
 
 def test_mcp_server_name() -> None:
@@ -91,3 +91,98 @@ def test_import_lint_clean() -> None:
         f"Found {len(result.violations)} cross-mode import violations:\n"
         + "\n".join(str(v) for v in result.violations)
     )
+
+
+# ── Phase 116: Tool registration and description budget tests ──
+
+
+def _count_words(text: str) -> int:
+    """Word-count heuristic matching state_cli.dev._count_tokens."""
+    return len(text.split())
+
+
+EXPECTED_TOOLS: list[str] = [
+    "coding_partner",
+    "concept_next",
+    "concept_teach",
+    "drill_prepare",
+    "drill_verify",
+    "learner_state",
+    "learning_verify",
+    "mental_model_show",
+    "mentor_scaffold",
+    "observation_record",
+    "review_session",
+    "style_edit",
+    "subject_author",
+    "subject_pick",
+]
+
+
+def test_all_tools_registered() -> None:
+    """All 14 teach-mode tools from MCP-T-03 are registered on the mcp instance."""
+    tools = mcp._tool_manager._tools
+    names = sorted(tools.keys())
+    assert names == sorted(EXPECTED_TOOLS), (
+        f"Expected {len(EXPECTED_TOOLS)} tools, got {len(names)}. "
+        f"Missing: {set(EXPECTED_TOOLS) - set(names)}. "
+        f"Extra: {set(names) - set(EXPECTED_TOOLS)}."
+    )
+
+
+def test_tool_description_token_budget() -> None:
+    """Every tool description is <=80 words and total <=1200 words."""
+    tools = mcp._tool_manager._tools
+    total = 0
+    failures: list[str] = []
+
+    for name in EXPECTED_TOOLS:
+        tool = tools[name]
+        description = getattr(tool, "description", "") or ""
+        words = _count_words(description)
+        total += words
+        if words > 80:
+            failures.append(f"{name}: {words} words (budget: 80)")
+        assert description, f"{name} has empty description"
+
+    assert not failures, (
+        f"{len(failures)} tool(s) exceed 80-word budget:\n" + "\n".join(failures)
+    )
+    assert total <= 1200, (
+        f"Total description words {total} exceeds 1200 budget "
+        f"by {total - 1200} words"
+    )
+
+
+def test_skeleton_tools_return_not_implemented() -> None:
+    """All 14 skeleton tools return SkeletonResponse with status='not_implemented'."""
+    tools = mcp._tool_manager._tools
+    for name in EXPECTED_TOOLS:
+        tool = tools[name]
+        result = tool.fn()
+        assert isinstance(result, SkeletonResponse), (
+            f"{name} returned {type(result).__name__}, expected SkeletonResponse"
+        )
+        assert result.tool == name, (
+            f"{name}: tool field is '{result.tool}', expected '{name}'"
+        )
+        assert result.status == "not_implemented", (
+            f"{name}: status is '{result.status}', expected 'not_implemented'"
+        )
+
+
+def test_mode_gate_still_works_after_tool_registration(tmp_path: Path) -> None:
+    """Phase 116 tool additions must not break the Phase 115 mode-gate."""
+    state_dir = tmp_path / ".state"
+    state_dir.mkdir()
+    mode_file = state_dir / "mode.json"
+
+    # Build mode must still block
+    mode_file.write_text(json.dumps({"mode": "build"}))
+    with pytest.raises(SystemExit) as exc_info:
+        check_mode_gate(tmp_path)
+    assert exc_info.value.code == 1
+
+    # Teach mode must still allow
+    mode_file.write_text(json.dumps({"mode": "teach"}))
+    check_mode_gate(tmp_path)  # no exception

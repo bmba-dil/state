@@ -8,11 +8,19 @@ import sys
 from pathlib import Path
 
 import structlog
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP  # noqa: F401 (Context: Phase 120 wiring)
+from pydantic import BaseModel
 
 from state_core.schema import validate_mode_config
 
 log = structlog.get_logger(__name__)
+
+
+class SkeletonResponse(BaseModel):
+    """Standard not-implemented response for skeleton teach-mode tools."""
+
+    tool: str
+    status: str = "not_implemented"
 
 
 def check_mode_gate(project_root: Path) -> None:
@@ -52,79 +60,97 @@ def check_mode_gate(project_root: Path) -> None:
 mcp = FastMCP("state-teach")
 
 
-@mcp.tool(description="Determine the next concept to teach from the learner's position in the subject concept tree.")
-async def concept_next() -> dict[str, str]:
-    return {"error": "not_implemented"}
+# ── Concept and drill tools ───────────────────────────────────
 
 
-@mcp.tool(description="Prepare a drill session with typing and modification exercises for the current concept.")
-async def drill_prepare() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def concept_next() -> SkeletonResponse:
+    """Load and display the next concept in the active teach-mode subject sequence"""
+    return SkeletonResponse(tool="concept_next")
 
 
-@mcp.tool(description="Verify the learner's drill session results and record performance metrics.")
-async def drill_verify() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def drill_prepare() -> SkeletonResponse:
+    """Generate a muscle-memory drill for the current concept"""
+    return SkeletonResponse(tool="drill_prepare")
 
 
-@mcp.tool(description="Teach one concept using a mode chosen from PRIMM, Scaffolded, Socratic, or Constructivist.")
-async def concept_teach() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def drill_verify() -> SkeletonResponse:
+    """Verify learner output against drill expected results"""
+    return SkeletonResponse(tool="drill_verify")
 
 
-@mcp.tool(description="Record a structured observation about the learner's behavior during a teaching session.")
-async def observation_record() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def concept_teach() -> SkeletonResponse:
+    """Teach one concept using the configured teaching mode"""
+    return SkeletonResponse(tool="concept_teach")
 
 
-@mcp.tool(description="Display the mental model projection showing the learner's mastery across all taught concepts.")
-async def mental_model_show() -> dict[str, str]:
-    return {"error": "not_implemented"}
+# ── Subject and observation tools ─────────────────────────────
 
 
-@mcp.tool(description="Select an active learning subject from the available subject catalog.")
-async def subject_pick() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def observation_record() -> SkeletonResponse:
+    """Record a structured observation about learner behavior"""
+    return SkeletonResponse(tool="observation_record")
 
 
-@mcp.tool(description="Create or modify a subject definition including its concept tree and prerequisite mappings.")
-async def subject_author() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def mental_model_show() -> SkeletonResponse:
+    """Display the current mental model projection for the active learner"""
+    return SkeletonResponse(tool="mental_model_show")
 
 
-@mcp.tool(description="Edit the teaching style including verbosity, pace, hint level, and feedback preferences.")
-async def style_edit() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def subject_pick() -> SkeletonResponse:
+    """Select or switch the active teach-mode subject"""
+    return SkeletonResponse(tool="subject_pick")
 
 
-@mcp.tool(description="Retrieve or update the learner's current state including progress, session data, and mode.")
-async def learner_state() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def subject_author() -> SkeletonResponse:
+    """Create or edit a teach-mode subject definition"""
+    return SkeletonResponse(tool="subject_author")
 
 
-@mcp.tool(description="Conduct a code review session with graduated hints for the learner's submitted code.")
-async def review_session() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def style_edit() -> SkeletonResponse:
+    """View or modify the active teaching style configuration"""
+    return SkeletonResponse(tool="style_edit")
 
 
-@mcp.tool(description="Guide the learner through creating a project skeleton with structured observations.")
-async def mentor_scaffold() -> dict[str, str]:
-    return {"error": "not_implemented"}
+# ── Session and verification tools ────────────────────────────
 
 
-@mcp.tool(description="Provide interactive coding mentorship with graduated hints when the learner is stuck.")
-async def coding_partner() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def learner_state() -> SkeletonResponse:
+    """Show current learner state and session history"""
+    return SkeletonResponse(tool="learner_state")
 
 
-@mcp.tool(description="Verify learning outcomes by checking the learner's comprehension against concept objectives.")
-async def learning_verify() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def review_session() -> SkeletonResponse:
+    """Run a scheduled review session for concepts approaching their review interval"""
+    return SkeletonResponse(tool="review_session")
 
 
-@mcp.tool(description="Check the learner's existing knowledge level on a topic with targeted assessment questions.")
-async def knowledge_check() -> dict[str, str]:
-    return {"error": "not_implemented"}
+@mcp.tool()
+def mentor_scaffold() -> SkeletonResponse:
+    """Guide the learner through creating a project skeleton file-by-file"""
+    return SkeletonResponse(tool="mentor_scaffold")
+
+
+@mcp.tool()
+def coding_partner() -> SkeletonResponse:
+    """Start an interactive coding partner session"""
+    return SkeletonResponse(tool="coding_partner")
+
+
+@mcp.tool()
+def learning_verify() -> SkeletonResponse:
+    """Run goal-backward verification on learner concept mastery"""
+    return SkeletonResponse(tool="learning_verify")
 
 
 if __name__ == "__main__":
