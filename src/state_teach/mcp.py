@@ -13,6 +13,10 @@ from pydantic import BaseModel
 
 from state_core.schema import validate_mode_config
 
+# Shared library wiring (Phase 120) — single import surface for all tools
+from state_core.auth import load_credentials as _load_credentials  # noqa: F401
+from state_core.events import SqliteEventStore as _SqliteEventStore  # noqa: F401
+
 log = structlog.get_logger(__name__)
 
 
