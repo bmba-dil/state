@@ -1,12 +1,12 @@
 ---
 gsd_state_version: 1.0
 status: v11 milestone complete
-last_updated: 2026-05-06T00:50:00.000Z
+last_updated: 2026-05-06T01:06:18.634Z
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-06 — Phase 121 (Mode-gate integration) complete. v13: 7 phases shipped (115, 116, 117, 118, 119, 120, 121). 11 / 27 milestones complete. v11 delivered 9 phases (097–105), all 6 mode-enforcement layers implemented. v12 (state-build MCP) and v13 (state-teach MCP) in progress.
+**Last updated:** 2026-05-06 — Phase 123 (Integration test) complete. v13 SHIPPED: all 9 phases (115–123). 12 / 27 milestones complete. v12 (state-build MCP) in progress.
 
 ---
 
@@ -28,17 +28,17 @@ last_updated: 2026-05-06T00:50:00.000Z
 **Current tier:** Tier 2 active (v1 ✓, v2 ✓, v3 ✓, v4 ✓, v5 ✓, v6 ✓, v7 ✓, v8 ✓, v9 ✓, v10 ✓)
 **Last shipped milestone:** v11 — Mode Enforcement — Shipped 2026-05-05
 **Active milestone:** v12 (state-build MCP) and v13 (state-teach MCP) — both in progress
-**Active phase:** Phase 121 (Mode-gate integration) — completed, plan 01/01 done
+**Active phase:** Phase 123 (Integration test) — completed, plan 01/01 done
 **Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement)
 
-**Phases complete:** 113 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 7)
-**Milestones complete:** 11 / 27
+**Phases complete:** 115 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 9)
+**Milestones complete:** 12 / 27
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
 
 ```
-[################............................................] 43%
+[##################..........................................] 44%
 ```
 
 ### Unblocked milestones (ready to start, parallel-safe)
@@ -53,7 +53,7 @@ v1–v11 are all shipped. Tier 2 (v6–v13) is the active tier with v12 and v13 
 Build critical path: A1 → A6 → A7 ✓ → A8 ✓ → A11 ✓ → A12 → A14 → A15 → A16 → A27
 Teach critical path: A1 → A6 → A7 ✓ → A8 ✓ → A11 ✓ → A13 → A18 → A20 → A22 → A27
 
-A1–A11 (= v1–v11) complete.
+A1–A11 (= v1–v11) complete. A13 (= v13) complete.
 
 ---
 
@@ -90,7 +90,8 @@ A1–A11 (= v1–v11) complete.
 | v9-milestone phases shipped | 9 / 9 |
 | v10-milestone phases shipped | 8 / 8 |
 | v11-milestone phases shipped | 9 / 9 |
-| Total project phases shipped | 107 / 260 |
+| v13-milestone phases shipped | 9 / 9 |
+| Total project phases shipped | 109 / 260 |
 | v1 commits | 67 |
 | v2 commits (since v1 tag) | 153 |
 | v6 commits (daemon dir) | 27 |
@@ -101,6 +102,7 @@ A1–A11 (= v1–v11) complete.
 | v2 timeline | 5 days (2026-04-28 → 2026-05-02) |
 
 ---
+| Phase 119-drill-prompt-token-cap P01 | 386 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -130,10 +132,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Next actions (when resuming or starting)
 
-1. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this.
-2. **v13 — state-teach MCP Server (skeleton):** Mode-gated MCP server (parallel-safe with v12).
-3. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
-4. **Optional cleanup:** v1–v11 shipped; old phase branches safe to clean.
+1. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this. Only remaining milestone in Tier 2.
+2. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
+3. **Optional cleanup:** v1–v11+v13 shipped; old phase branches safe to clean.
 
 ### v11 milestone delivered
 
@@ -141,6 +142,20 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 - CLI: `state mode init` and `state mode set` with atomic writes, subtree creation, SIGHUP hot-reload
 - 114-test cross-mode leakage regression suite
 - 9 phases, all 6 layers verified, MODE-01 through MODE-06 satisfied
+
+### v13 milestone delivered
+
+- `state-teach` MCP server (14 tools, all skeleton) — FastMCP stdio entry point with mode-gate check
+- 14 tools registered: concept_next, drill_prepare, drill_verify, concept_teach, observation_record, mental_model_show, subject_pick, subject_author, style_edit, learner_state, review_session, mentor_scaffold, coding_partner, learning_verify
+- Tool descriptions all ≤80 tokens (o200k_base encoding) — MCP-T-02 compliant
+- Question binding wrapper for opencode's question tool (MCP-T-04) — Pydantic Question/Option/Answer models
+- Structured Observation schema with 5 kinds and kind discriminator (MCP-T-05)
+- Token counting + cap enforcement with Hypothesis property tests (MCP-T-06)
+- Shared library wiring to state_core.auth and state_core.events (Phase 120)
+- Mode-gate integration: rejects build mode (exit 78), allows teach/both
+- Tool-budget CI assertion: `state dev tool-budget --server state-teach` green
+- Integration test suite: 10 tests, 4 classes (Registration, Invocation, ModeGate, Structural), all passing in 0.41s
+- 9 phases, MCP-T-01 through MCP-T-06 satisfied
 
 ### v10 milestone delivered
 
@@ -214,8 +229,8 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Tier boundary gates
 
-- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).** Tier 2 (v6–v13) active with v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓.
-- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓ — 2 left (v12, v13).**
+- **Tier 1 → Tier 2:** all of v1..v5 ship (foundation complete). **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).** Tier 2 (v6–v13) active with v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓ + v13 ✓.
+- **Tier 2 → Tier 3:** all of v6..v13 ship. **v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓ + v13 ✓ — 1 left (v12).**
 
 ---
 

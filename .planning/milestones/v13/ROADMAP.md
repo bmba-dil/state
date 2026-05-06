@@ -88,6 +88,10 @@ Plans:
 **Depends on:** 115..P8
 **Requirements:** (verifier)
 **Parallelizable:** no (final)
+**Plans:** 1 plan
+
+Plans:
+- [x] 123-01-PLAN.md — MCP server integration test suite (4 classes, 10 tests, all passing)
 
 ---
 
