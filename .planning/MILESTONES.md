@@ -1,5 +1,19 @@
 # MILESTONES: state
 
+## v11 Mode Enforcement (6 Layers) (Shipped: 2026-05-05)
+
+**Phases completed:** 9 phases, 9 plans
+**Tests:** 114 (cross-mode leakage regression suite)
+
+**Key accomplishments:**
+
+- 6-layer mode enforcement defense-in-depth: mode.json schema, directory presence, MCP registration toggle, plugin hook gates, daemon HTTP middleware, import-graph lint
+- CLI: `state mode init` and `state mode set` with atomic writes and SIGHUP hot-reload
+- MODE-01 through MODE-06 satisfied (all 6 v11 requirements)
+- All 16 P0 pitfalls closed (final P0-11/P0-12 mode enforcement holes sealed)
+
+---
+
 ## v10 TUI DAG Viewer (Shipped: 2026-05-05)
 
 **Phases completed:** 8 phases, 8 plans
@@ -17,33 +31,55 @@
 
 ---
 
-## v8 Plugin Server Hooks (Shipped: 2026-05-05)
+## v9 Plugin TUI Bundle (Shipped: 2026-05-05)
 
-**Phases completed:** 0 phases, 0 plans, 0 tasks
+**Phases completed:** 9 phases, 9 plans
+**Tests:** 344 passed (TUI) | **Bundle:** tui.js 51 KB
 
 **Key accomplishments:**
 
-- (none recorded)
+- Mode-aware sidebar with conditional render (build-progress vs teach-concept)
+- Build-progress sub-component with Step status colors + Slice DAG mini-view
+- Teach-concept sub-component with concept card + Kolb stage + mastery bar
+- Statusline: mode / scope / provider / session cost
+- Toast notifications: Slice completion, drill availability, auth refresh
+- Plugin install script for TUI + MCP auto-registration
+- TUI-01 through TUI-05 satisfied (all 5 v9 requirements)
+
+---
+
+## v8 Plugin Server Hooks (Shipped: 2026-05-05)
+
+**Phases completed:** 11/12 phases (073 event hook deferred)
+**Bundle:** dist/index.js 11.53 KB | **Hooks:** 10/11 implemented
+
+**Key accomplishments:**
+
+- `@state/opencode-plugin` TS package scaffolded (bun, typescript 5.8.2, @opencode-ai/plugin)
+- 10 server hooks implemented: chat.message, tool.execute.before, tool.execute.after, permission.ask, experimental.chat.system.transform, experimental.session.compacting, chat.params, chat.headers, command.execute.before, shell.env
+- Mode gating across all hooks (build/teach/kernel), cross-mode rejection
+- Model profile resolution (quality/balanced/budget) with thinking budget headers
+- `bun build` single-file bundling (11.53 KB), `install.sh` auto-registration
+- HOOK-01 through HOOK-04, HOOK-06 through HOOK-11 satisfied (10/11; HOOK-05 deferred — API gap)
 
 ---
 
 ## v7 Per-Session Worker (Shipped: 2026-05-05)
 
-**Phases completed:** 0 phases, 0 plans, 0 tasks
+**Phases completed:** 8 phases, 8 plans
+**Tests:** 52 (42 new + 10 augmented) | **Lines of Python:** ~1,200
 
 **Key accomplishments:**
 
-- (none recorded)
-
----
-
-## v5 DAG Scheduler (Shipped: 2026-05-05)
-
-**Phases completed:** 0 phases, 0 plans, 0 tasks
-
-**Key accomplishments:**
-
-- (none recorded)
+- Worker main module spawned by plugin shim with session ID registration
+- Daemon-worker bridge over HTTP+SSE on unix socket
+- Hot-state container (active Slice/Step/drill) synced from daemon
+- Hook event forwarding (HTTP POST to daemon) with retry on transient failure
+- Version handshake between plugin and daemon with compat range
+- Session tear-down on opencode close — flush pending events, clean exit
+- Structured per-worker-PID logging with redactor attached
+- Multi-session stress test (3 concurrent sessions, zero leaked workers)
+- WRK-10 through WRK-13 satisfied (all 4 v7 requirements)
 
 ---
 
@@ -109,7 +145,7 @@
 
 **Layout:** milestone-scoped
 **Total milestones:** 27
-**Total phases:** 256
+**Total phases:** 260
 **Created:** 2026-04-22 (migration from monolithic)
 
 ---
@@ -174,15 +210,15 @@
 |---|---|---|
 | v1 Event Store Foundation | 11/11 | **Complete** — Shipped 2026-04-26, merged to `main` 2026-04-28 |
 | v2 Auth Coverage (5 Methods + Multi-Cred) | 15/15 | **Complete** — Shipped 2026-05-03 |
-| v3 Provider Routing + Model Profiles | 0/9 | Not started |
-| v4 Worktree + Snapshot Service | 0/9 | Not started |
+| v3 Provider Routing + Model Profiles | 7/9 | **Complete** — Shipped 2026-05-04 (030/031 deferred) |
+| v4 Worktree + Snapshot Service | 9/9 | **Complete** — Shipped 2026-05-04 |
 | v5 DAG Scheduler | 9/9 | **Complete** — Shipped 2026-05-04 |
 | v6 State Daemon (HTTP + SSE + Mode Middleware) | 10/10 | **Complete** — Shipped 2026-05-04 |
-| v7 Per-Session Worker | 0/8 | Not started |
-| v8 Plugin Server Hooks (all 9) | 0/12 | Not started |
-| v9 Plugin TUI Bundle | 0/9 | Not started |
+| v7 Per-Session Worker | 8/8 | **Complete** — Shipped 2026-05-05 |
+| v8 Plugin Server Hooks (all 9) | 11/12 | **Complete** — Shipped 2026-05-05 (HOOK-05 deferred) |
+| v9 Plugin TUI Bundle | 9/9 | **Complete** — Shipped 2026-05-05 |
 | v10 TUI DAG Viewer | 8/8 | **Complete** — Shipped 2026-05-05 |
-| v11 Mode Enforcement (6 Layers) | 0/9 | Not started |
+| v11 Mode Enforcement (6 Layers) | 9/9 | **Complete** — Shipped 2026-05-05 |
 | v12 state-build MCP Server (skeleton) | 0/9 | Not started |
 | v13 state-teach MCP Server (skeleton) | 0/9 | Not started |
 | v14 Build Kernel: Step FSM + Verifiers | 0/11 | Not started |
@@ -199,6 +235,6 @@
 | v25 Migration & Import | 0/8 | Not started |
 | v26 Portability Shims | 0/8 | Not started |
 | v27 Release & Packaging | 0/10 | Not started |
-| **TOTAL** | **53/256** | — |
+| **TOTAL** | **106/260** | — |
 
 *See `_archived/ROADMAP.md` for the pre-migration monolithic roadmap including DAG, tier boundaries, and revision history.*

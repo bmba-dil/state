@@ -33,6 +33,10 @@ concurrency model.
 - ✓ **Provider routing via litellm with direct-Anthropic SDK escape hatch, OAuth stealth bypass guard, model profiles, cost accounting, thinking budget** — v3 (2026-05-04): 7 phases (023-029), 14 plans, 494 tests, 6/9 requirements satisfied (PRV-03/PRV-06/PRV-07 via implementation, PRV-09/PRV-10 deferred in 030/031).
 - ✓ **Per-Slice worktree with opencode-HTTP + pygit2 fallback, transactional bootstrap, orphan GC, Step/Slice snapshots, prefix-only revert CLI** — v4 (2026-05-04): 9 phases (032-040), 55 tests, 9/9 requirements satisfied.
 - ✓ **Opencode plugin server hooks (10/11) — `@state/opencode-plugin` TS package with chat.message, tool.execute.before/after, permission.ask, chat.system.transform, session.compacting, chat.params+headers, command.execute.before, shell.env hooks; bundled via bun build** — v8 (2026-05-05): 12 phases (068-079), 10/11 HOOK requirements satisfied (HOOK-05 event hook deferred — not in opencode Hooks type v1.14.35).
+- ✓ **Per-session worker bridging plugin and daemon over HTTP+SSE** — v7 (2026-05-05): 8 phases (060-067), 52 tests, WRK-10..WRK-13 satisfied.
+- ✓ **Plugin TUI extensions — mode-aware sidebar, build-progress, teach-concept, statusline, toasts, install script** — v9 (2026-05-05): 9 phases (080-088), 344 tests, TUI-01..TUI-05 satisfied.
+- ✓ **TUI DAG viewer — shared route with topological layout, shared status palette, filtering, SSE live updates, keyboard nav** — v10 (2026-05-05): 8 phases (089-096), DAG-VIEW-01..DAG-VIEW-04 satisfied.
+- ✓ **Mode enforcement (6 layers) — mode.json schema, directory presence, MCP registration toggle, plugin hook gates, daemon HTTP middleware, import-graph lint** — v11 (2026-05-05): 9 phases (097-105), all 6 layers verified.
 
 ### Active
 
@@ -43,7 +47,7 @@ concurrency model.
 - [ ] Two independent MCP servers: `state-build` and `state-teach`, registered
       independently in opencode
 - [~] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
-      hook shim and TUI extensions (sidebar, routes, dialogs) — server hooks shipped v8; TUI pending in v9
+      hook shim and TUI extensions (sidebar, routes, dialogs) — ✓ shipped (v8 server hooks + v9 TUI + v10 DAG viewer)
 - [ ] Four-tier planning hierarchy: **Arc → Phase → Slice → Step**, with the
       full discuss/plan/execute/verify cycle at Step level
 - [x] Per-Slice worktree isolation for concurrent work (opencode worktree
@@ -63,7 +67,7 @@ concurrency model.
 - [ ] AOL teaching-personality port and teaching-style config
 - [ ] Scaffolding-mentor and coding-partner flows as teach-mode Slices
 - [ ] Shared TUI extensions: build dashboard, teach dashboard, DAG viewer,
-      drill UI, statusline, toasts, gray-area decision dialog
+      drill UI, statusline, toasts, gray-area decision dialog — DAG viewer and core TUI shipped (v9, v10); dashboards pending
 - [ ] Verification infrastructure: goal-backward Step verifier,
       Slice/Phase/Arc rollup verifiers, AOL-style learning verifier,
       cross-tier integration verifier
@@ -215,11 +219,11 @@ This document evolves at phase transitions and milestone boundaries.
 
 ## Context (post-v2)
 
-**Codebase state (2026-05-03):**
-- ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests across `tests/`.
-- 784 tests passing (321 v1 baseline + 463 v2 net-new); zero regressions across milestone boundary.
-- Subsystems shipped: `state_core.events` (v1), `state_core.auth.{base,store,refresh,anthropic,gemini,antigravity,copilot,api_key,rotation}` (v2), `state_core.observability.redactor` (v2), `state_daemon.orchestrator` Step 0 + 0.5 wiring (v1+v2), `state.cli.auth.{login,logout,status}` (v2).
-- Tech-stack additions in v2: `filelock>=3.20.3` (vault + refresh locking), `google-auth>=2.35` + `google-auth-oauthlib>=1.2` (Gemini/Antigravity OAuth), `cryptography>=43.0` (vault), `structlog>=25.1` (root-logger redactor + canary).
+**Codebase state (2026-05-05):**
+- ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests.
+- 784+ tests passing (321 v1 baseline + 463 v2 net-new).
+- Subsystems shipped: `state_core.events` (v1), `state_core.auth` (v2), `state_core.providers` (v3), `state_core.worktree` (v4), `state_core.scheduler` (v5), `state_daemon` (v6), `state_worker` (v7), `@state/opencode-plugin` (v8/v9/v10), `state_core.mode` (v11).
+- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked.
 
 **Patterns proven by v2:**
 - Wave-based TDD execution (Wave 0 RED → Wave 1+ GREEN drilling) keeps each plan auditable; 463 net-new tests landed without flaking.
@@ -227,10 +231,11 @@ This document evolves at phase transitions and milestone boundaries.
 - Captured-header golden suites (per-provider, frozen via `state-inputs/*.md`) pin stealth fidelity in CI without requiring live OAuth in the test loop.
 - Decimal phases (022.1/.2/.3) are the right shape for milestone gap-closure: small, focused, plan-then-execute under the same milestone, no roadmap renumbering.
 
-**Known issues / debt going into v3:**
+**Known issues / debt going into v12:**
 - Retroactive SECURITY.md backfill for phases 011–022 + 022.1 + 022.2 (security_enforcement gate was added mid-milestone).
 - Manual release-time smoke gates (live OAuth login + refresh for Anthropic/Gemini/Antigravity/Copilot) are owned by user; not yet in CI.
-- VALIDATION.md not authored for the three gap-closure phases (acceptable per `plan-phase` Step 5.5).
+- v3 deferred phases 030/031 (cache-control e2e, provider parity matrix) — release-time smoke.
+- v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-05 — v3 (Provider Routing) and v4 (Worktree + Snapshot) tracking files updated to reflect 2026-05-04 squash-commit delivery. 6/27 milestones shipped (v1, v2, v3, v4, v5, v6). Tier 1 complete (5/5). Tier 2 started (v6 shipped).*
+*Last updated: 2026-05-05 — v11 (Mode Enforcement) shipped. 11/27 milestones complete (v1–v11). Tier 1 complete (5/5). Tier 2 active — v12/v13 remaining.*
