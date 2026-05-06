@@ -91,7 +91,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [x] 123-01-PLAN.md — MCP server integration test suite (4 classes, 10 tests, all passing)
+- [x] 123-01-PLAN.md — Enhanced MCP server integration test suite (6 classes, 16+ tests, MCP-T-01..06 coverage + protocol transport)
 
 ---
 
