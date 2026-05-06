@@ -72,6 +72,10 @@ Plans:
 **Depends on:** 097
 **Requirements:** MCP-T-01, MODE-03
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [x] 121-PLAN.md — Refactor state-teach mode gate to lightweight Phase 112 pattern (no structlog/schema deps, sys.exit(78))
 
 #### Phase 122 — Tool-budget CI assertion (shared helper w/ v12)
 **Goal:** `state dev tool-budget --server state-teach` green.
