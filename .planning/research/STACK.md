@@ -1,601 +1,421 @@
-# Stack Research: `state`
+# Stack Research: Build Hierarchy & Artifact System Architecture (Design Stack)
 
-**Domain:** Python agentic state-machine workflow engine + opencode plugin + MCP servers
-**Researched:** 2026-04-22
-**Overall Confidence:** HIGH
+**Domain:** Design-phase milestone — architecting the 4-tier product hierarchy (Arc → Phase → Slice → Step)
+**Researched:** 2026-05-06
+**Overall Confidence:** HIGH on modeling formats and schema tooling; MEDIUM on Mermaid C4 (marked experimental upstream)
 
-This document is prescriptive. Every Arc in the roadmap MUST reference libraries by the exact
-name + version floor defined here. Alternatives were considered and rejected; the rejection
-reasons are recorded so future contributors don't re-litigate.
+This document defines the **documentation and specification stack** for the v40-v50 design spike. Zero implementation — this is what we use to produce architecture documents, state machine specs, artifact schemas, and cross-reference rules.
 
 ---
 
-## Scope split
+## Scope
 
-`state` is two physically separate codebases that ship together:
+This stack covers the **design-phase tools** for:
 
-1. **Python daemon** (`state-daemon`, `state-build`, `state-teach`) — the engine, CLIs,
-   and two MCP servers. Python 3.12+.
-2. **Opencode plugin** (`@state/opencode-plugin`) — TypeScript/SolidJS, ~300-LOC hook shim
-   + TUI extensions. Bun-first, mirrors opencode conventions byte-for-byte.
+1. **State machine specification** — how we define the Arc/Phase/Slice/Step FSMs
+2. **Architecture diagrams** — how we visualize tiers, flows, and dependencies
+3. **Artifact schemas** — how we formally specify ARC.md, PHASE.md, SLICE.md, STEP.md, etc.
+4. **Cross-referencing rules** — how artifacts link to each other
+5. **Naming conventions** — how IDs, directories, and files are structured
+6. **Documentation formats** — what file formats we use for design artifacts
 
-Both are versioned and released together. The Python side is primary; the plugin is a thin
-client.
+This does NOT cover the runtime stack (that's in the original `STACK.md`). This is about how we author the design documents for tiers v41-v47 will implement.
 
 ---
 
-## Core Stack — Python daemon
+## Recommended Design Stack
 
-### Runtime & async
+### State Machine Specification
 
-| Technology | Version floor | Purpose | Why | Confidence |
-|------------|---------------|---------|-----|------------|
-| CPython | **3.12.0** | Runtime | Project mandate (learn-through-build). 3.12's `asyncio.TaskGroup`, `typing` improvements, f-string relaxations, and per-interpreter GIL groundwork all pay off | HIGH |
-| `asyncio` (stdlib) | 3.12 built-in | Concurrency | TaskGroup is now mature (3.11+), ExceptionGroup handling is clean, subprocess streaming is first-class. Matches the natural shape of MCP + HTTP + DAG scheduling | HIGH |
-| `anyio` | **≥4.8.0** | Structured-concurrency abstraction used by the MCP SDK | We don't adopt anyio as our primary concurrency API, but `mcp` transitively depends on it, so pin it for reproducibility and know the API if we need it | HIGH |
+| Format | Purpose | Why | Confidence |
+|--------|---------|-----|------------|
+| **Mermaid state diagrams** (`.md` embedded) | Visual state machine definitions for all four tiers | Zero-dependency text format; renders in VS Code, opencode, GitHub, any Markdown viewer. Supports composite states, concurrency forks, transitions with labels, guards, start/end states. The official state project docs can render these inline in architecture documents | HIGH — verified via mermaid.js.org docs v11.14.0 |
+| **Pydantic v2 `BaseModel`** (Python, `state_core/schema.py`) | Executable state machine validation contract | Same models that validate frontmatter at creation time ALSO serve as the design contract. `extra="forbid"` enforces strict schemas. `Literal` types define valid state names. Already in state's runtime stack (pydantic≥2.13.2) | HIGH — pydantic.dev docs; already proven in state v1-v11 event schemas |
+| **Python `Enum` + `Literal`** | State name enumerations, event type enumerations, guard condition lists | Type-safe, discoverable, auto-completing in IDEs. A single `class ArcState(str, Enum)` is both documentation AND importable runtime constant | HIGH — stdlib, zero deps |
 
-**Decision: asyncio over anyio/trio as the primary API.** The ecosystem (httpx, aiosqlite, mcp,
-litellm, anthropic SDK, pytest-asyncio) is all asyncio-native. AnyIO buys abstraction we don't
-need — we never plan to run on Trio. Exposing `asyncio.TaskGroup` directly is simpler pedagogy
-for a Python learner, too.
+**Pattern:** Each tier's state machine is specified in two artifacts:
+1. **Architecture doc** (`.planning/research/ARCHITECTURE.md` or dedicated per-tier doc) — Mermaid diagram + prose explanation of each transition
+2. **Schema module** (`state_core/schema.py` updates) — Pydantic models with `Literal` state names and transition event types
 
-### HTTP / networking
+**Example — Arc state machine (Mermaid + Pydantic):**
 
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `httpx` | **≥0.28.1** | Async HTTP client for opencode server, provider SDK escape hatches, MCP remote transports, OAuth callback server | Industry default; HTTP/2 support; shared client model reuses connections; both sync + async APIs; matches the Anthropic Python SDK's own transport choice |
-| `httpx-ws` | optional, ≥0.7 | WebSocket support over httpx if we need live opencode SSE multiplexing | Only pulled in if/when opencode bus SSE needs sustained duplex |
-
-**Pattern:** single `httpx.AsyncClient` owned by the daemon, injected via a `Deps` container
-into every caller. Litellm, the Anthropic SDK, and our opencode HTTP client all accept a
-user-provided httpx client — reuse the same one for connection pooling and unified proxy/TLS
-config.
-
-### IPC / daemon transport
-
-| Mechanism | Purpose | Why |
-|-----------|---------|-----|
-| Unix domain socket (macOS/Linux) + TCP loopback (Windows fallback) | Daemon ↔ CLI + daemon ↔ plugin | Low-latency, OS-enforced perms, zero deps. `asyncio.start_unix_server` exists in stdlib |
-| JSON-RPC 2.0 framing over the socket | Structured calls | Standard, easy to debug with `nc`, mirrors the MCP wire shape |
-| SSE (via httpx) | Plugin subscribing to daemon events | Mirrors how opencode exposes its bus; the plugin already knows the pattern |
-
-No new dependency is introduced here — asyncio + orjson cover it. We DO NOT adopt `grpcio`
-(overkill, schema overhead), `zmq` (new mental model), or `dbus` (Linux-only).
-
-### Data / serialization
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `pydantic` | **≥2.13.2** | All data models: events, plans, agent specs, config, CLI args | V2 is production-stable, V1 is EOL-adjacent. Rust core is fast enough that we don't dodge it for hot paths. Matches opencode's Zod ethos on the TS side |
-| `pydantic-settings` | ≥2.7 | Config loading with layered sources (env, file, CLI) | Native pydantic integration; replaces dynaconf/omegaconf bloat |
-| `orjson` | **≥3.11.8** | JSON for events, HTTP, SQLite columns | Fastest correct JSON; native datetime/UUID/dataclass; 10-20× stdlib json. Critical for event replay throughput |
-
-**NOT using:** `dataclasses-json`, `marshmallow`, `attrs`. Pydantic v2 owns this tier.
-
-### Event store / persistence
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `sqlite3` (stdlib) | 3.12 built-in | Schema + writer path (synchronous) for SQLite at `.state/events.sqlite` | Daemon owns all writes on a dedicated writer task; one WAL connection; simple and correct |
-| `aiosqlite` | **≥0.22.1** | Async reader path for dashboards, MCP tools, CLI queries | Shared-thread queue semantics match our "one writer, many readers" model; battle-tested; minimal surface |
-| `filelock` | **≥3.20.3** | Cross-process lock on `.state/daemon.lock` and `.state/auth.json` writes | TOCTOU-patched (CVE-2026-22701 fixed in 3.20.3); portable; async variant available; covers the rare case where two `state` CLIs race against the same `.state/` directory |
-
-**Pinning note:** we require filelock ≥3.20.3 specifically because of the SoftFileLock TOCTOU
-CVE fixed in that release. Do not float below this.
-
-**Migration strategy:** hand-rolled. A `.state/events.sqlite` `schema_migrations` table, plus a
-numbered-file pattern (`migrations/0001_init.sql`, `0002_*.sql`). We do NOT adopt Alembic — we
-are not SQLAlchemy users and don't want an ORM. Events are append-only; schema evolution is
-rare and small.
-
-**NOT using:** SQLAlchemy (too heavy), Tortoise ORM, SQLModel (drags SQLAlchemy), Alembic,
-Peewee. The event log is append-only JSON-blobs with indexed metadata columns; an ORM is a
-negative-value abstraction here.
-
-### MCP server (two servers: `state-build`, `state-teach`)
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `mcp` (official SDK) | **≥1.27.0** | MCP server protocol, tool/prompt/resource registration, transports | Official Anthropic SDK. Opencode bundles `@modelcontextprotocol/sdk` **1.27.1** (see `packages/opencode/package.json:111`), so version-floor parity avoids protocol drift |
-| `mcp[cli]` extras | same | `mcp dev` inspector + STDIO smoke test | Included in same package; zero extra cost |
-
-**Transports we support:**
-- **STDIO** — primary. Matches how opencode launches MCP servers (`type: "local", command: [...]`).
-- **Streamable HTTP** — for remote hosts (Claude Code over network, headless CI). Use the MCP
-  SDK's `streamable_http` transport, not the deprecated SSE transport.
-- **NOT SSE** — explicitly deprecated by MCP spec; only used for legacy-client fallback.
-
-**Compatibility claim:** opencode's MCP client is `@modelcontextprotocol/sdk@1.27.1`. Python
-SDK `mcp@1.27.0+` speaks the same protocol version — verified HIGH confidence.
-
-**Framework choice within MCP SDK:** we use the `FastMCP` decorator-based server in the
-`mcp` package for the build and teach servers. It is the ergonomic layer bundled with the
-official SDK; no extra `fastmcp` third-party package is needed (do NOT install the third-party
-`fastmcp` package on PyPI — use the one shipped inside `mcp`).
-
-### Provider routing
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `litellm` | **≥1.80.0** | Unified multi-provider routing, cost tracking, fallbacks, retries, streaming normalization | 100+ providers, supports Anthropic extended thinking via `thinking: {type: "adaptive" | "enabled", budget_tokens: N}`, native `cache_control: ephemeral` forwarding on Anthropic. The 1.80 floor is chosen to capture recent extended-thinking + context-management fixes; check actuals at install time |
-| `anthropic` | **≥0.80.0** | Direct SDK escape hatch for fine-grained Anthropic features | Extended thinking blocks arrive verbatim (no litellm normalization loss), OAuth token flow for Anthropic Pro/Max stealth (uses same creds format), fine-grained cache-control placement at arbitrary block positions, batching API, files API |
-| `google-genai` | ≥0.9 | Gemini CLI OAuth free-tier handshake | The Gemini CLI free-tier uses Google's OAuth; we need the token flow. Raw provider calls still go through litellm |
-| `openai` | ≥1.60 | Copilot device-code flow + OpenAI-compat routing helpers | Required for the GitHub Copilot OAuth path; most Copilot endpoints are OpenAI-compat |
-
-**Pattern:** litellm is the default path for every provider call. Our `ProviderRouter` resolves
-a call config `(provider_id, model_id, auth_method, features)` and either:
-1. **Default path** — `await litellm.acompletion(model="anthropic/...", ..., client=shared_httpx)`
-2. **Escape hatch** — if features include `anthropic_extended_thinking_with_cache_breakpoints`
-   at specific block positions, bypass litellm and call `anthropic.AsyncAnthropic(http_client=shared_httpx).messages.create(...)` directly.
-
-All SDKs accept a user-provided `httpx.AsyncClient`, so we share connection pooling across the
-whole daemon.
-
-**Auth methods covered (day-one requirement):**
-
-| Method | Library | Storage | Notes |
-|--------|---------|---------|-------|
-| Anthropic OAuth (Claude Pro/Max stealth) | Custom (follows `state-inputs/claude-oauth.md`) | `.state/auth.json` | Non-trivial — implement per the exact stealth spec; Anthropic SDK accepts the resulting bearer token |
-| Gemini CLI free-tier OAuth | `google-auth-oauthlib` + `google-auth` + `google-genai` | `.state/auth.json` | Standard Google OAuth; refresh-token flow |
-| Antigravity OAuth | Custom via `httpx` + OAuth2 device-code | `.state/auth.json` | Device-code flow; template from Copilot impl |
-| GitHub Copilot device-code | Custom via `httpx` | `.state/auth.json` | Device-code → token exchange; sub to OpenAI-compat endpoint |
-| Plain API keys | None | `.state/auth.json` (env var fallback) | For every provider litellm knows |
-
-**Auth libraries:**
-
-| Library | Version floor | Purpose |
-|---------|---------------|---------|
-| `google-auth` | ≥2.35 | Gemini OAuth token management |
-| `google-auth-oauthlib` | ≥1.2 | Gemini OAuth flow helpers |
-| `cryptography` | ≥43.0 | Token encryption at rest in `.state/auth.json` (chmod 600 is necessary but not sufficient on shared machines) |
-| `keyring` | optional ≥25 | OS keychain integration (opt-in; gated behind config flag) |
-
-### Git / worktree layer
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `pygit2` | **≥1.19.2** | Git operations + worktree lifecycle (add/list/lookup/prune) in the fallback path when opencode's worktree service is unavailable | libgit2 bindings; worktree API is stable (`Repository.add_worktree(name, path)`, `list_worktrees()`, `lookup_worktree(name)`, `Worktree.prune()`); wheels bundle libgit2 so no system install; supports Python 3.11–3.14 |
-
-**Hybrid strategy** (matches PROJECT.md "opencode worktree service preferred, pygit2 fallback"):
-
-- **When the host is opencode**: call `client.worktree.create/list/remove/reset` via the
-  opencode HTTP client. Zero filesystem-level Git code in `state` itself; opencode owns the
-  lifecycle, emits `worktree.ready`/`worktree.failed` bus events we subscribe to.
-- **When the host is Claude Code / Gemini CLI / Qwen Code / standalone**: `pygit2` covers
-  add_worktree / list / lookup / prune. Snapshots at step/slice boundaries use
-  `repo.create_blob_fromdisk` + a `state-snapshots` ref namespace (out-of-tree refs, no
-  pollution of user branches).
-
-**Rejected alternatives:**
-- **`GitPython`** — subprocess-based, slow, API quirks (detached object lifetimes). We don't
-  need its flexibility; `pygit2` is faster and cleaner.
-- **Shelling out to `git` directly** — portable but loses structured error handling; error
-  parsing from stderr is brittle; subprocess overhead in a hot worktree-creation path is
-  avoidable. We keep `asyncio.create_subprocess_exec("git", ...)` as a last-resort escape hatch
-  for exotic commands (e.g., `git sparse-checkout`) we may need later.
-
-### DAG / graph algorithms
-
-**Decision: pure Python, no networkx.**
-
-**Rationale:** our DAG is small (dozens to low hundreds of nodes per Arc), agent-shaped (edges
-carry type metadata, nodes are Pydantic models), and we need custom semantics (typed
-`depends_on`, concurrency budgets per node, partial-completion propagation). NetworkX's value
-is algorithm breadth for generic graphs — we use exactly three operations:
-
-1. Topological sort (Kahn's algorithm, ~30 lines of Python)
-2. Cycle detection during roadmap validation (DFS with color marking, ~20 lines)
-3. "Frontier" calculation — all nodes whose predecessors are complete (trivial)
-
-Importing networkx to use 1% of it drags in `scipy`-adjacent optional deps and adds a mental
-model (`nx.DiGraph`) that clashes with our Pydantic-native node objects. We keep the
-scheduler ~200 lines of pure Python in `state/core/scheduler.py` with unit tests.
-
-| Library | Version | Purpose |
-|---------|---------|---------|
-| (none) | — | DAG lives in hand-rolled `state/core/scheduler.py` |
-
-**If we ever outgrow it:** `networkx>=3.6` is the escape hatch. Not before.
-
-### Plugin architecture (extensibility within the Python daemon)
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `pluggy` | **≥1.6.0** | Hook system for extension points: custom verifiers, custom teach-mode modes, third-party mode kernels | Powers pytest and tox; hook ordering + early-return semantics; 38M weekly downloads; minimal surface |
-| `importlib.metadata` (stdlib) | 3.12 built-in | Entry-point discovery for pip-installed extensions | Standard discovery path |
-
-**Pattern:** define hook specs in `state/plugins/specs.py`:
+```mermaid
+stateDiagram-v2
+    [*] --> planned : state.arc.created
+    planned --> in_progress : first phase starts
+    in_progress --> in_progress : phase completes
+    in_progress --> shipped : all phases verified
+    planned --> abandoned : descoped
+    in_progress --> abandoned : descoped
+    shipped --> [*]
+    abandoned --> [*]
+```
 
 ```python
-hookspec = pluggy.HookspecMarker("state")
-hookimpl = pluggy.HookimplMarker("state")
+class ArcState(str, Enum):
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    SHIPPED = "shipped"
+    ABANDONED = "abandoned"
 
-class StateHookSpec:
-    @hookspec
-    def verify_slice(self, slice: Slice, context: VerifyContext) -> VerifyResult | None: ...
-    @hookspec
-    def teach_mode_observe(self, event: Event, state: LearnerState) -> None: ...
-    @hookspec(firstresult=True)
-    def route_gray_area(self, decision: GrayAreaDecision) -> Decision | None: ...
+class ArcEvent(str, Enum):
+    CREATED = "state.arc.created"
+    RETIRED = "state.arc.retired"
+    UPDATED = "state.arc.updated"
+
+class ArcFrontmatter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str                          # arc-001, auth-system, etc.
+    title: str                       # Human-readable name
+    status: ArcState
+    goal: str
+    success_criteria: list[str]
+    depends_on: list[str] = []       # Other arc IDs
+    phases: list[str] = []           # Phase IDs
+    opencode_surface: list[str] = [] # Extension surface paths
 ```
 
-Third parties publish `state-plugin-foo` on PyPI with an entry point
-`state.plugins = foo:plugin_module`. The daemon discovers + loads on startup.
+### Architecture Diagrams
 
-**NOT using:** `stevedore` (OpenStack-flavored, heavy), custom scanner (reinventing pluggy).
+| Format | Purpose | Why | Confidence |
+|--------|---------|-----|------------|
+| **Mermaid C4 diagrams** (`C4Context`, `C4Container`, `C4Component`) | Visualizing the 4-tier hierarchy as a C4 model | C4's four levels (Context → Container → Component → Code) map naturally to Arc → Phase → Slice → Step. Mermaid's C4 syntax is compatible with C4-PlantUML; supports System Context, Container, Component, Dynamic, Deployment diagrams | MEDIUM — Mermaid docs mark C4 as "experimental 🦺⚠️"; syntax is stable enough for design docs but may evolve |
+| **Mermaid flowcharts** | Directory tree layouts, data flow, dependency graphs | Standard flowchart syntax; good for showing `.state/build/` tree structure, event flow, dependency DAGs | HIGH — mature, stable |
+| **Mermaid class diagrams** | Pydantic model relationships, artifact taxonomy | Shows inheritance, composition, associations between schema models | HIGH — stable |
 
----
+**Decision: Mermaid over Structurizr DSL/PlantUML for architecture diagrams.**
 
-## Core Stack — Opencode plugin (`@state/opencode-plugin`)
+Rationale:
+- **Structurizr DSL** is powerful but Java-based; its toolchain requires a JVM or Docker. The DSL is a custom grammar — another thing for contributors to learn. Export to Mermaid is supported but adds a build step.
+- **PlantUML** requires a JVM or server-side renderer. Not universally viewable in VS Code without extensions.
+- **Mermaid** renders natively in: VS Code (built-in), opencode, GitHub, GitLab, Notion, Obsidian. Zero toolchain. The C4 diagram syntax (even if experimental) is sufficient for design-phase documentation.
 
-**Rule: mirror opencode's conventions exactly.** Read directly from
-`state-inputs/opencode/packages/plugin/package.json` and the root `package.json` — those are the
-source of truth. We pin the exact same catalog versions opencode itself uses, because the plugin
-is loaded into opencode's runtime.
+**Fallback:** If Mermaid C4 proves insufficient, render C4 diagrams via Structurizr DSL and export to Mermaid/PNG. The DSL files live in `.planning/architecture/` and are regenerated as needed. But for v40, Mermaid alone is sufficient.
 
-### Runtime & packaging
+### Artifact Schema Specification
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| **Bun** | **1.3.13** (exact match) | Primary dev runtime, test runner, package manager | opencode's `packageManager: "bun@1.3.13"` (root `package.json:7`). Plugin dev uses `bun dev` equivalent. Deno/Node work is in-progress for opentui but bun is authoritative today |
-| **TypeScript** | **5.8.2** (match catalog) | Language | opencode catalog pins `typescript: "5.8.2"` |
-| `@tsconfig/node22` | **22.0.2** | tsconfig base | Plugin package extends this — matches opencode plugin's own `tsconfig` pattern |
-| `@types/node` | **22.13.9** | Node type defs | Catalog version |
-| `@types/bun` | **1.3.12** | Bun type defs | Catalog version |
-| Node target | ESM module, `"module": "preserve"`, `"moduleResolution": "bundler"` | Build config | Matches `@opencode-ai/plugin` tsconfig exactly |
+| Format | Purpose | Why | Confidence |
+|--------|---------|-----|------------|
+| **Pydantic v2 `BaseModel`** with `extra="forbid"` | Formal artifact schemas | The exact same models that validate frontmatter at creation time serve as the design contract. `model_json_schema()` emits JSON Schema for cross-language interoperability. `model_dump()` serializes. Fields are typed with Python annotations — self-documenting. | HIGH — already proven in state's event schemas |
+| **JSON Schema** (emitted from Pydantic) | Cross-language schema sharing | Pydantic's `model_json_schema()` output is standard JSON Schema Draft 2020-12. Useful for generating OpenAPI docs, TS type stubs, or validation in opencode plugin. Not authored directly — always generated. | HIGH — Pydantic v2 JSON Schema support is mature |
+| **YAML frontmatter** (Markdown `---` delimiters) | Human-readable artifact metadata | GSD convention carried forward. Every `.md` artifact (ARC.md, PHASE.md, SLICE.md, STEP.md, etc.) has a YAML frontmatter block validated by Pydantic. | HIGH — already used by GSD; proven in state's existing `.planning/` convention |
 
-### Plugin runtime deps (mirror `@opencode-ai/plugin` peerDependencies)
+**Artifact schema pattern — every artifact has:**
 
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `@opencode-ai/plugin` | workspace peer, **≥1.14.20** | Plugin types + Hooks interface | Our plugin exports a `PluginModule` + `TuiPluginModule`; types come from here. Opencode's v1.14.20 is the reference |
-| `@opencode-ai/sdk` | peer, **≥1.14.20** | `createOpencodeClient` for driving the server from the plugin | Used for programmatic session/tool/worktree control from hooks |
-| `effect` | **4.0.0-beta.48** (catalog match) | Effect system opencode uses pervasively | Our plugin consumes `Event`, `Config` etc. which are Effect-flavored Zod schemas; avoid version mismatch |
-| `zod` | **4.1.8** (catalog match) | Schema validation inside hooks | Same reason — shared types |
-| `@opentui/core` | **0.1.99** peer | TUI primitives | For any custom TUI slot/route |
-| `@opentui/solid` | **0.1.99** peer | SolidJS bindings for TUI | Build/teach dashboards, DAG viewer, drill UI written in SolidJS per opencode convention |
-| `solid-js` | **1.9.10** (catalog match) | UI framework | Non-negotiable — opencode TUI is SolidJS |
-
-### Plugin-specific deps
-
-| Library | Version floor | Purpose |
-|---------|---------------|---------|
-| `@modelcontextprotocol/sdk` (TS) | **≥1.27.1** | Register + manage the two `state-*` MCP servers (plugin auto-adds them to opencode config on first install) |
-| `ulid` | 3.0.1 (catalog match) | Event + session IDs; matches opencode's own ID format |
-| `remeda` | 2.26.0 (catalog match) | Functional helpers, matches opencode style |
-
-### Plugin dev tooling (mirror opencode)
-
-| Tool | Version | Purpose |
-|------|---------|---------|
-| `oxlint` | **1.60.0** | Linting — opencode uses oxlint, not ESLint |
-| `prettier` | **3.6.2** | Formatting, with `{ semi: false, printWidth: 120 }` to match opencode's config exactly |
-| `@typescript/native-preview` | 7.0.0-dev.20251207.1 | Fast typecheck via `tsgo --noEmit` — opencode plugin uses this |
-| `turbo` | 2.8.13 | Monorepo builds if we split plugin+sdk+types; optional for now |
-
-**Build command:** `tsc` (build plugin) + `bun build` (if bundling). Match
-`@opencode-ai/plugin`'s `"build": "tsc"` minimalism — no esbuild/rollup/vite ceremony.
-
-### Plugin scope — what lives in the TS side
-
-Per PROJECT.md constraints, the plugin is **bundled single package** (~300 LOC hook shim + TUI
-extensions). TS code is thin; all real logic lives in the Python daemon and the plugin
-round-trips through:
-
-1. The daemon's Unix socket / HTTP IPC (JSON-RPC)
-2. opencode's `createOpencodeClient` for reading state
-3. Registering the two MCP servers programmatically
-
-TS handles:
-- Hook wiring (translate opencode hook events → daemon RPC calls)
-- TUI slot/route/dialog registrations (sidebar, routes, drill UI, DAG viewer, statusline)
-- Auto-registration of MCP servers in `opencode.json` on first run
-- MCP server process supervision (start/stop/restart `state-build` and `state-teach`)
-
----
-
-## Testing stack (Python)
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `pytest` | **≥8.4.0** | Test runner | Industry default; `pytest-asyncio>=1.3` requires 8.4.0 minimum |
-| `pytest-asyncio` | **≥1.3.0** | Async test support | Latest 1.x stable; strict-mode event-loop management; Python 3.12 support |
-| `pytest-cov` | ≥6.0 | Coverage | Standard |
-| `hypothesis` | ≥6.120 | Property-based testing for event replay, DAG scheduler invariants, auth token parsing | Critical for the event store: "any sequence of events replays to the same projection" is a property, not a fixture |
-| `pytest-httpx` | ≥0.35 | Mock httpx in provider-routing tests | Same transport our production code uses; no wiremock ceremony |
-| `pytest-mock` | ≥3.14 | Convenience wrapper on `unittest.mock` | Standard |
-| `freezegun` | ≥1.5 | Freeze time in event-ordering tests | Event timestamps are load-bearing in replay |
-| `pytest-xdist` | ≥3.6 | Parallel test execution | Helps on the full E2E matrix |
-| `trio` | — | NOT USED | We're asyncio-only |
-
-### Opencode E2E tests
-
-- Spawn a real `opencode` binary via `bun` in a pytest fixture (the binary is pinned in
-  `resources/opencode-version.txt`), register the plugin via a test-scope config directory,
-  drive sessions via `OpencodeClient`.
-- Tests live in `tests/e2e_opencode/`; marked `@pytest.mark.e2e` and excluded from default run.
-- TS side uses `bun test` for the plugin unit tests (hook translation correctness).
-
-### Provider parity matrix
-
-- `tests/provider_parity/` — for each provider, run the same 10 reference prompts through
-  `ProviderRouter`, snapshot the normalized output, diff. Hypothesis-generated prompt set
-  fuzzes the cache-control and extended-thinking paths.
-
----
-
-## Packaging
-
-### Build backend — `uv_build`
-
-| Tool | Version floor | Purpose | Why |
-|------|---------------|---------|-----|
-| `uv` | **≥0.5.0** | Package manager, installer, lockfile (`uv.lock`), virtualenv | Default for new projects in 2026; 10–100× faster than pip+venv; first-class build backend; lockfile is reproducible across Linux/macOS/Windows |
-| `uv_build` | bundled with `uv` | `[build-system]` backend | Now the default `uv init` backend (stable July 2025); zero extra install; picks up `pyproject.toml` naturally |
-| `hatchling` | ≥1.27 (fallback only) | Alternative build backend if we need build scripts or vendored C deps | If `uv_build` hits a limitation (e.g., custom C extension for the auth crypto layer), drop to hatchling without changing consumers |
-
-**pyproject layout:**
-
-```toml
-[project]
-name = "state"
-version = "0.1.0"
-requires-python = ">=3.12"
-dependencies = [
-    "mcp>=1.27.0",
-    "litellm>=1.80.0",
-    "anthropic>=0.80.0",
-    "httpx>=0.28.1",
-    "pydantic>=2.13.2",
-    "pydantic-settings>=2.7",
-    "orjson>=3.11.8",
-    "aiosqlite>=0.22.1",
-    "filelock>=3.20.3",
-    "pluggy>=1.6.0",
-    "pygit2>=1.19.2",
-    "google-auth>=2.35",
-    "google-auth-oauthlib>=1.2",
-    "google-genai>=0.9",
-    "openai>=1.60",
-    "cryptography>=43.0",
-    "structlog>=25.1",
-    "rich>=13.9",
-    "typer>=0.15",
-]
-
-[build-system]
-requires = ["uv_build>=0.5"]
-build-backend = "uv_build"
+```python
+# Design contract (lives in state_core/schema.py, v40 milestone)
+class ArcManifest(BaseModel):
+    """Full schema for ARC.md frontmatter."""
+    model_config = ConfigDict(extra="forbid")
+    id: ArcId                       # arc-001 or slug
+    title: str                      # max 120 chars
+    status: ArcState
+    goal: str
+    success_criteria: list[str]
+    depends_on: list[ArcId] = []
+    phases: list[PhaseId] = []
+    opencode_surface: list[str] = []
+    created_at: datetime
+    updated_at: datetime
 ```
 
-**Installer UX:** `uvx state install` (recommended) or `pipx install state`. Both are
-single-command. The installer detects opencode, offers to register the plugin + MCP servers
-automatically.
-
-### CLI framework
-
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `typer` | **≥0.15** | CLI (`state`, `state-build`, `state-teach`) | Type-hint-driven, built on click, plays well with pydantic; matches the "learn Python through types" ethos |
-| `rich` | **≥13.9** | Terminal output (tables, progress, tracebacks) | Ubiquitous; Typer uses it; zero config |
-
-**NOT using:** `click` directly (Typer is strictly better for typed CLIs), `argparse`
-(learner-hostile), `fire` (magic, surprising).
-
+```markdown
+<!-- ARC.md example -->
 ---
-
-## Development tooling
-
-| Tool | Version floor | Purpose | Why |
-|------|---------------|---------|-----|
-| `ruff` | **≥0.9.0** | Linter + formatter (replaces Black, isort, flake8, pyupgrade) | 10–100× faster than Black+flake8; 900+ rules; Apache Airflow, FastAPI, pandas, pydantic all use it; one config file |
-| `mypy` | **≥1.14** | Type checker | Still the standard; ty (Astral's upcoming checker) not stable enough yet |
-| `pre-commit` | ≥4.0 | Git hooks (ruff, mypy, prettier for TS) | Standard |
-| `basedpyright` | optional ≥1.27 | Alternative type checker with better inference | Reserved for power debugging; not default |
-
-**NOT using:** Black (ruff format replaces it), isort (ruff replaces it), flake8 (ruff
-replaces it), pyright (mypy has better ecosystem docs for a learner).
-
-`pyproject.toml` carries all config — no `.ruff.toml`, `setup.cfg`, `tox.ini` scatter.
-
+id: arc-001
+title: Auth System Overhaul
+status: planned
+goal: Full 5-method auth with OAuth stealth and token refresh
+success_criteria:
+  - All 5 auth methods ship day one
+  - Anthropic OAuth matches claude-oauth.md byte-for-byte
+depends_on: []
+phases:
+  - arc-001-phase-001
+  - arc-001-phase-002
+opencode_surface:
+  - packages/opencode/src/auth/
+created_at: 2026-05-06T00:00:00Z
+updated_at: 2026-05-06T00:00:00Z
 ---
+# Auth System Overhaul
+...
+```
 
-## Observability
+### Cross-Referencing System
 
-Event replay is load-bearing in both modes. We need logs that join up with events.
+| Mechanism | Purpose | Why | Confidence |
+|-----------|---------|-----|------------|
+| **Frontmatter ID fields** (`id`, `depends_on`, `phases`, `parent_arc`) | Explicit cross-references in artifact metadata | Machine-parseable; validated by Pydantic at creation time; resolvable by the projector at verification time | HIGH |
+| **File path conventions** | Implicit cross-references via directory hierarchy | `arcs/{arc-id}/phases/{phase-id}/slices/{slice-id}/` — the path IS the relationship. No need to store parent references in every file | HIGH |
+| **Content-addressed hashes** (future, v42+) | Immutable references for snapshots | When an artifact is snapshotted, the SHA-256 hash becomes an immutable pointer. Used for verify-contract references (`STEP.md` → `PLAN.md` hash) | MEDIUM — deferred to quality pipeline milestone (v42) |
+| **Event IDs** (`event_id` in SQLite) | Audit-trail cross-references | Every artifact mutation is an event; the `event_id` links the artifact's current state back to the causal event sequence | MEDIUM — already in event store, but cross-reference semantics need formalizing in v40 |
 
-| Library | Version floor | Purpose | Why |
-|---------|---------------|---------|-----|
-| `structlog` | **≥25.1** | Structured logging; every log line is a dict, timestamp + event_id + session_id + slice_id | Structured-native; easy to pipe to JSON for collectors; separates dev-friendly renderer (Rich-styled) from production JSON renderer |
-| `rich` | ≥13.9 | Dev-mode log rendering | Already a dep; structlog integrates natively |
+**Decision: ID-based + path-based cross-references for v40. Content-hash references deferred to v42.**
 
-**OpenTelemetry: opt-in only, v2 phase.** We ship hooks but do not pin a tracer SDK day-one.
-Opencode itself uses `@effect/opentelemetry` heavily (see `opencode/package.json`), and the
-daemon can export OTLP traces later without a code rewrite. Adding OTLP now is premature
-optimization; Arc-level decision.
+Cross-reference format:
+- **Within same tier**: `depends_on: [arc-003, arc-007]` (by ID)
+- **Parent→Child**: Implicit via directory hierarchy. `ARC.md` lives in `arcs/{arc-id}/`; its phases live in `arcs/{arc-id}/phases/`. The `phases` frontmatter field is a cache, not the source of truth.
+- **Child→Parent**: Implicit via path. A `SLICE.md` at `arcs/arc-001/phases/phase-003/slices/slice-012/` knows its parent phase and grandparent arc from the path.
+- **Cross-tier dependencies**: `depends_on: [{arc: arc-001, phase: phase-003, slice: slice-005}]` (fully qualified)
+- **Artifact→Artifact**: `STEP.md` frontmatter references `plan: arcs/arc-001/phases/phase-003/slices/slice-005/steps/step-002/PLAN.md` (relative path)
 
-| Library (deferred) | Version floor | Purpose |
-|--------------------|---------------|---------|
-| `opentelemetry-sdk` | ≥1.30 | Tracer SDK (v2 phase) |
-| `opentelemetry-exporter-otlp` | ≥1.30 | OTLP exporter (v2 phase) |
-| `opentelemetry-instrumentation-httpx` | ≥0.55b | httpx auto-instrumentation (v2 phase) |
+### Naming Conventions
 
-**Event replay strategy for forensics:** events are the ground truth. Logs are supplementary.
-The event store (`events.sqlite`) + the structured log stream (one JSONL file per daemon
-session) together replay any execution. No APM dependency required for forensics.
+| Element | Format | Example | Rationale |
+|---------|--------|---------|-----------|
+| Arc ID | `arc-{NNN}` or `{slug}` | `arc-001`, `auth-system` | Machine-sortable numeric for ordering; optional slug for readability. Arc IDs are globally unique |
+| Phase ID | `{arc-id}-phase-{NNN}` | `arc-001-phase-003` | Scoped to parent arc; no global uniqueness required |
+| Slice ID | `{phase-id}-slice-{NNN}` | `arc-001-phase-003-slice-012` | Scoped to parent phase |
+| Step ID | `{slice-id}-step-{NNN}` | `arc-001-phase-003-slice-012-step-004` | Scoped to parent slice |
+| Decimal insertion | `{parent-id}-{NNN}.{D}` | `arc-001-phase-003.1` | For urgent gap-closure work; inserted between `003` and `004` |
+| Directory | `arcs/{arc-id}/phases/{phase-id}/slices/{slice-id}/steps/{step-id}/` | Matches ID hierarchy exactly |
+| File | `{TYPE}.md` (ARC.md, PHASE.md, SLICE.md, STEP.md, PLAN.md, etc.) | Fixed names; the directory path disambiguates |
 
----
+**Decision: Numeric IDs for machine sortability, slug IDs as optional aliases.**
 
-## Version compatibility matrix
+Example: Both `arc-001` and `auth-system` refer to the same Arc. The numeric ID is the canonical identifier; the slug is a human-readable alias stored in the `slug` frontmatter field. The directory uses the numeric ID.
 
-| Pair | Constraint | Rationale |
-|------|------------|-----------|
-| `mcp>=1.27.0` ↔ opencode's `@modelcontextprotocol/sdk` `1.27.1` | Same protocol version (2025-06 revision) | HIGH confidence — both speak current MCP spec |
-| `litellm>=1.80.0` ↔ `anthropic>=0.80.0` | litellm uses anthropic SDK internally for some paths; keep both current | Avoid the "litellm requires older anthropic" drift |
-| `httpx>=0.28.1` ↔ `anthropic`, `openai`, `google-genai` | All three SDKs accept user-provided httpx client; 0.28+ is their minimum | Shared connection pool |
-| `pygit2>=1.19.2` ↔ `libgit2` 1.9.x | Binary wheels bundle libgit2; no system install | Works on macOS/Linux/Windows |
-| `pydantic>=2.13.2` ↔ `pydantic-settings>=2.7` | Pydantic v2 APIs only | V1 is frozen |
-| `pytest>=8.4.0` ↔ `pytest-asyncio>=1.3.0` | pytest-asyncio 1.3 bumped min pytest to 8.4 | Floor is hard |
-| Python 3.12+ ↔ all the above | 3.12 is the minimum per project mandate | No 3.11 back-compat |
-| opencode plugin catalog versions | Match opencode root `package.json` catalog **exactly** | Plugin runs inside opencode's runtime; drift causes silent mis-imports |
+This mirrors GSD's `NNN-slug` pattern but inverts: the ID is numeric-only for sort stability; the slug is metadata.
 
----
+### Documentation Format
 
-## What NOT to use (with reasons)
+| Format | Purpose | Why |
+|--------|---------|-----|
+| **Markdown** (`.md`) | All design documents, architecture docs, tier definitions, artifact schemas | Human-readable, diffable, renders everywhere (VS Code, GitHub, opencode). GSD convention carried forward |
+| **YAML frontmatter** | Structured metadata in every `.md` artifact | Machine-parseable, validated by Pydantic, familiar from GSD |
+| **Mermaid** (embedded in `.md`) | Diagrams (state machines, C4, flowcharts, class diagrams) | Text-based, version-controlled, renders in all markdown viewers |
+| **Pydantic models** (`.py`) | Formal schemas as Python code | The design contract that becomes the implementation contract. Lives in `state_core/schema.py` — updated during v40, executed during v41+ |
+| **JSON Schema** (generated, not authored) | Cross-language schema documentation | Generated from Pydantic via `model_json_schema()`; used for TS type generation in the opencode plugin |
+
+**What we do NOT use:**
 
 | Avoid | Why | Use instead |
 |-------|-----|-------------|
-| **Prefect / Dask / Airflow** | Data-pipeline engines; wrong shape for human/agent work; heavyweight. Project mandate rejects them | Pure-Python DAG scheduler |
-| **LangChain / LangGraph** | Over-engineered; abstraction layers over abstraction layers; moving target | Custom agent loop + litellm |
-| **pydantic-ai / smolagents** | Agent frameworks that hide the LLM loop; we want control | Custom loop, ~400 lines |
-| **SQLAlchemy / SQLModel / Tortoise ORM** | ORM for append-only event log is negative value | stdlib `sqlite3` + `aiosqlite` |
-| **Alembic** | Assumes SQLAlchemy; too heavy for our migration shape | Hand-rolled SQL migrations |
-| **GitPython** | Subprocess-based, slow, awkward API | `pygit2` with libgit2 wheels |
-| **NetworkX** | Importing a library to use 1% of it; doesn't match our Pydantic node shape | 200 LOC of pure Python scheduler |
-| **Textual / Rich Live** (for primary TUI) | We extend opencode's TUI; building our own is waste | opencode TUI plugin (SolidJS + OpenTUI). Textual reserved for standalone utilities only (per PROJECT.md) |
-| **FastAPI / uvicorn** (for primary daemon) | Overkill; opencode-plugin + MCP cover all external surfaces; adding an HTTP API is a v2 decision | asyncio Unix socket + JSON-RPC |
-| **jiti-style TS-at-runtime loading** | Python imports `.py` natively | `importlib.import_module` |
-| **Black, isort, flake8, pyupgrade** | Ruff does all of them 10–100× faster | Ruff (format + lint) |
-| **Poetry** | Slower than uv; lockfile format now lagging; second-class build-backend integration | `uv` + `uv_build` |
-| **setuptools** (for new greenfield) | Unopinionated; `pyproject.toml`-native alternatives are cleaner | `uv_build` (default) or `hatchling` (fallback) |
-| **AnyIO / Trio** as the primary API | asyncio is the ecosystem; no cross-backend need | asyncio directly |
-| **fastmcp** (third-party package on PyPI) | Different project from the official `FastMCP` inside `mcp` package; confusing naming | Use `mcp` package's bundled `FastMCP` |
-| **tiktoken** | OpenAI-specific; Anthropic/Gemini tokens are different; we let providers count | Provider-reported token usage from litellm responses |
+| XState v5 | JavaScript-only. Our runtime is Python 3.12+. XState is an execution engine, not a documentation format. For design docs, Mermaid state diagrams are sufficient. | Mermaid state diagrams + Pydantic models |
+| SCXML | W3C standard but XML-based. Verbose. No Python execution ecosystem (the spec's reference implementation is JS/Java). Academic formalism not needed for our 4-state FSM per tier. | Mermaid + Pydantic |
+| UML (enterprise tooling) | Requires specialized tools (Sparx EA, Visual Paradigm, MagicDraw). Not diffable. Not rendered in markdown. | Mermaid |
+| Structurizr DSL (as primary) | Java-based toolchain. Requires `structurizr-cli` to render. Adds a build step between authoring and viewing. Good for production-grade architecture docs; overkill for design-phase docs. | Mermaid C4 (export from Structurizr if Mermaid proves insufficient) |
+| Arc42 template | 12-section architecture template designed for enterprise systems with multiple stakeholders. Overly formal for a design-phase spike — we need 4 tier definitions and an artifact catalog, not a 150-page architecture document. | Targeted architecture docs in `.planning/research/` + milestone-specific docs |
+| adr-tools / log4brains | CLI tools for managing ADR numbering and generation. Our decisions live in `.planning/research/DECISIONS.md` and the milestone-specific HANDOFF.md; we don't need a dedicated ADR CLI. | Markdown files in `.planning/` + frontmatter tracking |
+| OpenAPI | Designed for REST API schemas. Using it for artifact schemas is square-peg-round-hole. Pydantic models + JSON Schema cover our needs. | Pydantic `BaseModel` |
+| PlantUML | Requires JVM or server-side renderer. Not natively viewable in VS Code/GitHub without extensions. | Mermaid (renders everywhere) |
 
 ---
 
-## Stack patterns by variant
+## Design Document Structure
 
-**If the host is opencode (primary):**
-- Use opencode worktree service (HTTP client calls, not pygit2)
-- Plugin registers MCP servers programmatically, wires hooks, adds TUI routes
-- Daemon talks to opencode server over HTTP (SSE bus subscription)
-- `chat.params` + `experimental.chat.system.transform` hooks handle all prompt shaping
+The v40-v50 design spike produces documents in this layout:
 
-**If the host is Claude Code / Gemini CLI / Qwen Code (deprioritized):**
-- MCP-only surface. No hook shim, no TUI extension, no bus subscription.
-- pygit2 handles worktree lifecycle locally.
-- The two MCP servers (`state-build`, `state-teach`) expose the full tool surface.
-- `.state/auth.json` first-run import from opencode's `auth.json` if present.
-
-**If standalone (no host):**
-- `state` CLI (Typer) drives the daemon directly.
-- pygit2 for all git ops.
-- No TUI — progress rendered via Rich in the terminal.
-
----
-
-## Installation
-
-```bash
-# Primary install path
-uvx state install
-# Detects opencode, offers plugin + MCP registration
-
-# Alternative
-pipx install state
-
-# Plugin (registered automatically by `state install`, or manually):
-#   adds to opencode config:
-#     mcp.state-build.command = ["state-build", "mcp"]
-#     mcp.state-teach.command = ["state-teach", "mcp"]
-#     plugin["@state/opencode-plugin"] — loaded from local clone or npm
-
-# Dev setup
-git clone https://github.com/thomas/state
-cd state
-uv sync                       # Python deps + dev tools
-bun install --cwd plugin      # Plugin deps (matches opencode bun-first convention)
-uv run pytest                 # Python tests
-bun test --cwd plugin         # TS tests
+```
+.planning/
+├── research/
+│   ├── STACK.md                          # This file — design stack
+│   ├── ARCHITECTURE.md                   # Updated with 4-tier architecture
+│   ├── SUMMARY.md                        # Research summary
+│   └── tiers/
+│       ├── ARC.md                        # Arc tier specification (states, events, artifacts, frontmatter)
+│       ├── PHASE.md                      # Phase tier specification
+│       ├── SLICE.md                      # Slice tier specification
+│       └── STEP.md                       # Step tier specification (full FSM, 7+ states)
+├── architecture/
+│   ├── hierarchy.mermaid                 # 4-tier C4 model (Context=Arc, Container=Phase, Component=Slice, Code=Step)
+│   ├── state-machines.mermaid            # All 4 tier FSMs
+│   ├── data-flow.mermaid                 # Event flow across tiers
+│   └── directory-tree.mermaid            # .state/build/ tree as flowchart
+├── schemas/
+│   ├── arc.py                            # ArcManifest, ArcState, ArcFrontmatter
+│   ├── phase.py                          # PhaseManifest, PhaseState, etc.
+│   ├── slice.py                          # SliceManifest
+│   ├── step.py                           # StepManifest (build) / StepManifest (teach)
+│   ├── artifacts.py                      # ArtifactType enum, ArtifactCatalog
+│   └── crossref.py                       # CrossReference, DependencyEdge
+├── conventions/
+│   ├── NAMING.md                         # ID formats, directory naming, decimal insertions
+│   ├── CROSSREF.md                       # Cross-reference rules, resolution algorithm
+│   └── FRONTMATTER.md                    # Frontmatter field reference for every artifact
+└── PROJECT.md                            # Updated with v40 decisions
 ```
 
 ---
 
-## Confidence assessment per recommendation
+## Pydantic Schema Pattern for All Tiers
 
-| Recommendation | Confidence | Source quality |
-|----------------|------------|----------------|
-| Python 3.12+ | HIGH | PROJECT.md mandate |
-| asyncio over anyio | HIGH | Ecosystem-wide verified |
-| `mcp>=1.27.0` | HIGH | PyPI, GitHub releases; opencode uses 1.27.1 on TS side (same spec) |
-| `litellm>=1.80` | HIGH (floor may float) | WebSearch + docs; exact floor reviewed at install time |
-| `anthropic>=0.80` escape hatch | HIGH | SDK docs + release notes |
-| `pygit2>=1.19.2` | HIGH | Official docs |
-| `pluggy>=1.6.0` | HIGH | PyPI + pytest-dev |
-| `pydantic>=2.13.2` | HIGH | PyPI + pydantic.dev announcements |
-| `orjson>=3.11.8` | HIGH | PyPI + changelog |
-| `aiosqlite>=0.22.1` | HIGH | PyPI |
-| `filelock>=3.20.3` (CVE floor) | HIGH | CVE-2026-22701 advisory |
-| `httpx>=0.28.1` | HIGH | encode/httpx |
-| Pure-Python DAG (no networkx) | HIGH | Architectural fit, consistent with PROJECT.md |
-| Opencode plugin catalog pins | HIGH | Direct read from opencode's `package.json` |
-| `uv` + `uv_build` | HIGH | Astral docs, 2026 consensus |
-| `ruff` (replacing Black/isort/flake8) | HIGH | Astral docs, industry adoption |
-| `structlog` + deferred OTel | MEDIUM | Common pattern; OTel deferral is an opinion |
-| Hand-rolled SQL migrations vs Alembic | MEDIUM | Defensible but biased toward simplicity |
+Every tier's artifact schema follows this pattern:
+
+```python
+from enum import Enum
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
+
+# ── State enumeration (the FSM states) ──
+class TierState(str, Enum):
+    """Valid states for this tier."""
+    ...
+
+# ── Event enumeration (what transitions the FSM) ──
+class TierEvent(str, Enum):
+    """Events that advance this tier's state machine."""
+    ...
+
+# ── Frontmatter schema (the artifact's YAML header) ──
+class TierFrontmatter(BaseModel):
+    """Schema for {TIER}.md frontmatter."""
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    title: str = Field(max_length=120)
+    status: TierState
+    # ... tier-specific fields ...
+    created_at: datetime
+    updated_at: datetime
+
+# ── Manifest (full artifact including body) ──
+class TierManifest(BaseModel):
+    """Full artifact: frontmatter + markdown body."""
+    frontmatter: TierFrontmatter
+    body: str  # Markdown content after the --- delimiter
+```
+
+**Design principle:** The Pydantic model IS the schema. No separate JSON Schema or YAML schema file. When a developer reads `state_core/schema.py`, they see the canonical definition. The JSON Schema is generated from it, not maintained separately.
+
+---
+
+## Mermaid Diagram Patterns
+
+### Pattern 1: Tier State Machine
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> planned : create command
+    planned --> in_progress : work begins
+    in_progress --> shipped : all children complete
+    planned --> abandoned : descoped
+    in_progress --> abandoned : descoped
+    shipped --> [*]
+    abandoned --> [*]
+
+    state in_progress {
+        [*] --> active
+        active --> blocked : dependency stalled
+        blocked --> active : dependency resolved
+        active --> [*]
+    }
+```
+
+### Pattern 2: C4 Hierarchy (experimental syntax)
+
+```mermaid
+C4Context
+    title Arc: Auth System (arc-001) — System Context
+
+    Person(user, "Developer", "Uses state to ship code")
+    System(arc_auth, "Auth Arc", "5-method auth system")
+    System_Ext(anthropic, "Anthropic API", "OAuth + inference")
+    
+    Rel(user, arc_auth, "Runs state commands")
+    Rel(arc_auth, anthropic, "Authenticates via OAuth")
+```
+
+### Pattern 3: Directory Tree
+
+```mermaid
+flowchart TD
+    root[".state/build/"]
+    root --> arcs["arcs/"]
+    arcs --> arc001["arc-001/"]
+    arc001 --> arcMD["ARC.md"]
+    arc001 --> phases["phases/"]
+    phases --> phase003["phase-003/"]
+    phase003 --> phaseMD["PHASE.md"]
+    phase003 --> slices["slices/"]
+    slices --> slice012["slice-012/"]
+    slice012 --> sliceMD["SLICE.md"]
+    slice012 --> steps["steps/"]
+    steps --> step004["step-004/"]
+    step004 --> stepMD["STEP.md"]
+    step004 --> planMD["PLAN.md"]
+```
+
+---
+
+## Tools for Authoring Design Documents
+
+| Tool | Purpose | Why |
+|------|---------|-----|
+| **VS Code + Mermaid extension** | Live preview of Mermaid diagrams while authoring | Already installed; preview updates on save |
+| **mermaid-cli** (`mmdc`) | Export diagrams to PNG/SVG for non-Markdown contexts | `npx -p @mermaid-js/mermaid-cli mmdc -i diagram.mermaid -o diagram.png` |
+| **Python REPL** | Test Pydantic schema models during design | `python3 -c "from state_core.schema import ArcFrontmatter; ArcFrontmatter.model_json_schema()"` |
+| **ruff / mypy** | Lint and type-check schema files | Already in dev toolchain |
+
+**Not needed:**
+- Stately Studio (XState visual editor) — XState is not our runtime
+- Structurizr CLI — unless Mermaid C4 proves insufficient
+- PlantUML server — Mermaid replaces it entirely
+- Any GUI modeling tool — text-based formats are diffable, reviewable, and survive context resets
+
+---
+
+## Version Compatibility
+
+| Pair | Constraint | Notes |
+|------|------------|-------|
+| Mermaid syntax | v11.14.0 | Latest stable at time of research. C4 diagrams marked experimental — pinning to current syntax in case of breaking changes |
+| Pydantic | ≥2.13.2 | Already in state's runtime stack. Using features stable since v2.0 (ConfigDict, extra="forbid", model_json_schema) |
+| Python | 3.12+ | Required for PEP 695 type parameter syntax (new generics), which we use in generic artifact base classes |
+| Markdown | CommonMark + GFM tables | Standard; renders everywhere |
+
+---
+
+## What We Rejected (with Reasons)
+
+| Rejected | Why | What We Use Instead |
+|----------|-----|---------------------|
+| **XState v5** | JavaScript runtime; no Python equivalent. XState is an execution engine, not a documentation format. Our state machines are simpler (4-7 states per tier), executed by a custom Python FSM, not by a JS interpreter. XState's visual editor (Stately Studio) is excellent but produces JS code, not Python. | Mermaid state diagrams (documentation) + Pydantic models (schema contract) |
+| **SCXML** | W3C standard (2015) but XML-based and verbose. Defines parallel states, history states, compound states — features we don't need (our tiers are simple linear FSMs with 4-7 states). No Python execution ecosystem. The Step FSM is the only complex one, and it's still simpler than a full Harel statechart. | Mermaid + Pydantic `Literal` state enums |
+| **Structurizr DSL** | Java-based tooling. Requires JVM or Docker for `structurizr-cli`. Powerful for production architecture docs but adds friction for a design-phase spike. The DSL grammar is another thing to learn. Mermaid C4 covers our needs for now. | Mermaid C4 diagrams (built-in to Mermaid v11) |
+| **Arc42** | 12-section template designed for enterprise architecture documentation. Overly formal for a design spike. We need 4 tier definitions and an artifact catalog, not chapters on "Runtime Environment" and "Cross-Cutting Concepts." | Targeted architecture docs per tier |
+| **adr-tools / log4brains** | CLI tools for ADR numbering/templating. Our decision tracking is already handled by GSD's `.planning/research/DECISIONS.md` + project-level Key Decisions table in PROJECT.md. Adding a dedicated ADR CLI is ceremony without value. | Markdown decisions log |
+| **OpenAPI / Swagger** | Designed for REST API specification. Using it for artifact schemas is a category error. Our artifacts are markdown files, not HTTP endpoints. | Pydantic `BaseModel` (emits JSON Schema if needed) |
+| **PlantUML** | Requires JVM. The PlantUML C4-PlantUML stdlib is mature but Mermaid's C4 support (while experimental) is sufficient for design docs and renders without a server. | Mermaid |
+| **JSON Schema (authored manually)** | Maintaining JSON Schema by hand diverges from the Pydantic models that actually validate at runtime. DRY violation. | Pydantic `model_json_schema()` (generated, not authored) |
+| **UML class/state diagrams (enterprise tools)** | Requires specialized tools (Sparx EA, Visual Paradigm). Not diffable. Can't embed in markdown. Breaks the "text-based, version-controlled" design constraint. | Mermaid class diagrams + state diagrams |
 
 ---
 
 ## Sources
 
-### Python libraries (version floors and capabilities)
+### Mermaid.js
+- [Mermaid State Diagrams — official docs v11.14.0](https://mermaid.js.org/syntax/stateDiagram.html) — composite states, concurrency, forks, transitions with guards
+- [Mermaid C4 Diagrams — official docs v11.14.0](https://mermaid.js.org/syntax/c4.html) — experimental, C4Context/C4Container/C4Component/C4Dynamic/C4Deployment
+- [Mermaid Live Editor](https://mermaid.live/edit) — interactive authoring
 
-- [MCP Python SDK on PyPI](https://pypi.org/project/mcp/) — 1.27.0, April 2026
-- [MCP Python SDK GitHub releases](https://github.com/modelcontextprotocol/python-sdk/releases)
-- [LiteLLM Anthropic provider docs](https://docs.litellm.ai/docs/providers/anthropic)
-- [LiteLLM prompt caching docs](https://docs.litellm.ai/docs/completion/prompt_caching)
-- [LiteLLM reasoning_content / extended thinking](https://docs.litellm.ai/docs/reasoning_content)
-- [Anthropic Python SDK on PyPI](https://pypi.org/project/anthropic/)
-- [Anthropic SDK GitHub releases](https://github.com/anthropics/anthropic-sdk-python/releases)
-- [Anthropic prompt caching docs](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
-- [pygit2 1.19.2 docs](https://www.pygit2.org/)
-- [pygit2 worktree docs](https://www.pygit2.org/worktree.html)
-- [pluggy on PyPI](https://pypi.org/project/pluggy/)
-- [aiosqlite on PyPI](https://pypi.org/project/aiosqlite/)
-- [Pydantic v2.13 release announcement](https://pydantic.dev/articles/pydantic-v2-12-release)
-- [Pydantic on PyPI](https://pypi.org/project/pydantic/)
-- [orjson 3.11.8 changelog](https://github.com/ijl/orjson/blob/master/CHANGELOG.md)
-- [orjson on PyPI](https://pypi.org/project/orjson/)
-- [httpx on PyPI](https://pypi.org/project/httpx/)
-- [NetworkX 3.6.1 topological_sort docs](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.dag.topological_sort.html)
-- [filelock changelog + CVE-2026-22701 advisory](https://py-filelock.readthedocs.io/en/latest/changelog.html)
-- [pytest-asyncio on PyPI](https://pypi.org/project/pytest-asyncio/)
-- [Ruff docs](https://docs.astral.sh/ruff/)
-- [uv build backend](https://docs.astral.sh/uv/concepts/build-backend/)
-- [uv project init](https://docs.astral.sh/uv/concepts/projects/init/)
-- [AnyIO why](https://anyio.readthedocs.io/en/stable/why.html)
-- [Python.org discussion: adopting anyio/trio patterns into asyncio](https://discuss.python.org/t/adopt-proven-anyio-trio-patterns-natively-into-asyncio-multi-release-roadmap/106067)
-- [structlog + OpenTelemetry integration guide](https://www.dash0.com/guides/python-logging-with-structlog)
+### XState / SCXML
+- [XState v5 — official docs](https://xstate.js.org/docs/) — JS state machine library; actor-based, SCXML-inspired
+- [SCXML W3C Recommendation 1 September 2015](https://www.w3.org/TR/scxml/) — reference state machine spec
 
-### Opencode source of truth
+### Structurizr / C4 Model
+- [Structurizr DSL documentation](https://docs.structurizr.com/dsl) — text-based C4 model DSL; Java-based
+- [C4 Model official site](https://c4model.com) — the conceptual model behind all C4 tooling
 
-- `state-inputs/opencode/package.json` (root) — catalog versions (bun 1.3.13, typescript 5.8.2,
-  effect 4.0.0-beta.48, zod 4.1.8, solid-js 1.9.10, @opentui/core and solid 0.1.99, oxlint
-  1.60.0, prettier 3.6.2, ulid 3.0.1, remeda 2.26.0, turbo 2.8.13, @tsconfig/node22 22.0.2)
-- `state-inputs/opencode/packages/opencode/package.json` — `@modelcontextprotocol/sdk@1.27.1`,
-  `@ai-sdk/anthropic@3.0.71`, `@ai-sdk/openai@3.0.53`, `@ai-sdk/google@3.0.63`, full provider
-  matrix
-- `state-inputs/opencode/packages/plugin/package.json` — plugin peer deps, devDeps,
-  `"build": "tsc"`, `"typecheck": "tsgo --noEmit"`, ESM module type
-- `state-inputs/opencode/packages/plugin/src/index.ts` — `Hooks` interface (the 14 hook types
-  we wire)
-- `state-inputs/opencode/packages/plugin/src/tui.ts` — `TuiPluginApi` surface (slots, routes,
-  dialogs, commands, keybinds)
-- `state-inputs/opencode-extension-surface.md` — full extension map
-- `state-inputs/opencode-integration-analysis.md` — integration ROI tiers
-- [@opencode-ai/plugin gist by rstacruz](https://gist.github.com/rstacruz/946d02757525c9a0f49b25e316fbe715) — plugin dev conventions
-- [OpenTUI](https://github.com/anomalyco/opentui) — bun-first terminal UI core
+### Pydantic
+- [Pydantic v2 Models — official docs](https://docs.pydantic.dev/latest/concepts/models/) — BaseModel, ConfigDict(extra="forbid"), model_json_schema()
+- [Pydantic v2 JSON Schema](https://docs.pydantic.dev/latest/concepts/json_schema/) — JSON Schema emission
 
-### Project mandate
+### Existing state codebase
+- `src/state_core/schema.py` — 34+ event types, existing Arc/Phase/Slice/Step event definitions
+- `src/state_build/kernel.py` — current StepMachine skeleton (defines existing states)
+- `.planning/research/ARCHITECTURE.md` — §5 (event taxonomy), §8 (build kernel internals)
+- `.planning/milestones/v40/HANDOFF.md` — v40 milestone scope, artifact catalog table, directory tree
 
-- `/Users/tmac/Projects/state/.planning/PROJECT.md` — cardinal rules, library locks,
-  rejected alternatives
-- `/Users/tmac/Projects/state/state-inputs/gsd-2pi-codebase-analysis/10-python-rebuild-mapping.md`
-- `/Users/tmac/Projects/state/state-inputs/gsd-2pi-codebase-analysis/11-architecture-discussion.md`
+### GSD heritage
+- `state-inputs/get-shit-done/bin/lib/artifacts.cjs` — canonical artifact registry (10 exact-match + 2 pattern-match)
+- `state-inputs/get-shit-done/bin/lib/frontmatter.cjs` — YAML frontmatter handling
+- `state-inputs/get-shit-done/bin/lib/state.cjs` — STATE.md operations
 
 ---
 
-*Stack research for: `state` — Python 3.12+ agentic state-machine workflow engine, extending
-opencode, portable via MCP to Claude Code / Gemini CLI / Qwen Code.*
-*Researched: 2026-04-22*
+*Stack research for: state v40 Build Hierarchy & Artifact System Architecture — design-phase documentation and specification tools.*
+*Researched: 2026-05-06*
+*Updated: This file replaces the original STACK.md's design-tooling section; runtime stack unchanged.*

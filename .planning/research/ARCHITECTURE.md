@@ -1,1102 +1,1037 @@
-# Architecture: `state` — Polyglot Agentic State-Machine Workflow Engine on opencode
+# Build Hierarchy & Artifact System Architecture
 
-**Domain:** Agentic workflow engine fused with adaptive-learning engine, primary host opencode
-**Researched:** 2026-04-22
-**Confidence:** HIGH on opencode surface (read directly); MEDIUM on teach-mode internals (AOL structure inferred from workflows + learner JSON); HIGH on auth (direct specs in claude-oauth.md and gsd2-auth-analysis.md)
+**Project:** `state` — v40 Design-Phase Milestone
+**Domain:** Four-tier product hierarchy (Arc → Phase → Slice → Step) integration with event-sourced state machine engine
+**Researched:** 2026-05-06
+**Confidence:** HIGH on event-store integration (code read directly); HIGH on scheduler/worktree integration (code read directly); MEDIUM on TUI visualization patterns (inferred from plugin structure); MEDIUM on MCP tool scoping (design choice)
 
 ---
 
 ## 0. Executive Summary
 
-`state` is split into **six physically distinct processes/artifacts** that cooperate through opencode's event bus, HTTP API, and SQLite event store:
+This document defines the **four-tier product hierarchy** and how it integrates with every existing subsystem in `state`. The hierarchy (Arc → Phase → Slice → Step) replaces GSD's two-tier milestone→phase model with a richer decomposition that separates scope, concurrency, and the discuss/plan/execute/verify cycle into distinct tiers.
 
-1. **`state-daemon`** — always-on Python user service (systemd / launchd). Owns `.state/events.sqlite`, runs the DAG scheduler, drives the build and teach kernels, serves the dashboard HTTP API even when opencode is closed.
-2. **`state-worker`** — per-opencode-session Python worker, spawned on demand by the plugin shim. Holds hot state for the active session's Arc/Phase; proxies HTTP between the plugin and the daemon.
-3. **`state-build`** — stdio MCP server exposing build-mode tools (plan, execute, verify, ship, etc.) to any MCP host. Shares a library with state-teach for auth/provider/event plumbing.
-4. **`state-teach`** — stdio MCP server exposing teach-mode tools (concept graph ops, drill prepare/verify, mental-model queries). Never registered alongside state-build in the same session (enforced by mode gate).
-5. **`@state/opencode-plugin`** — single TypeScript bundle carrying (a) the 9-hook server shim (~300 LOC) and (b) the SolidJS TUI extensions (sidebar, routes, dialogs, slots). Exports both a `PluginModule` (`server`) and a `TuiPluginModule` (`tui`).
-6. **On-disk artifacts** — `.state/` directory with `build/`, `teach/`, `events.sqlite`, `auth.json`, `mode.json`, `snapshots/`. Every state transition writes both an opencode `SyncEvent` and a row in `events.sqlite`.
+**The fundamental insight:** each tier is a **CQRS aggregate** with its own event types, state machine, projection, and on-disk artifacts. State flows upward: Step outcomes aggregate into Slice rollups, Slice rollups aggregate into Phase verification, Phase completion rolls into Arc retirement. The event store is the only source of truth at every tier.
 
-Everything else — kernels, verifiers, DAG scheduler, auth providers, litellm routing — are Python packages inside the daemon/worker, not separate processes.
+### Integration Points
 
----
+| Subsystem | How Hierarchy Integrates | What Changes |
+|-----------|------------------------|--------------|
+| **Event Store** (`events.py`) | Each tier is an aggregate; tier transitions emit typed events with aggregate cascade (e.g., `state.step.done` → daemon emits `state.slice.step_completed`) | New Arc/Phase/Slice aggregate types; composite events for rollup |
+| **CQRS Projector** (`projector.py`) | New projection handlers for arc/phase; projector rebuilds STATE.md files at each tier from events | `Arc` and `Phase` cache tables; STATE.md file projection (new) |
+| **DAG Scheduler** (`scheduler.py`) | Slices are the concurrency unit (existing); `depends_on` edges from SLICE.md frontmatter fed to scheduler; Arc/Phase nodes are scheduling containers | Scheduler already reads Step-level edges; extend to Slice-level edges and cross-Phase dependencies |
+| **Worktree** (`worktree.py`) | Per-Slice worktree (existing); one worktree per Slice, Steps execute serially within the Slice's worktree | No structural change; hierarchy clarifies ownership |
+| **On-Disk Layout** (`.state/build/`) | Hierarchical mirror: `arcs/{arc-id}/phases/{phase-id}/slices/{slice-id}/steps/{step-id}/` | Full redesign from flat current layout to nested tiers |
+| **MCP Tools** (`state-build`) | Tools scoped to tiers: Arc tools (roadmap, retire), Phase tools (verify-phase, audit-phase), Slice tools (ship-slice, revert-slice), Step tools (discuss, plan, execute, verify) | Tool naming convention `state_build__{tier}_{action}` |
+| **TUI** (`@state/opencode-plugin`) | Hierarchy tree in sidebar; DAG viewer shows all four tiers; statusline shows active path | Hierarchical rendering with expand/collapse per tier |
+| **STATE.md Consistency** | Projector rebuilds STATE.md at every tier from event stream — agents NEVER write STATE.md directly | New projector output; health validation detects drift |
 
-## 1. Component Topology
+### Critical Design Decisions
 
-### 1.1 Process & module diagram
+1. **Arc/Phase/Slice/Step are four independent CQRS aggregates**, not a single hierarchical document. Each has its own event stream (`aggregate_id = arc-01`, `aggregate_id = arc-01/phase-03`, etc.). Cross-tier relationships are encoded in event data (e.g., `state.phase.planned` carries `arc_id`).
 
-```
-┌─────────────────────────────── user machine ───────────────────────────────┐
-│                                                                            │
-│  ┌──────────────────────┐     ┌────────────────────────────────────────┐   │
-│  │   state-daemon       │     │           opencode process             │   │
-│  │  (user service)      │     │                                        │   │
-│  │                      │◄────┤  ┌──────────────────────────────────┐  │   │
-│  │  • DAG scheduler     │ HTTP│  │ @state/opencode-plugin (server)  │  │   │
-│  │  • event store       │ SSE │  │   9 hook callbacks → HTTP /rpc   │  │   │
-│  │  • build kernel      │─────┤  └──────────────────────────────────┘  │   │
-│  │  • teach kernel      │     │                                        │   │
-│  │  • auth manager      │     │  ┌──────────────────────────────────┐  │   │
-│  │  • provider router   │     │  │ @state/opencode-plugin (tui)     │  │   │
-│  │  • worktree service  │     │  │   sidebar / routes / dialogs     │  │   │
-│  │                      │     │  └──────────────────────────────────┘  │   │
-│  │  ┌──────────────┐    │     │                                        │   │
-│  │  │ state-worker │    │     │  built-in: task, todo, question,       │   │
-│  │  │ (per session)│────┼─────┤   permission, skill, snapshot, worktree│   │
-│  │  └──────────────┘    │     │                                        │   │
-│  │                      │     │  MCP clients ─────┐                    │   │
-│  └──────────────────────┘     └───────────────────┼────────────────────┘   │
-│           │                                       │                        │
-│           ▼                                       ▼                        │
-│  ┌────────────────────┐          ┌──────────────────────────┐              │
-│  │ .state/            │          │ state-build  (stdio MCP) │              │
-│  │  events.sqlite     │◄─────────│ state-teach  (stdio MCP) │              │
-│  │  auth.json         │  shared  │  (Python, mode-gated)    │              │
-│  │  mode.json         │  library └──────────────────────────┘              │
-│  │  build/ARC/...     │                                                    │
-│  │  teach/CONCEPT/... │                                                    │
-│  │  snapshots/        │                                                    │
-│  └────────────────────┘                                                    │
-└────────────────────────────────────────────────────────────────────────────┘
-```
+2. **The daemon emits composite events for cross-tier rollup.** When the last Step in a Slice reaches DONE, the daemon emits `state.slice.step_completed`. When the last Slice in a Phase reaches VERIFIED, the daemon emits `state.phase.slices_verified`. No agent code computes rollup — it's all projector-driven.
 
-### 1.2 Call/data flow between Python pieces
+3. **STATE.md at every tier is a projector artifact, not agent-written.** On daemon startup, the projector replays all events and rebuilds every STATE.md from scratch. Agents write STEP.md, PLAN.md, VERIFY.md — the projector writes STATE.md. This eliminates the GSD problem where agents miss updating tracking files.
 
-| Caller | Callee | Protocol | Purpose |
-|---|---|---|---|
-| plugin shim (TS) | state-worker | HTTP (loopback, authenticated) | hook event → kernel action |
-| state-worker | state-daemon | HTTP (loopback) | durable reads/writes, scheduler signals |
-| state-worker | opencode HTTP API | HTTP + SSE | subscribe to bus, drive sessions, control TUI |
-| state-daemon | opencode HTTP API | HTTP + SSE (when running) | reflect kernel state into SyncEvents |
-| state-daemon | .state/events.sqlite | aiosqlite + filelock | authoritative event log |
-| state-build (MCP) | state-daemon | HTTP loopback | read Arc/Phase/Slice state, emit events |
-| state-teach (MCP) | state-daemon | HTTP loopback | read concept graph, emit drill observations |
-| state-worker | state-build/teach (spawned) | stdio per MCP spec | dispatch mode-scoped tool calls |
+4. **Slices are the concurrency unit (unchanged).** Steps within a Slice execute serially within the Slice's worktree. Multiple Slices run concurrently across different worktrees, capped by `concurrency_cap`.
 
-**Key invariant:** `events.sqlite` is the single source of truth for planning state. Everything else is a projection or cache. The daemon is the only writer to planning tables; workers/MCP servers write through it.
-
-### 1.3 Library layout (Python packages)
-
-```
-state/
-├── state_core/            # shared: event store, auth, provider, config, schema
-│   ├── events.py          # SQLite + SyncEvent mirror
-│   ├── auth/              # 5-method auth (anthropic_oauth, gemini_cli, antigravity, copilot_device, api_key)
-│   ├── providers/         # litellm wrapper + direct anthropic SDK escape
-│   ├── scheduler.py       # pure-Python DAG scheduler
-│   ├── worktree.py        # opencode-preferred / pygit2-fallback abstraction
-│   ├── snapshot.py        # Step + Slice tier snapshot glue
-│   └── schema.py          # pydantic models for Arc/Phase/Slice/Step/Concept
-├── state_build/           # build-mode kernel (siloed)
-│   ├── kernel.py          # Step state machine (discuss/plan/execute/verify)
-│   ├── commands/          # ported GSD commands as Step workflows
-│   ├── verifiers/         # goal-backward + rollup verifiers
-│   └── mcp.py             # state-build MCP server entry
-├── state_teach/           # teach-mode kernel (siloed)
-│   ├── kernel.py          # Kolb-cycle state machine
-│   ├── concepts.py        # concept graph ops
-│   ├── drill.py           # drill engine (binds to opencode question tool)
-│   ├── mental_model.py    # event-sourced projection
-│   ├── personalities/     # AOL personality loaders
-│   └── mcp.py             # state-teach MCP server entry
-├── state_daemon/          # always-on service
-│   ├── server.py          # HTTP API (FastAPI/Starlette + uvicorn)
-│   ├── watchers.py        # .state/**, opencode SSE subscribers
-│   └── cli.py             # `state daemon start/stop/status`
-├── state_worker/          # per-session worker
-│   ├── main.py            # spawned by plugin shim
-│   └── bridge.py          # opencode HTTP client + state-daemon client
-└── state_cli/             # `state` top-level CLI (auth login, mode set, etc.)
-```
-
-**Physical mode silo:** `state_build/` and `state_teach/` never import each other. All shared logic lives in `state_core/`. This makes the "exclusive modes" rule a Python import-graph invariant that static analysis can enforce.
+5. **`depends_on` edges exist at both Slice and Step levels.** Slice-level edges define cross-Slice DAG within a Phase. Step-level edges define serial ordering within a Slice. Cross-Phase Slice dependencies are supported via fully-qualified Slice IDs.
 
 ---
 
-## 2. Opencode Hook Wiring (all 9 hooks → concrete behaviors)
+## 1. Tier Definitions & State Machines
 
-Every hook is implemented in `@state/opencode-plugin`'s `server` export. Each callback typically does: validate → translate payload → POST to state-worker → worker updates event store → returns mutated `output`.
+### 1.1 Arc State Machine
 
-| Hook | Input | Mode | State behavior |
-|---|---|---|---|
-| `chat.message` | sessionID, parts[] | both | **Prompt guard + state injection.** Parses message for `/state:*` intent, rejects cross-mode commands (build command in teach session), appends active Step/Concept ID hint as a text part for the LLM. Writes `state.message.received` sync event. |
-| `tool.execute.before` | tool, sessionID, callID → args | both | **Read-guard / workflow-guard.** Blocks writes outside the active Slice's worktree; blocks `task` spawn of non-allowed subagents; rewrites `read` args to resolve `.state/` paths. In teach mode, blocks `bash` on learner code except inside scaffold sandbox. Writes `state.tool.intercepted`. |
-| `tool.execute.after` | tool, callID, args → output | both | **Observation capture.** Teach mode: classify tool output (correct attempt, error, unclear) and feed to mental_model. Build mode: verify output against Step's `verify_contract`; auto-advance Step state if verify passes. Writes `state.tool.observed` with classified kind. |
-| `permission.ask` | Permission → status | both | **Auto-approve within scope.** Build: if edit path is inside current Slice's worktree AND Step is in `execute` state AND ruleset permits → `allow`. Teach: if edit is under `./learner-work/` AND scaffold allows → `allow`; otherwise forward. Writes `state.permission.decided`. |
-| `event` | generic bus event | both | **Universal observer.** State machine subscribes to `session.idle`, `worktree.ready`, `worktree.failed`, `question.replied`, `permission.replied`, `todo.updated`, `file.edited`, `mcp.tools.changed`. Each triggers a kernel transition (see §6, §8, §9). |
-| `experimental.chat.system.transform` | sessionID, model → system[] | both | **State injection.** Prepends mode banner (`MODE: build / Arc A3 / Phase 7 / Slice 2 / Step 17: execute`) + active artifact content (STEP.md frontmatter, verify contract, dependencies). Teach mode prepends active concept card + Kolb stage + teaching-personality preamble. |
-| `experimental.session.compacting` | sessionID → {context, prompt} | both | **Phase-aware compaction.** Injects "preserve these IDs and artifacts verbatim" into compaction prompt: active Step ID, last 3 verify results, open gray-area decisions, drill-question answers pending verification. |
-| `chat.params` | sessionID → temperature/topP/etc. | both | **Model profile resolver.** Reads Step's `model_profile` frontmatter (or Concept's teaching-style). Build: low-temp (0.2) for verify, mid (0.5) for execute, higher (0.8) for discuss. Teach: per-personality temperature (socratic-gadfly 0.9, patient-mentor 0.4). Also sets provider-specific options (e.g. Anthropic `thinking: { type: "enabled", budget_tokens: N }` for extended thinking). |
-| `command.execute.before` | command, arguments → parts[] | both | **Slash command expansion.** `/state:build:plan-phase 7` resolves to: prepend `.planning/PHASE.md` content + `.planning/STATE.md` + all child SLICE.md frontmatter + verify-contract. Teach equivalent pulls concept card + mastery history. |
-| `shell.env` | cwd, sessionID → env | both | **Environment injection.** Sets `STATE_MODE`, `STATE_ARC_ID`, `STATE_PHASE_ID`, `STATE_SLICE_ID`, `STATE_STEP_ID`, `STATE_WORKTREE`, `STATE_DAEMON_URL`, `STATE_AUTH_JSON`. Every bash call the LLM makes can cd/read-file against the active scope without guessing. |
+An Arc is a feature block / project branch containing many Phases. Think "the auth system" or "the plugin framework." It is the coarsest scoping container.
 
-**Mode enforcement:** hooks first consult `.state/mode.json`. If `mode == "teach"` and an incoming `tool.execute.before` is for a build-mode MCP tool (`mcp__state-build__*`), hook throws DeniedError. See §7 for the full enforcement story.
+```
+States:  planned → in_progress → shipped | abandoned
+
+  ┌──────────┐  create   ┌─────────────┐  last-phase-shipped  ┌──────────┐
+  │  planned  │─────────►│ in_progress  │───────────────────►│  shipped  │
+  └──────────┘           └─────────────┘                      └──────────┘
+       │                       │
+       │  abandon               │  abandon
+       ▼                       ▼
+  ┌──────────────┐
+  │  abandoned   │
+  └──────────────┘
+```
+
+**Events:**
+- `state.arc.created` → arc aggregate enters `planned`
+- `state.arc.retired` → arc transitions to `shipped` (when all phases complete)
+- `state.arc.updated` → frontmatter/scope change while in `planned` or `in_progress`
+
+**Transition guards:**
+- `planned → in_progress`: at least one child Phase is `planned`
+- `in_progress → shipped`: ALL child Phases are `shipped`
+- `* → abandoned`: explicit abandon command; all in-progress Phases also abandoned
+
+**Arc aggregate ID:** `arc-{id}` (e.g., `arc-01`, `arc-auth`)
+
+### 1.2 Phase State Machine
+
+A Phase owns multiple Slices and defines success criteria at the milestone level.
+
+```
+States:  planned → in_progress → verified → shipped | abandoned
+
+  ┌──────────┐  start   ┌─────────────┐  slices-verified  ┌──────────┐  complete  ┌──────────┐
+  │  planned  │────────►│ in_progress  │─────────────────►│ verified  │──────────►│  shipped  │
+  └──────────┘          └─────────────┘                    └──────────┘            └──────────┘
+       │                       │                                │
+       │  abandon               │  abandon                       │  abandon
+       ▼                       ▼                                ▼
+  ┌──────────────┐
+  │  abandoned   │
+  └──────────────┘
+```
+
+**Events:**
+- `state.phase.planned` → phase aggregate created, carries `arc_id`
+- `state.phase.started` → first Slice transitions to `in_progress`
+- `state.phase.slices_verified` → ALL child Slices are `shipped` (composite event, daemon-emitted)
+- `state.phase.verified` → manual verify-rollup passes (goes beyond Slice verification: cross-Slice integration, UAT, documentation)
+- `state.phase.completed` → phase transitions to `shipped`
+
+**Transition guards:**
+- `planned → in_progress`: at least one child Slice is `worktree_ready`
+- `in_progress → verified`: ALL child Slices are `shipped`
+- `verified → shipped`: `state.phase.verified` event with `passed: true`
+
+**Phase aggregate ID:** `{arc-id}/phase-{n}` (e.g., `arc-01/phase-03`) — hierarchical ID encodes parent Arc.
+
+### 1.3 Slice State Machine
+
+A Slice is the concurrency unit. One worktree per Slice. Owns multiple Steps (executed serially within the worktree).
+
+```
+States:  planned → worktree_ready → in_progress → shipped | reverted
+
+  ┌──────────┐  worktree-create  ┌────────────────┐  first-step  ┌─────────────┐
+  │  planned  │─────────────────►│ worktree_ready  │────────────►│ in_progress  │
+  └──────────┘                   └────────────────┘              └─────────────┘
+                                                                       │
+                                                              all-steps-done
+                                                                       │
+                                                                       ▼
+                                                                 ┌──────────┐  ship  ┌──────────────┐
+                                                                 │  verified │──────►│   shipped    │
+                                                                 └──────────┘       └──────────────┘
+                                                                       │
+                                                                       │ revert
+                                                                       ▼
+                                                                 ┌──────────────┐
+                                                                 │   reverted   │
+                                                                 └──────────────┘
+```
+
+**Events:**
+- `state.slice.planned` → Slice defined with its Step list
+- `state.slice.worktree_ready` → daemon created worktree (opencode HTTP or pygit2)
+- `state.slice.steps_completed` → ALL child Steps are `done` (composite event)
+- `state.slice.shipped` → worktree merged, snapshot tagged
+- `state.slice.reverted` → Slice worktree reset to last snapshot
+
+**Transition guards:**
+- `planned → worktree_ready`: worktree created successfully
+- `worktree_ready → in_progress`: first Step dispatched
+- `in_progress → verified`: ALL child Steps are `done`
+- `verified → shipped`: explicit ship command succeeds
+- `* → reverted`: explicit revert command; worktree preserved
+
+**Slice aggregate ID:** `{arc-id}/phase-{n}/slice-{n}` (e.g., `arc-01/phase-03/slice-12`)
+
+### 1.4 Step State Machine (existing, extended)
+
+The Step is the only tier that runs the full discuss → plan → execute → verify cycle. Steps within a Slice execute serially.
+
+```
+States:  idle → discussing → planning → executing → verifying → done | blocked | abandoned
+
+  ┌──────┐  start   ┌────────────┐  plan-accepted  ┌──────────┐  execute   ┌───────────┐
+  │ idle  │────────►│ discussing │───────────────►│ planning │──────────►│ executing │
+  └──────┘          └────────────┘                 └──────────┘            └───────────┘
+                         │                                                        │
+                         │ skip-to-plan                                           │ verify-start
+                         ▼                                                        ▼
+                    ┌──────────┐                                            ┌───────────┐
+                    │ planning │                                            │ verifying │
+                    └──────────┘                                            └───────────┘
+                                                                              │       │
+                                                                     pass ◄───┘       └──► fail
+                                                                      │                  │
+                                                                      ▼                  │
+                                                                ┌──────────┐    ┌───────────┐
+                                                                │   done   │    │ executing │
+                                                                └──────────┘    └───────────┘
+                                                                      │
+                                                                      │ blocked
+                                                                      ▼
+                                                                ┌──────────┐  unblock  ┌───────────┐
+                                                                │ blocked  │──────────►│ executing │
+                                                                └──────────┘            └───────────┘
+                                                                      │
+                                                                      │ abandon
+                                                                      ▼
+                                                                ┌──────────────┐
+                                                                │  abandoned   │
+                                                                └──────────────┘
+```
+
+**Events (10 existing, unchanged):**
+- `state.step.discussed` — approach decided
+- `state.step.planned` — STEP.md with verify_contract written
+- `state.step.executed` — code changes made
+- `state.step.verify_started` — verifier invoked
+- `state.step.verify_passed` — verification succeeded
+- `state.step.verify_failed` — verification failed, returns to executing
+- `state.step.advanced` — generic state advancement
+- `state.step.blocked` — blocked on external condition
+- `state.step.snapshotted` — snapshot taken
+- `state.step.reverted` — reverted to prior snapshot
+
+**Transition guards:**
+- `discussing → planning`: DISCUSS.md written, approach decided
+- `planning → executing`: PLAN.md written, verify_contract defined
+- `executing → verifying`: explicitly triggered by user/agent
+- `verifying → done`: all verify_contract items pass
+- `verifying → executing`: at least one verify_contract item fails
+- `* → blocked`: explicit block (e.g., depends_on predecessor failed)
+- `blocked → executing`: predecessor completed or manual unblock
+
+**Step aggregate ID:** `{arc-id}/phase-{n}/slice-{n}/step-{n}` (e.g., `arc-01/phase-03/slice-12/step-004`)
 
 ---
 
-## 3. TUI Extension Slots
+## 2. Event Store Integration
 
-`@state/opencode-plugin`'s `tui` export registers into opencode's TUI via `TuiPluginApi` (see `packages/plugin/src/tui.ts:449`). All JSX is SolidJS (the `@opentui/solid` binding opencode ships with).
+### 2.1 Aggregate Types (extending existing schema)
 
-| PROJECT.md feature | Opencode API | Slot / mechanism |
-|---|---|---|
-| **Sidebar: build progress** | `ui.Slot name="sidebar_content"` | SolidJS component subscribes to `state.session.*` + daemon SSE, renders active Arc/Phase/Slice tree with Step status (idle/discussing/planning/executing/verifying/done/blocked) |
-| **Sidebar: teach concept state** | same slot, mode-gated by `.state/mode.json` | Renders current concept card, Kolb stage, confidence bar, next-drill timer |
-| **Build dashboard** | `route.register({ name: "state.build.dashboard" })` | Full route at `/state/build/dashboard`. Burndown by Slice, verify-pass rate, active worktrees, DAG viz |
-| **Teach dashboard** | `route.register({ name: "state.teach.dashboard" })` | Concepts graph, mastery heatmap, confidence-over-time, mistake cluster |
-| **DAG viewer** | `route.register({ name: "state.dag" })` | Renders Arc/Phase/Slice/Step DAG with topological layout; click → focus in sidebar. Both modes use this. |
-| **Gray-area decision dialog** | `ui.DialogSelect` via `ui.dialog.replace(...)` | Triggered when a build-mode kernel hits an ambiguous branch. Options = structured decision set, `custom: true` for escape hatch. Persists to `state.decision.made` event. |
-| **Drill question dialog** | `ui.DialogSelect` OR direct `question.ask` through HTTP API | Preferred: teach kernel calls `client.question.ask(...)` so the answer flows through opencode's native `question.replied` bus event. Fallback: custom DialogSelect for multi-step drills with inline explanations. |
-| **Statusline (both modes)** | `ui.Slot name="sidebar_footer"` or `home_footer` | One-line mode + active scope + unblocked Step count. |
-| **Toasts** | `ui.toast(...)` | Phase transitions, verify pass/fail, concept mastery, auth refresh events. |
-| **Prompt hint** | `ui.Slot name="session_prompt_right"` | Shows model + token cost live + "Step N.m" indicator. |
-| **Custom commands** | `command.register(() => TuiCommand[])` | `/state:*` keybinds and quick-switch commands. |
-| **Prompt inject on drill** | `ui.Prompt`-replacement in drill route | During a drill, replace the session prompt input with a typed drill input that shows a timer and disables tool use. |
+Current `schema.py` defines `AggregateType = Literal["arc", "phase", "slice", "step", ...]`. The four tiers already exist as aggregate discriminators. What changes:
 
-**Key constraint:** TUI-side code does not import `state_build` or `state_teach` Python packages; it talks exclusively to `state-daemon` over HTTP + opencode's own event bus. This makes the TS bundle small and keeps the mode silo intact.
+1. **Arc and Phase aggregates gain cache tables** (currently only `steps`, `slices`, `concepts` are cached — see `projector.py:31`).
+2. **Composite events for cross-tier rollup** — daemon listens for terminal per-aggregate events and emits parent-tier composite events.
+3. **Event data payloads carry parent IDs** — every event's `data` dict includes the parent aggregate ID so projectors can maintain the hierarchy mapping.
 
----
+### 2.2 Composite Event Flow
 
-## 4. MCP Tool Surfaces
-
-Two servers, each a Python process spawned from `state_build.mcp` / `state_teach.mcp`. Both depend on `state_core` (auth, events, schema). Candidate tool inventories below — roadmap refines exact names.
-
-### 4.1 `state-build` tools
-
-Mapped to GSD's command catalogue (ported / redesigned / dropped per PROJECT.md):
-
-| Tool | GSD precedent | Behavior |
-|---|---|---|
-| `state_build__plan_phase` | `/gsd:plan-phase` | Produce PHASE.md + child SLICE.md drafts from Arc context; emits `state.phase.planned` |
-| `state_build__execute_phase` | `/gsd:execute-phase` | Start scheduler for all unblocked Slices under a Phase |
-| `state_build__discuss_step` | (new) | Enter Step discuss state (sets `chat.params` to high-temp) |
-| `state_build__plan_step` | (inlined) | Draft STEP.md: goal, verify_contract, depends_on |
-| `state_build__verify_step` | `/gsd:verify` | Run Step's verify contract (tests, LSP diagnostics, custom script) |
-| `state_build__advance_step` | (state-machine) | Move Step to next cycle state or mark blocked |
-| `state_build__research_phase` | `/gsd:research-phase` | Spawn research subagents via opencode `task` tool with `subagent_type="researcher"` |
-| `state_build__roadmap` | `/gsd:roadmapper` | Generate Arc/Phase skeleton from PROJECT.md |
-| `state_build__intel` | `/gsd:intel` | Run intel subagent (read-only) and attach findings |
-| `state_build__map_codebase` | `/gsd:map-codebase` | Generate CODEMAP.md via subagent |
-| `state_build__code_review` | `/gsd:code-review` | Kick off review subagent on Slice diff |
-| `state_build__code_review_fix` | `/gsd:code-review-fix` | Consume review, emit fix Steps |
-| `state_build__ship_slice` | `/gsd:ship` | Merge Slice worktree → primary; tag release |
-| `state_build__progress` | `/gsd:progress` | Snapshot of current Arc tree |
-| `state_build__stats` | `/gsd:stats` | Rollup stats (verify pass rate, cycle time per Step, etc.) |
-| `state_build__audit_uat` | `/gsd:audit-uat` | Run UAT audit verifier across Phase |
-| `state_build__audit_milestone` | `/gsd:audit-milestone` | Arc-level audit |
-| `state_build__debug` | `/gsd:debug` | Spawn debug subagent on a failing verify |
-| `state_build__forensics` | `/gsd:forensics` | Replay events.sqlite → reconstruct failure path |
-| `state_build__pause_resume` | `/gsd:pause-work` + `/gsd:resume-work` | Flip Step state to paused; restore later |
-| `state_build__thread` | `/gsd:thread` | Spawn cross-Phase thread (side investigation) |
-| `state_build__workstreams` | `/gsd:workstreams` | List unblocked Slices, concurrent-safe ones flagged |
-| `state_build__snapshot_step` | (new) | Step-tier snapshot via opencode `Snapshot.track` |
-| `state_build__revert_step` | (new) | Revert to Step snapshot via `Snapshot.revert` |
-| `state_build__decision_record` | `gray-area decisions` | Persist a typed decision from the gray-area dialog |
-
-### 4.2 `state-teach` tools
-
-Mapped from AOL workflows (`teach.md`, `build-subject.md`, `new.md`, `state.md`):
-
-| Tool | AOL precedent | Behavior |
-|---|---|---|
-| `state_teach__subject_list` | `aol subject list` | Enumerate installed subjects |
-| `state_teach__subject_install` | `aol subject install` | Register subject (local or remote) |
-| `state_teach__subject_resolve` | `aol subject resolve` | Slug → canonical id |
-| `state_teach__concept_next` | (curriculum engine) | Pick next concept given mastery + prereqs |
-| `state_teach__concept_teach` | `aol-concept-teacher` skill | Drive Kolb cycle for a concept |
-| `state_teach__drill_prepare` | `aol drill prepare` | Generate drill items from concept |
-| `state_teach__drill_verify` | `aol drill verify` | Grade drill submission, record mastery update |
-| `state_teach__drill_stats` | `aol drill stats` | Mastery projection for concept |
-| `state_teach__observation_record` | (mental-modeler subagent) | Append an observation event |
-| `state_teach__mental_model_query` | (new) | Projected current mental model |
-| `state_teach__scaffold_set` | (scaffolding-mentor) | Adjust scaffold level for concept |
-| `state_teach__personality_set` | (teaching-style) | Swap active personality |
-| `state_teach__mode_select` | `active-mode.json` | curriculum / drill / review / resume |
-| `state_teach__review_start` | (review branch) | Enter review Kolb cycle for a mastered concept |
-| `state_teach__verify_learning` | (learning verifier) | Cross-concept integration verifier (AOL-style) |
-
-### 4.3 Shared library (in `state_core`, not MCP tools)
-
-Not exposed as tools; imported by both servers:
-- Auth manager (login, token refresh, round-robin)
-- Event log (read/write `events.sqlite`, emit SyncEvent)
-- Provider router (litellm + anthropic-SDK escape)
-- Schema validators (pydantic models)
-- Daemon HTTP client
-
-Any tool that the MCP needs auth/provider/event access to gets it via this shared lib — never by duplicating logic.
-
----
-
-## 5. Event Flow (Dual-Write)
-
-### 5.1 Canonical trace: `/state:build:verify 17.3` issued by user in opencode
-
-```
-1. User types command in opencode TUI
-2. opencode dispatches slash command → fires command.execute.before hook
-     plugin shim: expands $1, injects PHASE.md + STEP.md content
-3. opencode prompts LLM; LLM tool-calls `mcp__state-build__verify_step`
-4. tool.execute.before hook fires
-     plugin shim → POST state-worker: /hook/tool-before
-       state-worker checks mode.json, scope, writes state.tool.intercepted
-       to events.sqlite (then mirrors as SyncEvent via state-daemon)
-5. MCP tool executes in state-build process
-     state-build reads STEP.md verify_contract
-     state-build POSTs state-daemon: /events/append state.verify.started
-       daemon writes row (seq++) to events.sqlite
-       daemon calls opencode HTTP: sync.publish(state.verify.started)
-       → SyncEvent fires into opencode bus; TUI sidebar re-renders
-6. state-build runs the verifier (tests, LSP query, etc.)
-7. state-build POSTs state-daemon: /events/append state.verify.passed
-     daemon: dual-write (SQLite + opencode SyncEvent)
-     opencode bus fan-out: plugin's `event` hook fires on daemon-mirror event,
-       kernel advances Step state machine: verify → done
-     kernel writes state.step.advanced → daemon → SyncEvent
-     TUI sidebar flips Step to "done"; toast shows
-8. MCP tool returns to LLM
-9. tool.execute.after hook fires
-     plugin shim → POST state-worker: /hook/tool-after
-     worker records verify metadata (duration, pass/fail) against the Step
-```
-
-### 5.2 Dual-write contract
-
-- **Primary writer:** `state-daemon` (the only process that writes to `events.sqlite`).
-- **Secondary writer:** opencode's `SyncEvent.run` path, invoked by the daemon over HTTP. This gives opencode's TUI live updates and inter-client replay for free.
-- **Failure mode:** if opencode is down, daemon still writes to SQLite. When opencode returns, daemon replays missed events by reading `events.sqlite` since last known `sync_seq` (opencode's own sync mechanism — `sync.replay` HTTP op — consumes those).
-- **Schemas:** defined once in `state_core/schema.py` (pydantic). A small adapter generates the Zod schema for `SyncEvent.define` so Python and TS stay in lockstep.
-
-### 5.3 Event taxonomy (`state.*`)
-
-All 28+ event types grouped by aggregate:
-
-| Aggregate | Events |
-|---|---|
-| Arc | `state.arc.created`, `state.arc.retired`, `state.arc.updated` |
-| Phase | `state.phase.planned`, `state.phase.started`, `state.phase.verified`, `state.phase.completed` |
-| Slice | `state.slice.planned`, `state.slice.worktree_ready`, `state.slice.shipped`, `state.slice.reverted` |
-| Step | `state.step.discussed`, `state.step.planned`, `state.step.executed`, `state.step.verify_started`, `state.step.verify_passed`, `state.step.verify_failed`, `state.step.advanced`, `state.step.blocked`, `state.step.snapshotted`, `state.step.reverted` |
-| Concept | `state.concept.introduced`, `state.concept.observed`, `state.concept.drilled`, `state.concept.mastered`, `state.concept.reviewed` |
-| Drill | `state.drill.prepared`, `state.drill.submitted`, `state.drill.graded` |
-| Mode | `state.mode.activated` |
-| Decision | `state.decision.asked`, `state.decision.made` |
-| Auth | `state.auth.refreshed`, `state.auth.rotated` |
-
-Every event has `{id, seq, aggregateID, type, data, ts}`. `aggregateID` is Arc ID / Step ID / Concept ID etc. so SyncEvent's per-aggregate ordering guarantees hold.
-
----
-
-## 6. Worktree Orchestration
-
-### 6.1 Decision tree
-
-```
-Is host opencode?
-├── YES: call opencode HTTP worktree.create → ready
-└── NO (Claude Code / Gemini CLI / Qwen Code / standalone):
-      use pygit2 fallback in state_core.worktree
-```
-
-The plugin shim POSTs the daemon; the daemon detects host via `STATE_HOST` env var set by shim (or absence of daemon-discovered opencode server URL).
-
-### 6.2 Per-Slice worktree lifecycle
-
-```
-state.slice.planned
-  └─▶ scheduler picks Slice → ensure worktree
-        ├─ worktree name: slug(slice.title)
-        ├─ branch: state/<arc>/<phase>/<slice>
-        ├─ opencode path: POST /worktree → worktree.ready bus event
-        └─ pygit2 path: repo.create_worktree() + bootstrap
-
-state.slice.worktree_ready
-  └─▶ scheduler assigns Steps to Slice's worktree
-        each Step's tool.execute.before hook scopes edits to worktree path
-
-state.slice.shipped
-  └─▶ merge into primary (ours strategy for state artifacts, normal for code)
-        opencode path: POST /worktree/remove
-        pygit2 path: remove_worktree() + prune branch
-
-state.slice.reverted
-  └─▶ keep worktree, restore Slice snapshot
-```
-
-### 6.3 Snapshot composition
-
-- **Step tier:** every Step creates a snapshot at `execute` entry and another at `verify` entry. Uses opencode `Snapshot.track()` (separate git-dir under `~/.local/share/state/snapshot/<project>/<worktree-hash>`). Revert via `Snapshot.revert`.
-- **Slice tier:** a Slice snapshot = named reference to the final Step snapshot of that Slice. Stored in events.sqlite as `state.slice.shipped.snapshot_hash`. Revert = `Snapshot.restore` to that hash.
-- **Cross-tier rollback:** `state_build__revert_slice` = revert all Step snapshots in chronological order (newest first) until the Slice-tier hash is reached. Events emitted per Step.
-
-### 6.4 Who creates, who destroys
-
-| Action | Trigger | Actor |
-|---|---|---|
-| Create worktree | Scheduler picks unblocked Slice | state-daemon (opencode HTTP or pygit2) |
-| Bootstrap worktree | Created | opencode auto-bootstraps via InstanceBootstrap |
-| Destroy worktree | `state.slice.shipped` OR explicit `state_build__abandon_slice` | state-daemon |
-| Create step snapshot | Step enters execute/verify | Plugin `event` hook → worker → daemon calls `Snapshot.track` |
-| Purge old snapshots | opencode's 7-day GC (unchanged) | opencode (we don't override) |
-
----
-
-## 7. Mode Enforcement Boundary
-
-**Hard rule (PROJECT.md):** Build and Teach never run in the same invocation.
-
-**Physical enforcement layers (defense in depth):**
-
-1. **Disk layer** — `.state/mode.json` has `{mode: "build"|"teach", set_at: ISO8601, by: "cli"|"plugin"}`. CLI command `state mode set build` writes it. A project may have both `build/` and `teach/` dirs, but only one mode active at a time.
-
-2. **MCP registration layer** — `opencode.json` references both servers but with mutually-exclusive `enabled` flags computed by a small wrapper. In practice: the plugin shim reads `.state/mode.json` at boot; if `mode == "build"` it returns a config patch disabling `state-teach` and vice versa via `config` hook. MCP plumbing is invoked through `Config.Service` so toggling is a hot-reload.
-
-3. **Plugin hook layer** — every hook consults `.state/mode.json` once per call (cheap, cached by mtime). `tool.execute.before` DENIES tool IDs prefixed `mcp__state-teach__*` when mode is build.
-
-4. **Command dispatch layer** — `command.execute.before` inspects the command name. `/state:build:*` in teach mode → inject an error message via `output.parts` instead of expanding. Same in reverse.
-
-5. **Daemon layer** — daemon exposes `/events/append` with a mode validation middleware. Event type `state.concept.*` rejected when mode is build. This is the authoritative gate — both MCP servers write through the daemon, so no client can sneak in cross-mode writes.
-
-6. **Python import-graph layer** — `state_build` never imports `state_teach` and vice versa. A linter rule (import-guard) fails CI on violation. This makes the silo structural, not just runtime.
-
-**Canonical enforcement point:** daemon's HTTP middleware. All other layers are UX affordances; the daemon is the last line.
-
-**Switching modes:** `state mode set teach` → write mode.json → daemon reloads → daemon broadcasts `state.mode.activated` SyncEvent → plugin's `event` hook triggers opencode `config` reload → MCP servers restart via the config reload cycle.
-
----
-
-## 8. Build Kernel Internals
-
-### 8.1 Step state machine
-
-A Step is the only tier that runs the full discuss/plan/execute/verify cycle. Arc/Phase/Slice are scoping containers with simpler lifecycles (planned / in_progress / shipped).
-
-```
-                ┌───── create ──────┐
-                ▼                    │
-       ┌──────────────┐              │
-       │   IDLE       │──skip───────▶│
-       └──────┬───────┘              │
-              │ start                │
-              ▼                      │
-       ┌──────────────┐              │
-       │  DISCUSSING  │─────────────▶│
-       └──────┬───────┘              │
-              │ plan_accepted        │
-              ▼                      │
-       ┌──────────────┐              │
-       │   PLANNING   │─────────────▶│
-       └──────┬───────┘              │
-              │ execute_approved     │
-              ▼                      │
-       ┌──────────────┐    fail      │
-       │  EXECUTING   │───────────┐  │
-       └──────┬───────┘           │  │
-              │ execute_done      │  │
-              ▼                   │  │
-       ┌──────────────┐           │  │
-       │  VERIFYING   │           │  │
-       └──────┬───────┘           │  │
-         pass │                   │  │
-              ▼                   │  │
-       ┌──────────────┐           │  │
-       │     DONE     │           │  │
-       └──────────────┘           │  │
-                                  ▼  ▼
-                              ┌──────────────┐
-                              │   BLOCKED    │─unblock──▶ (back to EXECUTING)
-                              └──────────────┘
-                                   │
-                                   ▼ abandon
-                              ┌──────────────┐
-                              │  ABANDONED   │
-                              └──────────────┘
-```
-
-Pseudo-code:
+When a Step reaches `done` (terminal state), the daemon's post-commit callback checks if this was the last Step in its Slice. If so, it emits a composite event:
 
 ```python
-class StepMachine:
-    async def on_event(self, event: StateEvent) -> None:
-        match (self.state, event.type):
-            case (IDLE, "state.step.discussed"):
-                self.enter(DISCUSSING)
-            case (DISCUSSING, "state.step.planned"):
-                self.enter(PLANNING)
-            case (PLANNING, "state.step.executed"):
-                await self.snapshot(tier="step", reason="pre_execute")
-                self.enter(EXECUTING)
-            case (EXECUTING, "state.step.verify_started"):
-                await self.snapshot(tier="step", reason="pre_verify")
-                self.enter(VERIFYING)
-            case (VERIFYING, "state.step.verify_passed"):
-                self.enter(DONE)
-                await self.publish("state.step.advanced")
-                await self.scheduler.notify_completed(self.step_id)
-            case (VERIFYING, "state.step.verify_failed"):
-                self.enter(EXECUTING)
-                await self.log_failure(event.data.reason)
-            case (_, "state.step.blocked"):
-                self.enter(BLOCKED)
-            case (BLOCKED, "state.step.unblocked"):
-                self.enter(EXECUTING)
+# Pseudocode — daemon-side event handler
+async def on_step_advanced(event: StepEvent):
+    """Check if all Steps in the parent Slice are done."""
+    slice_id = extract_slice_id(event.aggregate_id)  # "arc-01/phase-03/slice-12"
+    steps = await store.read_stream(slice_id + "/step-")  # read all step events
+    all_done = all_step_states_are_done(steps)
+    if all_done:
+        await store.append(
+            aggregate_type="slice",
+            aggregate_id=slice_id,
+            event_type="state.slice.steps_completed",
+            data={"last_step_id": event.aggregate_id},
+            mode="build",
+        )
 ```
 
-### 8.2 Arc / Phase / Slice / Step schema
+The same cascade applies upward:
+- **Step → Slice:** Last Step done → `state.slice.steps_completed`
+- **Slice → Phase:** Last Slice shipped → `state.phase.slices_verified`
+- **Phase → Arc:** Last Phase shipped → `state.arc.retired`
 
-All persisted as Markdown with YAML frontmatter plus pydantic validation.
+This is **NOT** a synchronous nested write. Each composite event is a separate `append()` call, so the event store remains append-only and deterministic. The cascade is triggered by post-commit callbacks registered via `store.add_post_commit_callback()`.
 
-**ARC.md frontmatter:**
-```yaml
-id: arc-01
-title: Kernel & Event Store
-status: in_progress  # planned | in_progress | shipped | abandoned
-goal: ...            # one-line outcome
-success_criteria:    # list of measurable outcomes
-  - events.sqlite writable from all processes
-  - 100% SyncEvent mirror parity
-depends_on: []       # other Arc IDs
-phases: [phase-01, phase-02, phase-03]
-opencode_surface:    # required per PROJECT.md mandate
-  - packages/opencode/src/sync/
-  - packages/opencode/src/storage/
-```
+### 2.3 Event Data Payload Extension
 
-**PHASE.md frontmatter:** same + `arc_id`, `slices: [...]`, `verify_rollup: [...]` (criteria to consider the Phase verified).
+Existing payload models (e.g., `PhasePlannedData`, `SlicePlannedData`) need parent ID fields:
 
-**SLICE.md frontmatter:** same + `phase_id`, `worktree: {name, branch, dir}`, `steps: [...]`, `snapshot_ref` (slice-tier hash at ship time).
+| Event Data Model | New Field | Type | Purpose |
+|-----------------|-----------|------|---------|
+| `PhasePlannedData` | `arc_id` | `str` | Parent Arc aggregate ID |
+| `SlicePlannedData` | `phase_id` | `str` | Parent Phase aggregate ID |
+| `StepPlannedData` | `slice_id` | `str` | Parent Slice aggregate ID |
 
-**STEP.md frontmatter (the busiest):**
-```yaml
-id: step-17.3
-slice_id: slice-17
-title: Implement verify runner
-state: verifying    # idle|discussing|planning|executing|verifying|done|blocked|abandoned
-goal: ...
-verify_contract:
-  - type: tests
-    cmd: pytest tests/verify_runner/
-  - type: lsp
-    path: src/state_build/verifiers/
-    severity: error
-    allow: 0
-  - type: script
-    cmd: python scripts/smoke_verify.py
-depends_on:
-  - id: step-17.1
-    kind: blocks          # blocks | soft | data
-  - id: step-16.2
-    kind: data
-model_profile:
-  provider: anthropic
-  model: claude-opus-4-7
-  temperature: 0.2
-  thinking: { enabled: true, budget_tokens: 4000 }
-subagent_type: state-executor
-snapshots:
-  pre_execute: abc123
-  pre_verify: def456
-```
+These already exist in the current codebase for Slice and Step events (e.g., `slice_id` in Step handlers), but Arc/Phase events lack explicit parenting. The hierarchical aggregate ID encoding (`arc-01/phase-03/...`) makes parent extraction trivial via string parsing, but an explicit field is clearer for queries.
 
-`depends_on` edge kinds:
-- `blocks` — target must be DONE before this can start (hard DAG edge)
-- `soft` — target should be DONE but scheduler may override
-- `data` — target produces artifacts this step consumes (hard, plus copies artifact path)
+**Decision: Use hierarchical aggregate IDs with slash-delimited encoding.** The parent is always a prefix:
+- `arc-01/phase-03/slice-12/step-004` → parent Slice is `arc-01/phase-03/slice-12`
+- `arc-01/phase-03/slice-12` → parent Phase is `arc-01/phase-03`
+- `arc-01/phase-03` → parent Arc is `arc-01`
 
-### 8.3 DAG scheduler
-
-Pure-Python, ~300 LOC. Runs inside state-daemon.
-
-```python
-async def schedule_tick(arc_id: ArcID) -> list[StepID]:
-    """Return all unblocked Steps under this Arc, ready for concurrent dispatch."""
-    steps = await event_store.load_all_steps(arc_id)
-    blocked: set[StepID] = set()
-    for s in steps:
-        if s.state in {DONE, ABANDONED}:
-            continue
-        for dep in s.depends_on:
-            if dep.kind in {"blocks", "data"}:
-                target = steps[dep.id]
-                if target.state != DONE:
-                    blocked.add(s.id)
-                    break
-    ready = [s for s in steps if s.state == IDLE and s.id not in blocked]
-    ready.sort(key=lambda s: (s.slice_id, s.id))  # stable for reproducibility
-    return [s.id for s in ready]
-
-async def dispatch(step_ids: list[StepID]) -> None:
-    # Group by Slice → one worktree per Slice is the concurrency unit
-    by_slice = defaultdict(list)
-    for sid in step_ids:
-        step = await load(sid)
-        by_slice[step.slice_id].append(step)
-
-    # Concurrent by Slice (different worktrees), serial within a Slice
-    await asyncio.gather(*[run_slice(steps) for steps in by_slice.values()])
-```
-
-Scheduler is **reactive**: recomputes on every `state.step.advanced`, `state.slice.worktree_ready`, `state.phase.planned`. No polling loop.
+This avoids storing redundant parent IDs in every event and makes aggregate stream queries trivial (read all events where `aggregate_id LIKE 'arc-01/phase-03/%'`).
 
 ---
 
-## 9. Teach Kernel Internals
+## 3. CQRS Projector Integration
 
-### 9.1 Concept graph schema
+### 3.1 New Cache Tables
 
-Event-sourced projection stored as JSON at `.state/teach/concepts/<subject>.json`. Rebuildable from `events.sqlite` `state.concept.*` events (AOL precedent: `knowledge-graph.json`).
-
-```json
-{
-  "schema_version": 2,
-  "subject_id": "python_core",
-  "concepts": [
-    {
-      "id": "variables",
-      "name": "Variables",
-      "mastery_probability": 0.72,
-      "bloom_level": "APPLY",
-      "scaffold_level": 2,
-      "demonstration_count": 14,
-      "prerequisites": [],
-      "last_demonstrated_at": "2026-04-20T14:30:00Z",
-      "next_review_at": "2026-04-24T00:00:00Z",
-      "kolb_history": [
-        {"stage": "CE", "ts": "..."},
-        {"stage": "RO", "ts": "..."},
-        ...
-      ]
-    },
-    ...
-  ],
-  "edges": [
-    {"from": "variables", "to": "control_flow", "kind": "prereq"}
-  ]
-}
-```
-
-### 9.2 Kolb-cycle state machine
-
-Each concept under active teaching has a Kolb machine:
-
-```
-┌─ CE (Concrete Experience) ──► LLM narrates scenario, learner observes
-│         │
-│         ▼
-│   RO (Reflective Observation) ──► question.ask via opencode question tool
-│         │
-│         ▼
-│   AC (Abstract Conceptualization) ──► learner articulates rule
-│         │
-│         ▼
-│   AE (Active Experimentation) ──► drill: drill_prepare + drill_verify
-│         │
-│         ▼ ─ pass criterion (mastery_probability >= threshold) ─► MASTERED
-│         │
-│         ▼ ─ fail                                                  │
-└─────────┘ (re-enter CE with scaffold_level bumped up)             │
-                                                                    ▼
-                                                        re-enters REVIEW cycle
-                                                        per next_review_at
-```
-
-```python
-class KolbMachine:
-    async def on_event(self, event: StateEvent) -> None:
-        match (self.stage, event.type):
-            case (CE, "state.concept.observed"):
-                self.enter(RO)
-                await self.teach.ask_reflection()     # opencode question tool
-            case (RO, "question.replied"):
-                await self.observe(event.answer)
-                self.enter(AC)
-            case (AC, "state.concept.articulated"):
-                self.enter(AE)
-                await self.drill.prepare(self.concept_id)
-            case (AE, "state.drill.graded"):
-                if event.data.score >= THRESHOLD:
-                    await self.update_mastery(delta=+0.15)
-                    if self.projected_mastery() >= MASTERY_CUTOFF:
-                        await self.publish("state.concept.mastered")
-                        self.enter(MASTERED)
-                    else:
-                        self.scaffold_level = max(0, self.scaffold_level - 1)
-                        self.enter(CE)
-                else:
-                    self.scaffold_level += 1
-                    self.enter(CE)
-```
-
-### 9.3 Drill engine integration with opencode `question` tool
-
-The drill engine generates typed questions and dispatches through opencode's native `question.ask`:
-
-```python
-async def run_drill(concept_id: ConceptID, session_id: SessionID):
-    items = await generate_drill_items(concept_id)
-    # Build opencode Question.Info[] with labels + descriptions
-    req = [{
-        "question": item.prompt,
-        "header": item.header[:30],
-        "options": [{"label": o.label, "description": o.desc} for o in item.options],
-        "multiple": item.multi_select,
-        "custom": True,
-    } for item in items]
-    # Call opencode HTTP: question.ask → blocks until user replies
-    answers = await opencode_client.question.ask(session_id=session_id, questions=req)
-    # Grade and write observations
-    for item, answer in zip(items, answers):
-        await record_observation(concept_id, item, answer)
-    score = grade(items, answers)
-    await publish("state.drill.graded", {concept_id, score, items})
-    return score
-```
-
-This gives us typed audit history for free (`question.asked` / `question.replied` SyncEvents), no custom drill UI needed for the common case.
-
-### 9.4 Mental-model projection
-
-`MENTAL-MODEL.json` at `.state/teach/<learner>/mental-model.json` is a pure projection of the event stream. Rebuildable by replaying all `state.concept.observed` + `state.drill.graded` + `state.concept.mastered` events for that learner.
-
-```python
-def project_mental_model(events: Iterable[StateEvent]) -> MentalModel:
-    mm = MentalModel()
-    for e in events:
-        match e.type:
-            case "state.concept.observed":
-                mm.concepts[e.data.concept_id].demos += 1
-                mm.concepts[e.data.concept_id].last_seen = e.ts
-            case "state.drill.graded":
-                c = mm.concepts[e.data.concept_id]
-                c.mastery_probability = bayes_update(
-                    prior=c.mastery_probability,
-                    evidence=e.data.score,
-                )
-                c.demonstration_count += 1
-            case "state.concept.mastered":
-                mm.concepts[e.data.concept_id].mastered_at = e.ts
-    return mm
-```
-
----
-
-## 10. Auth Layer Architecture
-
-### 10.1 Provider abstraction
-
-```
-state_core.auth/
-├── base.py              # AuthMethod protocol + credential container
-├── store.py             # auth.json I/O + filelock + multi-cred array
-├── refresh.py           # refresh-lock + round-robin
-└── providers/
-    ├── anthropic_oauth.py    # claude-oauth.md stealth flow
-    ├── gemini_cli.py         # Google OAuth, free-tier code assist
-    ├── antigravity.py        # Google OAuth, Gemini-3/Claude/GPT-OSS via GCloud
-    ├── copilot_device.py     # GitHub device-code flow
-    └── api_key.py            # plain key (Anthropic direct, OpenAI, etc.)
-```
-
-Every provider implements:
-
-```python
-class AuthMethod(Protocol):
-    async def login(self) -> Credential: ...
-    async def refresh(self, cred: Credential) -> Credential: ...
-    def is_token(self, val: str) -> bool: ...
-    def http_headers(self, cred: Credential) -> dict[str, str]: ...
-    def is_expired(self, cred: Credential, now: float) -> bool: ...
-```
-
-Anthropic OAuth's `http_headers` returns the stealth set verbatim (`user-agent: claude-cli/...`, `x-app: cli`, `anthropic-beta: claude-code-20250219,oauth-2025-04-20,...`). Non-negotiable per claude-oauth.md.
-
-### 10.2 auth.json layout
-
-```json
-{
-  "schema_version": 1,
-  "providers": {
-    "anthropic": [
-      {
-        "type": "oauth",
-        "access": "sk-ant-oat-...",
-        "refresh": "...",
-        "expires": 1712345678,
-        "account_id": "...",
-        "enterprise_url": null
-      },
-      {
-        "type": "api",
-        "key": "sk-ant-api03-..."
-      }
-    ],
-    "google.gemini_cli": [...],
-    "google.antigravity": [...],
-    "github.copilot": [...]
-  },
-  "last_rotation": { "anthropic": 0 }
-}
-```
-
-Array-per-provider preserves GSD 2's multi-credential round-robin shape. chmod 600. First-run bootstrap tries to import from `~/.local/share/opencode/auth.json` when present (enhancement, not fallback).
-
-### 10.3 Refresh-lock mechanism
-
-```python
-async def get_usable_credential(provider: str) -> Credential:
-    async with filelock(auth_json_path):
-        store = load(auth_json_path)
-        creds = store.providers[provider]
-        # rotate on expiration + rate-limit-seen flags
-        for i, cred in cycle_from(creds, store.last_rotation[provider]):
-            if not cred.is_expired(now()):
-                store.last_rotation[provider] = i
-                save(store)
-                return cred
-            refreshed = await providers[cred.type].refresh(cred)
-            creds[i] = refreshed
-            save(store)
-            return refreshed
-```
-
-Filelock via `filelock` library (committed library lock). One refresh at a time across daemon + MCP servers + CLI.
-
-### 10.4 Provider routing (litellm + Anthropic direct)
-
-`state_core.providers.route(model_spec)` returns either a litellm client or the Anthropic SDK with stealth headers. Build-mode's verify path uses Anthropic direct for extended-thinking. All other paths go through litellm.
-
----
-
-## 11. Data Contracts
-
-### 11.1 `.state/` on-disk layout
-
-```
-.state/
-├── auth.json                   # chmod 600, portable
-├── mode.json                   # { "mode": "build"|"teach", ... }
-├── events.sqlite               # WAL-mode; the source of truth
-├── events.sqlite-wal
-├── events.sqlite-shm
-├── daemon.sock                 # unix socket for loopback HTTP (optional)
-├── daemon.pid
-├── config.toml                 # static config (schedulers, thresholds)
-├── build/
-│   ├── arcs/
-│   │   └── <arc-slug>/ARC.md
-│   ├── phases/
-│   │   └── <phase-slug>/PHASE.md
-│   ├── slices/
-│   │   └── <slice-slug>/SLICE.md
-│   └── steps/
-│       └── <step-id>/STEP.md
-├── teach/
-│   ├── subjects/
-│   │   └── <subject>/
-│   │       ├── SUBJECT.md
-│   │       └── concepts/
-│   │           └── <concept-id>/CONCEPT.md
-│   ├── learners/
-│   │   └── <learner>/
-│   │       ├── mental-model.json          # projection
-│   │       ├── knowledge-graph.json       # projection (AOL-compat)
-│   │       ├── confidence.jsonl           # append-only (AOL-compat)
-│   │       └── mistakes.jsonl             # append-only (AOL-compat)
-│   └── personalities/                     # AOL personality ports
-├── snapshots/
-│   └── <project-hash>/                    # opencode Snapshot storage
-├── skills/                                # opencode-scanned (per PROJECT decision)
-└── logs/
-    ├── daemon.log
-    └── worker-<pid>.log
-```
-
-### 11.2 CONCEPT.md frontmatter
-
-```yaml
-id: variables
-subject_id: python_core
-name: Variables
-bloom_level: APPLY
-prerequisites: []
-drill_questions_path: drills.yaml
-scaffold_levels:
-  0: "Learner writes from scratch"
-  1: "Signature + docstring provided"
-  2: "Partial implementation, blanks to fill"
-  3: "Multiple-choice walkthrough"
-teaching_modes: [scaffolded, socratic, primm, constructivist]
-observation_rules:
-  - trigger: tool_error
-    weight: -0.1
-  - trigger: verify_pass
-    weight: +0.15
-```
-
-### 11.3 SQLite schema
+The projector currently maintains three cache tables: `steps`, `slices`, `concepts`. We add:
 
 ```sql
--- Event log (authoritative)
-CREATE TABLE events (
-  id TEXT PRIMARY KEY,           -- ULID
-  seq INTEGER NOT NULL,          -- per-aggregate sequence
-  aggregate_type TEXT NOT NULL,  -- 'arc' | 'phase' | 'slice' | 'step' | 'concept' | 'drill' | 'decision' | 'auth' | 'mode'
-  aggregate_id TEXT NOT NULL,
-  type TEXT NOT NULL,            -- 'state.step.verify_passed' etc.
-  data TEXT NOT NULL,            -- JSON
-  ts TEXT NOT NULL,              -- ISO8601
-  synced_to_opencode INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX idx_events_agg ON events(aggregate_id, seq);
-CREATE INDEX idx_events_ts ON events(ts);
-CREATE INDEX idx_events_unsynced ON events(synced_to_opencode) WHERE synced_to_opencode = 0;
-
--- Per-aggregate current sequence (for conflict detection)
-CREATE TABLE aggregate_seq (
-  aggregate_id TEXT PRIMARY KEY,
-  seq INTEGER NOT NULL,
-  updated_at TEXT NOT NULL
+-- Arc cache (new)
+CREATE TABLE arcs (
+    id TEXT PRIMARY KEY,            -- e.g., 'arc-01'
+    state TEXT NOT NULL,            -- planned | in_progress | shipped | abandoned
+    title TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    frontmatter TEXT NOT NULL,      -- JSON dump of ARC.md frontmatter
+    phase_count INTEGER NOT NULL DEFAULT 0,
+    shipped_phase_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
 );
 
--- Step cache (projection, rebuildable)
-CREATE TABLE steps (
-  id TEXT PRIMARY KEY,
-  slice_id TEXT NOT NULL,
-  state TEXT NOT NULL,
-  title TEXT NOT NULL,
-  frontmatter TEXT NOT NULL,  -- JSON dump of STEP.md frontmatter
-  updated_at TEXT NOT NULL
+-- Phase cache (new)
+CREATE TABLE phases (
+    id TEXT PRIMARY KEY,            -- e.g., 'arc-01/phase-03'
+    arc_id TEXT NOT NULL,
+    state TEXT NOT NULL,            -- planned | in_progress | verified | shipped | abandoned
+    title TEXT NOT NULL,
+    goal TEXT NOT NULL,
+    frontmatter TEXT NOT NULL,      -- JSON dump of PHASE.md frontmatter
+    slice_count INTEGER NOT NULL DEFAULT 0,
+    shipped_slice_count INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
 );
-CREATE INDEX idx_steps_slice ON steps(slice_id);
-CREATE INDEX idx_steps_state ON steps(state);
-
--- Slice cache
-CREATE TABLE slices (
-  id TEXT PRIMARY KEY,
-  phase_id TEXT NOT NULL,
-  state TEXT NOT NULL,
-  worktree_dir TEXT,
-  worktree_branch TEXT,
-  frontmatter TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
--- Concepts cache (teach mode)
-CREATE TABLE concepts (
-  id TEXT PRIMARY KEY,
-  subject_id TEXT NOT NULL,
-  learner_id TEXT NOT NULL,
-  mastery_probability REAL NOT NULL,
-  scaffold_level INTEGER NOT NULL,
-  bloom_level TEXT NOT NULL,
-  frontmatter TEXT NOT NULL,
-  last_drilled_at TEXT,
-  updated_at TEXT NOT NULL
-);
-CREATE INDEX idx_concepts_learner ON concepts(learner_id);
-
--- Decisions (gray area + auditable)
-CREATE TABLE decisions (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  aggregate_id TEXT NOT NULL,
-  question TEXT NOT NULL,
-  options TEXT NOT NULL,         -- JSON
-  answer TEXT,
-  answered_at TEXT,
-  reason TEXT
-);
-
--- Tool call metadata (for verifier / forensics)
-CREATE TABLE tool_calls (
-  id TEXT PRIMARY KEY,
-  session_id TEXT NOT NULL,
-  call_id TEXT NOT NULL,
-  tool TEXT NOT NULL,
-  step_id TEXT,
-  concept_id TEXT,
-  args TEXT,
-  output TEXT,
-  verdict TEXT,                   -- 'correct'|'error'|'unclear' for teach
-  ts TEXT NOT NULL
-);
-
--- Auth rotation log (does NOT store credentials — those stay in auth.json)
-CREATE TABLE auth_rotations (
-  id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL,
-  index_used INTEGER NOT NULL,
-  ts TEXT NOT NULL,
-  outcome TEXT NOT NULL           -- 'ok'|'refresh_ok'|'rate_limited'|'failed'
-);
+CREATE INDEX idx_phases_arc ON phases(arc_id);
 ```
 
-Rebuilding from events: `steps`, `slices`, `concepts`, `tool_calls` are all rebuildable by replaying `events` table. `aggregate_seq` is derivable. `decisions` and `auth_rotations` are append-only with their own data.
+The existing `slices` cache table is extended with `arc_id` (derivable from `phase_id`, but denormalized for query convenience).
+
+### 3.2 New Projection Handlers
+
+Handlers for Arc and Phase aggregate events:
+
+```python
+@_register_handler("state.arc.created")
+def _handle_arc_created(current, data):
+    return {
+        "id": data.get("arc_id", ""),
+        "state": "planned",
+        "title": data.get("title", ""),
+        "goal": data.get("goal", ""),
+        "frontmatter": _merge_frontmatter(current, data),
+        "phase_count": data.get("phase_count", 0),
+        "shipped_phase_count": 0,
+        "updated_at": "",
+    }
+
+@_register_handler("state.arc.retired")
+def _handle_arc_retired(current, data):
+    return {**current, "state": "shipped", "frontmatter": _merge_frontmatter(current, data)} if current else {}
+
+@_register_handler("state.phase.planned")
+def _handle_phase_planned(current, data):
+    return {
+        "id": data.get("phase_id", ""),
+        "arc_id": data.get("arc_id", ""),
+        "state": "planned",
+        "title": data.get("title", ""),
+        "goal": data.get("goal", ""),
+        "frontmatter": _merge_frontmatter(current, data),
+        "slice_count": data.get("slice_count", 0),
+        "shipped_slice_count": 0,
+        "updated_at": "",
+    }
+
+# ... handlers for state.phase.started, state.phase.slices_verified,
+#     state.phase.verified, state.phase.completed
+```
+
+### 3.3 STATE.md File Projection (New)
+
+The projector's `rebuild_all()` method currently only writes to SQLite cache tables. We add a **file projection** step that writes STATE.md files to the on-disk hierarchy:
+
+```python
+async def rebuild_state_files(self) -> dict[str, str]:
+    """Rebuild STATE.md files at every tier from cache tables.
+    
+    Called after rebuild_all(). Reads from arcs/phases/slices/steps
+    cache tables and writes STATE.md files to the filesystem
+    hierarchy. Returns dict of path -> content for audit.
+    """
+    # Read all arcs from cache
+    arcs = await self._read_table("arcs")
+    written = {}
+    for arc in arcs:
+        arc_dir = Path(f".state/build/arcs/{arc['id']}")
+        arc_dir.mkdir(parents=True, exist_ok=True)
+        state_content = self._render_state_md(arc, "arc")
+        (arc_dir / "STATE.md").write_text(state_content)
+        written[str(arc_dir / "STATE.md")] = state_content
+
+        # Read phases for this arc
+        phases = await self._read_table("phases", where=f"arc_id = '{arc['id']}'")
+        for phase in phases:
+            phase_dir = arc_dir / "phases" / phase['id'].split('/')[-1]
+            phase_dir.mkdir(parents=True, exist_ok=True)
+            state_content = self._render_state_md(phase, "phase")
+            (phase_dir / "STATE.md").write_text(state_content)
+            # ... recurse into slices and steps
+    
+    return written
+
+def _render_state_md(self, row: dict, tier: str) -> str:
+    """Render a STATE.md file from a cache row."""
+    fm = json.loads(row.get("frontmatter", "{}"))
+    return f"""# STATE: {row['id']}
+**Tier:** {tier}
+**Status:** {row['state']}
+**Updated:** {row['updated_at']}
+"""
+```
+
+**Key invariant:** STATE.md files are throwaway projections. On daemon startup, `rebuild_state_files()` wipes and rewrites every STATE.md from the event store. Agents NEVER write STATE.md — they write the artifact files (ARC.md, PHASE.md, SLICE.md, STEP.md, PLAN.md, VERIFY.md) and the daemon's projector handles STATE.md.
+
+### 3.4 Consistency Validation
+
+A `validate_consistency()` function (akin to GSD's `verify.cjs`) detects drift between filesystem STATE.md and event-store state:
+
+```python
+async def validate_consistency() -> list[ConsistencyWarning]:
+    """Compare STATE.md files against projector output.
+    
+    Returns empty list when consistent. Each warning carries:
+    - tier: arc|phase|slice|step
+    - path: filesystem path
+    - event_state: state derived from events
+    - file_state: state read from STATE.md
+    - severity: critical|warning|info
+    """
+```
+
+Detection triggers on daemon startup and on-demand via `state build health`.
 
 ---
 
-## 12. Cross-Mode Integration Points
+## 4. DAG Scheduler Integration
 
-**Shared (build + teach both use):**
-- `state_core.events` — same `events.sqlite`, event type prefixes disjoint (`state.step.*` vs `state.concept.*`)
-- `state_core.auth` — single `auth.json`, both modes call through it
-- `state_core.providers` — same litellm + anthropic escape
-- `state_core.scheduler` — teach mode uses it for review-due concepts queue
-- `state_core.snapshot` — teach uses for sandbox scaffold reset
-- `state_core.worktree` — teach uses for "coding-partner" flows (learner's work branch)
-- `@state/opencode-plugin` — one TUI bundle; mode-gated slot rendering
-- Daemon HTTP + SQLite
-- Opencode hooks (same 9)
-- TUI DAG viewer route (both render their own tree)
+### 4.1 Scheduler Architecture (Existing, Extended)
 
-**Isolated (mode silos — do NOT share):**
-- `state_build` package never imports `state_teach` (enforced by import-guard)
-- Separate MCP servers; only one registered at a time
-- Separate on-disk dirs (`build/` vs `teach/`)
-- Separate command namespaces (`/state:build:*` vs `/state:teach:*`)
-- Separate event type prefixes
-- Separate Python subagent definitions (coder / researcher / reviewer vs concept-teacher / drill-grader / mental-modeler)
-- Separate sidebar SolidJS components (mode-gated via `.state/mode.json` read at render)
+The DAG scheduler (`scheduler.py`) already operates on `Node` objects with `kind: Literal["arc", "phase", "slice", "step"]` and `status`. The hierarchy integration requires:
 
-**Touch points (handled explicitly in `state_core`):**
-1. **Event store** — shared table, schema allows both aggregate types
-2. **Auth refresh** — both modes may trigger a refresh; filelock coordinates
-3. **Provider routing** — both call `providers.route(model_spec)`; no mode awareness in router
-4. **Daemon HTTP** — single endpoint set, mode-validation middleware gates event writes
-5. **Worktree service** — teach's coding-partner Slice is indistinguishable from a build Slice in the worktree layer
+1. **Nodes at all four tiers registered with the scheduler.** The scheduler's `NodeRegistry` already supports all four `kind` values.
+2. **Slice-level `depends_on` edges fed to the scheduler** alongside existing Step-level edges.
+3. **Cross-Phase Slice dependencies** via fully-qualified Slice IDs.
 
----
+### 4.2 Edge Extraction from Frontmatter
 
-## 13. Suggested Build Order (Foundational → Dependent)
+The scheduler reads `depends_on` from artifact frontmatter and converts them to `Edge` objects. This extraction happens at two levels:
 
-**Tier 1 — Foundation (no dependencies on teach or build kernels):**
-1. state_core.schema (pydantic models) — everything downstream depends on these types
-2. state_core.events + events.sqlite (dual-write skeleton with opencode SyncEvent mirror)
-3. state_core.auth (all 5 methods + filelock + round-robin) — RELEASE BLOCKER per PROJECT.md
-4. state_core.providers (litellm + Anthropic direct)
-5. state_core.worktree (opencode-HTTP + pygit2 fallback, same interface)
-6. state_core.snapshot (Step + Slice tier composition over opencode Snapshot)
-7. state_core.scheduler (pure-Python DAG resolver, no opencode knowledge)
-8. state_daemon (HTTP server, middleware, mode gate, SSE, systemd/launchd unit)
-9. state_worker (bridge between plugin and daemon; per-session bootstrap)
-10. state_cli (top-level `state` binary: daemon start/stop, auth login, mode set)
+**Slice-level dependencies** (from SLICE.md frontmatter):
+```yaml
+# SLICE.md frontmatter
+id: arc-01/phase-03/slice-12
+depends_on:
+  - id: arc-01/phase-03/slice-11   # same Phase, prior Slice
+    kind: blocks
+  - id: arc-01/phase-02/slice-07   # cross-Phase dependency
+    kind: data
+```
 
-**Tier 2 — Plugin plumbing (depends on Tier 1):**
-11. @state/opencode-plugin server shim (9 hooks; uses state-worker HTTP)
-12. @state/opencode-plugin TUI bundle (routes, slots, dialogs; uses opencode HTTP API)
-13. TUI DAG viewer (shared by both modes)
+**Step-level dependencies** (from STEP.md frontmatter, existing):
+```yaml
+# STEP.md frontmatter
+id: arc-01/phase-03/slice-12/step-004
+depends_on:
+  - id: arc-01/phase-03/slice-12/step-003
+    kind: blocks
+  - id: arc-01/phase-03/slice-12/step-002
+    kind: data
+```
 
-**Tier 3 — MCP plumbing (depends on Tier 1 + 2):**
-14. state-build MCP server skeleton (health/echo tools only; mode gate wired)
-15. state-teach MCP server skeleton (same)
+### 4.3 Scheduler Tick with Four Tiers
 
-**Tier 4 — Build kernel (depends on all Tier 1+2+3):**
-16. Step state machine + STEP.md schema + verify-contract runner
-17. Build-mode commands (plan-phase, execute-phase, verify, ship — happy path)
-18. Build-mode dashboards + sidebar
-19. Build-mode subagents + permission rulesets
-20. Ported GSD commands (audit, research, map-codebase, etc.)
-21. Slice-tier snapshot / revert / ship flow
+The `DAGScheduler.tick()` method already computes a frontier, groups by Slice, and dispatches. The hierarchy change means:
 
-**Tier 5 — Teach kernel (depends on Tier 1+2+3; independent of Tier 4):**
-22. Kolb state machine + concept graph projection
-23. Drill engine using opencode `question` tool
-24. Mental-model projection + rebuilder
-25. Teach-mode personalities (AOL port)
-26. Four teaching modes (PRIMM, Scaffolded, Socratic, Constructivist)
-27. Scaffolding-mentor + coding-partner Slices
-28. Teach dashboard + sidebar
-29. Learning verifier (AOL-style) + cross-tier integration verifier
+1. **The frontier includes Slice nodes** — not just Step nodes. When all predecessor Slices are done, the Slice itself enters the frontier.
+2. **Slice dispatch triggers worktree creation** — the executor for a Slice node calls `WorktreeService.create()`, then dispatches its Steps serially.
+3. **Step nodes within a Slice are dispatched serially** — existing `_run_slice()` behavior, unchanged.
 
-**Tier 6 — Portability + polish:**
-30. Claude Code / Gemini CLI / Qwen Code shims (MCP-only, deprioritized per PROJECT.md)
-31. Event replay CLI (`state forensics replay`)
-32. Remote skill registry
-33. Installer / packaging (`pyproject`, opencode plugin bundle)
-34. Release pipeline + updater
+```python
+async def tick_with_hierarchy(self, nodes: list[Node], edges: list[Edge]) -> list[str]:
+    """Extended tick that handles Slice-level scheduling.
+    
+    1. Compute frontier (may include Slice nodes with no blocking predecessors).
+    2. For each Slice in frontier:
+       a. If worktree not yet created → create worktree → mark worktree_ready
+       b. If worktree ready → compute Step frontier within Slice → dispatch Steps serially
+    3. Return dispatched IDs.
+    """
+    ready = frontier(nodes, edges)
+    
+    # Separate Slice nodes from Step nodes
+    slice_nodes = [n for n in ready if n.kind == "slice"]
+    step_nodes = [n for n in ready if n.kind == "step"]
+    
+    # For each Slice, ensure worktree exists, then run Steps serially
+    for sl_node in slice_nodes:
+        if sl_node.status == "idle":
+            await self._create_worktree(sl_node)
+        
+        # Get all Steps within this Slice
+        slice_steps = [
+            n for n in step_nodes
+            if n.id.startswith(_slice_key(sl_node.id))
+        ]
+        # Sort Steps within Slice
+        slice_steps.sort(key=lambda n: _parse_sort_key(n.id))
+        
+        # Dispatch Steps serially within the Slice's worktree
+        await self._run_slice_steps(slice_steps, sl_node.id)
+```
 
----
+### 4.4 Depends-On Edge Kinds (Unchanged)
 
-## 14. Candidate Arcs (component-boundary justified)
-
-Below are 22 Arcs aligned to component boundaries. Each names the opencode surface it extends. These feed the roadmapper directly; some may merge, some may split based on Phase-planning discovery.
-
-| # | Arc title | Component boundary | Opencode surface extended |
-|---|---|---|---|
-| A1 | **Event store foundation** | `state_core.events` + SQLite schema | `packages/opencode/src/sync/index.ts`, `sync/event.sql.ts`, `storage/` |
-| A2 | **Auth coverage (5 methods)** | `state_core.auth` | `packages/opencode/src/auth/index.ts`, plugin `AuthHook` (`plugin/src/index.ts:89`) |
-| A3 | **Provider routing** | `state_core.providers` | plugin `chat.params`, `chat.headers`, `provider: ProviderHook` |
-| A4 | **Worktree + snapshot service** | `state_core.worktree`, `.snapshot` | `packages/opencode/src/worktree/index.ts`, `snapshot/index.ts` |
-| A5 | **DAG scheduler** | `state_core.scheduler` | (pure Python; interacts with A1 only) |
-| A6 | **Daemon + HTTP + SSE** | `state_daemon` | opencode HTTP API (90+ ops), SSE event stream |
-| A7 | **Per-session worker** | `state_worker` | opencode HTTP session ops + plugin shim |
-| A8 | **Plugin server hooks** | `@state/opencode-plugin` (server) | all 9 hooks in `packages/plugin/src/index.ts:222-333` |
-| A9 | **Plugin TUI bundle** | `@state/opencode-plugin` (tui) | `packages/plugin/src/tui.ts` entire surface |
-| A10 | **TUI DAG viewer route** | (shared) | `route.register`, `ui.Slot` |
-| A11 | **Mode enforcement** | `state_core.mode` + gates | `config` hook, `command.execute.before`, `tool.execute.before` |
-| A12 | **state-build MCP server** | `state_build.mcp` + kernel skeleton | `packages/opencode/src/mcp/index.ts` (client side) |
-| A13 | **state-teach MCP server** | `state_teach.mcp` + kernel skeleton | `packages/opencode/src/mcp/index.ts` (client side) |
-| A14 | **Build kernel: Step state machine + verifiers** | `state_build.kernel`, `.verifiers` | `tool.execute.after`, `experimental.chat.system.transform`, `task` tool |
-| A15 | **Build commands: plan/execute/verify/ship** | `state_build.commands` | opencode `command.*`, `task` tool, `Snapshot` service |
-| A16 | **Build commands: GSD ports (research, map-codebase, review, audit, debug, forensics)** | `state_build.commands` | `task` tool + built-in tools (skill, plan mode, lsp) |
-| A17 | **Build TUI (sidebar + dashboard + dialogs)** | `@state/opencode-plugin` (tui/build) | `sidebar_content`, `route.register`, `ui.DialogSelect` |
-| A18 | **Teach kernel: Kolb + concepts + mental-model** | `state_teach.kernel`, `.concepts`, `.mental_model` | `experimental.chat.system.transform`, `tool.execute.after` |
-| A19 | **Teach kernel: drill engine** | `state_teach.drill` | `packages/opencode/src/question/index.ts`, built-in `question` tool |
-| A20 | **Teach commands + personalities + modes** | `state_teach.kernel`, `.personalities` | `chat.params`, `chat.headers`, `agent.options` read |
-| A21 | **Teach TUI (sidebar + dashboard + drill)** | `@state/opencode-plugin` (tui/teach) | `route.register`, `ui.Prompt`, `ui.DialogSelect` |
-| A22 | **Portability shims (Claude Code / Gemini CLI / Qwen Code)** | shim packages | MCP-only path; no opencode-specific surface |
-
-**Additional candidate Arcs** (the roadmap may split these out):
-
-- A23: Event replay / forensics CLI (consumes A1, A6)
-- A24: Remote skill registry ingestion (opencode `cfg.skills.urls`)
-- A25: Release & packaging (installer, plugin bundle, updater)
-- A26: Verification infrastructure (goal-backward + rollup + cross-tier verifiers) — could merge into A14
-- A27: Documentation (arch, user, author, plugin-dev) — explicit Arc per PROJECT.md requirements
-
-That's 27 candidate Arcs, comfortably in the "15-25+" expected range per PROJECT.md.
-
-**Ordering constraints (DAG edges between Arcs):**
-- A1 blocks A6, A12, A13, A14, A18
-- A2 blocks A6, A15 (auth needed for model calls)
-- A3 blocks A14, A18
-- A4 blocks A15 (ship needs worktree + snapshot)
-- A5 blocks A14, A18
-- A6 blocks A7, A10, A11, A12, A13
-- A7 blocks A8, A9
-- A8, A9 block A10, A17, A21
-- A11 blocks A12, A13 (mode gate before MCP registration)
-- A12 blocks A14, A15, A16
-- A13 blocks A18, A19, A20
-- A14 blocks A15, A16
-- A18 blocks A19, A20
-- A22 soft-depends on all build + teach Arcs (it's a parity tracker)
-
-This ordering lets Arcs A1-A6 run largely in parallel (different packages), A7-A13 form a second wave, A14-A21 form the third. A22 is the tail. A23-A27 slot in where capacity permits.
+| Kind | Semantics | Scheduler Behavior |
+|------|-----------|-------------------|
+| `blocks` | Hard prerequisite — target cannot start until source is DONE | Blocking edge; included in frontier calculation |
+| `soft` | Advisory — scheduler may override for critical-path promotion | NOT blocking; used only for priority inversion detection |
+| `data` | Data-flow dependency — target needs source's output artifacts | Blocking edge (same as `blocks`); plus artifact-path propagation |
 
 ---
 
-## 15. Sources & Confidence
+## 5. Worktree Integration
 
-| Area | Confidence | Primary sources |
-|---|---|---|
-| Opencode hooks | HIGH | read `packages/plugin/src/index.ts` directly |
-| TUI extension | HIGH | read `packages/plugin/src/tui.ts` directly |
-| Task tool, permission, question, snapshot, worktree | HIGH | read source files directly |
-| MCP, bus, sync | HIGH | read source files directly |
-| SyncEvent semantics | HIGH | `sync/index.ts` + `event.sql.ts` read |
-| Auth 5-method coverage | HIGH | `claude-oauth.md` + `gsd2-auth-analysis.md` (direct specs) |
-| GSD state-machine precedent | MEDIUM | directory structure inspected; individual `.cjs` files not read (GSD path was `sdk/src/*-runner.ts` not `bin/lib/*.cjs`) — not load-bearing since PROJECT.md mandates redesign, not port |
-| AOL architecture | MEDIUM | workflows + learners dir structure; schema inferred from `knowledge-graph.json` on disk (schema_version 1) |
-| Kolb / scaffold-level semantics | MEDIUM | inferred from AOL frontmatter conventions + standard Kolb model |
-| Mastery probability / Bayesian update | LOW | inferred pattern; exact update rule (if GSD/AOL has one) not surfaced in files read — roadmap should confirm against an AOL code deep-dive in its Phase 1 research |
+### 5.1 Per-Slice Worktree (Existing, Unchanged)
 
-**Gaps flagged for roadmap research:**
-- Exact AOL `aol drill verify` internals (grader signatures, mastery_probability update math)
-- GSD's current hook-adapter strategy (we're not porting it, but the interface set should be confirmed)
-- opencode plugin install/discovery mechanics (`TuiPluginInstallOptions`) — needed for Arc A25 release/packaging
-- Interactions between opencode's own `experimental.primary_tools` whitelist and our `mcp__state-*__` tool names — probably fine but a compatibility test in Arc A12/A13 should confirm
+The existing model remains: one git worktree per Slice. The `WorktreeService` protocol already supports this. The hierarchy clarifies the mapping:
+
+| Tier | Worktree? | Why |
+|------|-----------|-----|
+| Arc | No | Scoping container; no code changes directly owned by an Arc |
+| Phase | No | Scoping container; no code changes directly owned by a Phase |
+| **Slice** | **Yes** | Concurrency unit; each Slice gets one worktree |
+| Step | No (uses Slice's worktree) | Steps run serially within the Slice's worktree, scoped by `shell.env` hook |
+
+### 5.2 Worktree Naming Convention
+
+Worktrees follow the hierarchical ID:
+
+```
+Worktree name:   arc-01/phase-03/slice-12
+Branch:          state/arc-01/phase-03/slice-12
+On-disk path:    .state/build/arcs/arc-01/phases/phase-03/slices/slice-12/worktree/
+```
+
+The worktree is created when the Slice transitions from `planned` to `worktree_ready`. The daemon's scheduler dispatches worktree creation:
+
+1. Scheduler picks unblocked Slice → calls `WorktreeService.create(name, branch)`
+2. Worktree creation succeeds → daemon emits `state.slice.worktree_ready` with path/branch
+3. Plugin's `shell.env` hook sets `STATE_WORKTREE` to the worktree path
+4. All LLM tool calls (edit, bash, read) are scoped to the worktree path via `tool.execute.before` hook
+
+### 5.3 Step Serialization Within Slice
+
+Steps within a Slice execute **serially** within the Slice's single worktree. This is enforced by:
+1. Scheduler dispatches only one Step per Slice at a time
+2. `tool.execute.before` hook rejects writes outside the active worktree
+
+If a Slice needs true parallel Steps, they must be separate Slices (different worktrees, concurrent execution).
 
 ---
 
-*End of ARCHITECTURE.md*
+## 6. On-Disk Directory Layout
+
+### 6.1 Complete `.state/build/` Tree
+
+```
+.state/build/
+├── arcs/
+│   └── {arc-id}/                      # e.g., arc-01, arc-auth
+│       ├── ARC.md                     # Arc definition + frontmatter
+│       ├── STATE.md                   # Projector-rebuilt state projection
+│       ├── DECISIONS.md               # Arc-level gray-area decisions
+│       └── phases/
+│           └── {phase-id}/            # e.g., phase-03
+│               ├── PHASE.md           # Phase definition + frontmatter
+│               ├── STATE.md           # Projector-rebuilt state projection
+│               ├── DECISIONS.md       # Phase-level gray-area decisions
+│               └── slices/
+│                   └── {slice-id}/    # e.g., slice-12
+│                       ├── SLICE.md   # Slice definition + frontmatter
+│                       ├── STATE.md   # Projector-rebuilt state projection
+│                       ├── worktree/  # Git worktree (not committed)
+│                       ├── snapshots/ # Content-addressed Step snapshots
+│                       └── steps/
+│                           └── {step-id}/ # e.g., step-004
+│                               ├── STEP.md      # Step definition + verify_contract
+│                               ├── DISCUSS.md   # Discuss-phase output
+│                               ├── PLAN.md      # Plan-phase output
+│                               ├── VERIFY.md    # Verify-phase output
+│                               └── EXECUTE.log  # Structured execution log
+├── templates/                         # Artifact templates
+│   ├── ARC.md.tmpl
+│   ├── PHASE.md.tmpl
+│   ├── SLICE.md.tmpl
+│   └── STEP.md.tmpl
+├── skills/                            # Build-mode skills (opencode auto-discovers)
+├── config/                            # Build-mode configuration
+│   └── profiles.toml                  # Model profiles, concurrency caps
+├── intel/                             # Codebase intelligence
+├── codebase/                          # Codebase mapping
+├── graph/                             # Knowledge graph
+├── decisions/                         # Cross-tier decision log (global)
+├── patterns/                          # Pattern library
+└── index.json                         # Artifact registry (machine-readable index)
+```
+
+### 6.2 Directory Naming Conventions
+
+| Tier | Directory Name | Example | Format |
+|------|---------------|---------|--------|
+| Arc | `{arc-id}` | `arc-01`, `arc-auth` | `{prefix}-{slug}` |
+| Phase | `{phase-id}` | `phase-03` | `phase-{n}` (within arc context) |
+| Slice | `{slice-id}` | `slice-12` | `slice-{n}` (within phase context) |
+| Step | `{step-id}` | `step-004` | `step-{n:03d}` (within slice context) |
+
+**ID schemes (decision needed — see §9):**
+
+**Option A: Sequential per-parent (recommended)**
+- Arc IDs: user-chosen slug + sequential number (`arc-01`, `arc-02-a`)
+- Phase IDs: sequential within Arc (`phase-01`, `phase-02`) → full ID: `arc-01/phase-02`
+- Slice IDs: sequential within Phase (`slice-01`, `slice-02`) → full ID: `arc-01/phase-02/slice-01`
+- Step IDs: sequential within Slice (`step-001`, `step-002`) → full ID: `arc-01/phase-02/slice-01/step-001`
+
+**Advantages:** Predictable ordering; easy to scan; gap-closure inserts use decimal (`step-003.1`).
+
+**Option B: UUID-based**
+- Every tier gets a UUID → full ID: `01JQ...`
+- **Disadvantage:** Hard to scan; loses ordering; no meaningful grouping.
+
+**Recommendation: Option A (sequential per-parent).** Decimal insertion (`step-003.1`, `step-003.2`) handled at the Step level for gap-closure within a Slice. Slice-level decimal insertion (`slice-12.1`) for cross-Slice gap closure within a Phase. No decimal insertion at Arc or Phase — those tiers are pre-planned.
+
+### 6.3 Artifact Registry (`index.json`)
+
+A machine-readable index at `.state/build/index.json` maps every artifact to its path, tier, and state. Rebuilt by the projector alongside STATE.md:
+
+```json
+{
+  "arcs": {
+    "arc-01": {
+      "path": "arcs/arc-01/",
+      "state": "in_progress",
+      "phases": ["phase-01", "phase-02", "phase-03"]
+    }
+  },
+  "phases": {
+    "arc-01/phase-03": {
+      "path": "arcs/arc-01/phases/phase-03/",
+      "state": "in_progress",
+      "arc_id": "arc-01",
+      "slices": ["slice-11", "slice-12"]
+    }
+  }
+}
+```
+
+---
+
+## 7. Artifact Catalog
+
+### 7.1 Complete Artifact Table
+
+| Artifact | Tier | Creator | Updates | Schema (Pydantic) | Cross-References |
+|----------|------|---------|---------|-------------------|-----------------|
+| **ARC.md** | Arc | `state build arc new` | Agent | `ArcFrontmatter` | References other arcs via `depends_on` |
+| **ARC-STATE.md** | Arc | Projector (auto) | Projector (auto) | `ArcStateProjection` | Derived from `state.arc.*` events |
+| **PHASE.md** | Phase | `state build phase new` | Agent | `PhaseFrontmatter` | References parent Arc, child Slices |
+| **PHASE-STATE.md** | Phase | Projector (auto) | Projector (auto) | `PhaseStateProjection` | Derived from `state.phase.*` events |
+| **SLICE.md** | Slice | `state build slice new` | Agent | `SliceFrontmatter` | References parent Phase, `depends_on` edges |
+| **SLICE-STATE.md** | Slice | Projector (auto) | Projector (auto) | `SliceStateProjection` | Derived from `state.slice.*` events |
+| **STEP.md** | Step | `state build step plan` | Agent | `StepFrontmatter` | References parent Slice, `depends_on` edges |
+| **DISCUSS.md** | Step | `state build step discuss` | Agent | (Freetext markdown) | References STEP.md goal |
+| **PLAN.md** | Step | `state build step plan` | Agent | (Freetext markdown) | References STEP.md `verify_contract` |
+| **VERIFY.md** | Step | `state build step verify` | Agent/Verifier | `VerifyResult` | References PLAN.md must-haves |
+| **EXECUTE.log** | Step | `state build step execute` | Agent (structured) | `ExecuteLog` | Per-subtask commit hashes |
+| **DECISIONS.md** | Arc/Phase | `state build decision record` | Agent | `GrayAreaDecision` | References the Arc/Phase + question |
+| **index.json** | Root | Projector (auto) | Projector (auto) | `ArtifactIndex` | All artifact paths + states |
+
+### 7.2 Frontmatter Specifications
+
+**ARC.md:**
+```yaml
+# Required
+id: arc-01                           # Unique Arc identifier
+title: "Auth System Overhaul"        # Human-readable name
+status: in_progress                  # planned | in_progress | shipped | abandoned
+goal: "Provide authentication..."    # One-line outcome
+success_criteria:                    # Measurable outcomes
+  - "All five auth methods ship day one"
+  - "OAuth refresh survives process crash"
+
+# Optional
+depends_on: []                       # Other Arc IDs (cross-Arc dependency)
+phases:                              # Planned Phase list (may evolve)
+  - phase-01                         # Phase ID within this Arc
+  - phase-02
+opencode_surface:                    # Required per PROJECT.md
+  - packages/opencode/src/sync/
+  - packages/opencode/src/storage/
+model_profile:                       # Default model for this Arc
+  provider: anthropic
+  model: claude-sonnet-4-6
+```
+
+**PHASE.md:**
+```yaml
+# Required
+id: arc-01/phase-03
+title: "OAuth Provider Migration"
+status: in_progress                  # planned | in_progress | verified | shipped | abandoned
+goal: "Migrate all OAuth providers..."
+success_criteria:
+  - "All provider refresh tests pass"
+  - "Token rotation survives SIGTERM"
+
+# Optional
+arc_id: arc-01                       # Parent Arc (redundant but explicit)
+slices:                              # Planned Slice list
+  - slice-11
+  - slice-12
+  - slice-13
+verify_rollup:                       # Cross-Slice verification criteria
+  - type: integration
+    description: "End-to-end OAuth flow with all providers"
+depends_on: []                       # Other Phase IDs (rare — cross-Arc Phase dependency)
+```
+
+**SLICE.md:**
+```yaml
+# Required
+id: arc-01/phase-03/slice-12
+title: "Anthropic OAuth Implementation"
+status: planned                      # planned | worktree_ready | in_progress | shipped | reverted
+goal: "Implement Anthropic OAuth stealth flow"
+
+# Optional
+phase_id: arc-01/phase-03            # Parent Phase
+worktree:
+  name: arc-01/phase-03/slice-12
+  branch: state/arc-01/phase-03/slice-12
+steps:
+  - step-001                         # Step 1: discuss-approach
+  - step-002                         # Step 2: plan-implementation
+  - step-003                         # Step 3: execute-oauth-flow
+  - step-004                         # Step 4: verify-stealth-headers
+depends_on:
+  - id: arc-01/phase-03/slice-11     # Prior Slice must be done
+    kind: blocks
+snapshot_ref: null                   # Set at ship time
+```
+
+**STEP.md:**
+```yaml
+# Required
+id: arc-01/phase-03/slice-12/step-004
+title: "Verify Stealth Headers"
+state: idle                          # idle | discussing | planning | executing | verifying | done | blocked | abandoned
+goal: "Verify Anthropic OAuth stealth headers match claude-oauth.md byte-for-byte"
+
+# Optional
+slice_id: arc-01/phase-03/slice-12
+verify_contract:                     # What must pass for this Step to be "done"
+  - type: tests
+    cmd: "pytest tests/auth/test_anthropic_oauth.py -k stealth_headers"
+    severity: error
+    allow: 0
+  - type: header_capture
+    spec: "state-inputs/claude-oauth.md"
+    field: "headers"
+depends_on:
+  - id: arc-01/phase-03/slice-12/step-003
+    kind: blocks                    # Must complete execute-oauth-flow first
+model_profile:
+  provider: anthropic
+  model: claude-sonnet-4-6
+  temperature: 0.2                  # Low-temp for verification
+  thinking: { enabled: false }
+snapshots:
+  pre_execute: null                 # Set when entering executing
+  pre_verify: null                  # Set when entering verifying
+cost_cap: 0.50                      # Max USD spend for this Step
+```
+
+---
+
+## 8. Cross-Referencing Rules
+
+### 8.1 Reference Format
+
+All cross-references use **fully-qualified hierarchical IDs with slash-delimited paths**. This is the unambiguous reference format:
+
+| Reference Type | Format | Example |
+|---------------|--------|---------|
+| Arc reference | `arc-{id}` | `arc-auth` |
+| Phase reference | `arc-{id}/phase-{n}` | `arc-01/phase-03` |
+| Slice reference | `arc-{id}/phase-{n}/slice-{n}` | `arc-01/phase-03/slice-12` |
+| Step reference | `arc-{id}/phase-{n}/slice-{n}/step-{n:03d}` | `arc-01/phase-03/slice-12/step-004` |
+| File path | `arcs/{arc-id}/phases/{phase-id}/slices/{slice-id}/steps/{step-id}/{file}` | `arcs/arc-01/phases/phase-03/slices/slice-12/steps/step-004/STEP.md` |
+
+### 8.2 Reference Resolution
+
+**Parent resolution** (child → parent):
+- STEP.md → parent Slice: extract prefix up to last `/` from Step ID
+- SLICE.md → parent Phase: extract prefix up to last `/` from Slice ID
+- PHASE.md → parent Arc: extract prefix up to last `/` from Phase ID
+
+**Child resolution** (parent → children):
+- ARC.md → child Phases: prefix `arc-{id}/phase-` + list from frontmatter `phases` field
+- PHASE.md → child Slices: prefix `phase-id/slice-` + list from frontmatter `slices` field
+- SLICE.md → child Steps: prefix `slice-id/step-` + list from frontmatter `steps` field
+
+**Cross-reference validation on write:**
+1. Every `depends_on.id` must resolve to an existing artifact (Arc, Phase, Slice, or Step).
+2. Every parent reference must exist before a child can be created.
+3. Broken references (deleted target) trigger a health warning from `validate_consistency()`.
+
+### 8.3 What Happens on Broken References
+
+| Scenario | Detection | Resolution |
+|----------|-----------|------------|
+| `depends_on` target deleted | `validate_consistency()` warns | Agent must update `depends_on` or restore target |
+| Parent Phase deleted, child Slice remains | `validate_consistency()` warns (orphan Slice) | Orphaned Slices flagged for review or adoption |
+| STEP.md references a deleted PLAN.md | `validate_consistency()` warns | Agent must re-plan or update reference |
+| STATE.md diverges from event store | `validate_consistency()` critical | `state build repair` triggers projector rebuild |
+
+---
+
+## 9. Naming Conventions
+
+### 9.1 ID Formats
+
+| Tier | Format | Example | Collision Domain | Insertion |
+|------|--------|---------|-----------------|-----------|
+| Arc | `{prefix}-{n}` or `{prefix}-{slug}` | `arc-01`, `arc-auth` | Global (project root) | No insertion — pre-planned |
+| Phase | `phase-{n:02d}` | `phase-03` | Per Arc | No insertion — pre-planned |
+| Slice | `slice-{n:02d}` | `slice-12` | Per Phase | Decimal: `slice-12.1` |
+| Step | `step-{n:03d}` | `step-004` | Per Slice | Decimal: `step-003.1` |
+
+**Decimal insertion rules** (gap-closure):
+- `slice-12.1` — inserted between `slice-12` and `slice-13`
+- `step-003.1` — inserted between `step-003` and `step-004`
+- Decimal sort order: `12 < 12.1 < 12.2 < 13`
+- Maximum one decimal level (no `step-003.1.1`)
+
+### 9.2 File Naming
+
+All artifact files use UPPERCASE names for the primary artifact at each tier:
+- `ARC.md`, `PHASE.md`, `SLICE.md`, `STEP.md` — canonical definitions
+- `STATE.md` — projector-rebuilt at every tier
+- `DISCUSS.md`, `PLAN.md`, `VERIFY.md` — Step-phase outputs
+- `EXECUTE.log` — structured execution log
+
+Templates use `.tmpl` extension: `ARC.md.tmpl`, `PHASE.md.tmpl`, etc.
+
+### 9.3 Path Construction
+
+```python
+def arc_dir(arc_id: str) -> Path:
+    return Path(f".state/build/arcs/{arc_id}/")
+
+def phase_dir(arc_id: str, phase_num: int) -> Path:
+    return Path(f".state/build/arcs/{arc_id}/phases/phase-{phase_num:02d}/")
+
+def slice_dir(arc_id: str, phase_num: int, slice_num: int) -> Path:
+    return Path(f".state/build/arcs/{arc_id}/phases/phase-{phase_num:02d}/slices/slice-{slice_num:02d}/")
+
+def step_dir(arc_id: str, phase_num: int, slice_num: int, step_num: int) -> Path:
+    return Path(f".state/build/arcs/{arc_id}/phases/phase-{phase_num:02d}/slices/slice-{slice_num:02d}/steps/step-{step_num:03d}/")
+```
+
+---
+
+## 10. MCP Tool Scoping
+
+### 10.1 Tool Naming Convention
+
+Tools in `state-build` MCP server follow the pattern `state_build__{tier}_{action}`:
+
+| Tier | Tool Prefix | Example Tools |
+|------|-----------|---------------|
+| Arc | `state_build__arc_` | `arc_new`, `arc_plan`, `arc_retire`, `arc_roadmap` |
+| Phase | `state_build__phase_` | `phase_new`, `phase_plan`, `phase_start`, `phase_verify`, `phase_complete` |
+| Slice | `state_build__slice_` | `slice_new`, `slice_plan`, `slice_ship`, `slice_revert`, `slice_snapshot` |
+| Step | `state_build__step_` | `step_discuss`, `step_plan`, `step_execute`, `step_verify`, `step_advance`, `step_block`, `step_snapshot`, `step_revert` |
+| Cross-tier | `state_build__` (no tier prefix) | `dag_show`, `progress`, `stats`, `health`, `forensics`, `decision_record`, `intel`, `map_codebase` |
+
+### 10.2 Tier Scoping
+
+Each tool validates the current scope before executing:
+
+```python
+def validate_tier_scope(requested_tier: str, current_context: dict) -> None:
+    """Ensure the tool is being called at the right tier.
+    
+    Example: state_build__step_plan must be called when a Step is active.
+    Calling it without an active Step context raises an error.
+    """
+    if requested_tier == "step" and not current_context.get("active_step_id"):
+        raise TierScopeError("No active Step. Use 'state build step select <id>' first.")
+```
+
+- **Arc tools** require an Arc to be selected (or create one).
+- **Phase tools** require a parent Arc context.
+- **Slice tools** require a parent Phase context.
+- **Step tools** require a parent Slice context.
+
+### 10.3 Context Propagation
+
+The active context (Arc/Phase/Slice/Step IDs) is propagated through:
+1. `shell.env` hook sets `STATE_ARC_ID`, `STATE_PHASE_ID`, `STATE_SLICE_ID`, `STATE_STEP_ID`
+2. `experimental.chat.system.transform` hook prepends the active hierarchy path to the system prompt
+3. MCP tools read context from daemon HTTP (`GET /context/active`) if env vars are absent
+
+---
+
+## 11. TUI Integration
+
+### 11.1 Hierarchy Visualization (Sidebar)
+
+The plugin's `sidebar_content` slot renders the four-tier tree:
+
+```
+┌─ Arcs ──────────────────────────┐
+│ ✓ arc-01: Kernel & Event Store   │
+│ ▶ arc-02: Auth System            │
+│   ✓ phase-01: OAuth Providers    │
+│   ○ phase-02: Token Refresh      │
+│ ▶ arc-03: Provider Routing       │
+└──────────────────────────────────┘
+```
+
+Each tier is expandable/collapsible. Status icons:
+- `✓` (green) — shipped
+- `●` (blue) — in_progress / executing
+- `○` (gray) — planned / idle
+- `⚠` (yellow) — blocked
+- `✗` (red) — abandoned / failed
+
+### 11.2 DAG Viewer (Existing, Extended)
+
+The existing DAG viewer (`state.dag`) route renders all four tiers with hierarchical grouping:
+
+```
+arc-01 ──────────────► arc-02 ──────────────► arc-03
+ │                      │                      │
+ ├─ phase-01 ──► phase-02                     │
+ │    │                                       │
+ │    ├─ slice-11 ──► slice-12               │
+ │    │    │            │                     │
+ │    │    ├─ step-001   ├─ step-001         │
+ │    │    ├─ step-002   ├─ step-002         │
+ │    │    └─ step-003   └─ step-003         │
+ │    │                                       │
+ │    └─ slice-13                            │
+ │                                           │
+ └─ phase-02 ─────────────────────────────────┘
+```
+
+### 11.3 Statusline
+
+The statusline (`sidebar_footer` slot) shows:
+```
+build | arc-02:auth | phase-01:oauth | slice-12:anthropic | step-004:verify | DONE
+```
+
+---
+
+## 12. Tracking File Consistency Model
+
+### 12.1 The Golden Rule
+
+> **STATE.md at every tier is a projector output, NEVER agent-written.**
+
+The daemon's CQRS projector (`projector.py`) owns STATE.md. On every event append, the projector updates the relevant cache table (SQLite) AND optionally triggers a STATE.md file rewrite. On daemon startup, `rebuild_all()` wipes and rewrites EVERY STATE.md file from the event stream.
+
+### 12.2 Agent Writes vs Projector Writes
+
+| File | Written By | When | Content |
+|------|-----------|------|---------|
+| ARC.md | Agent (`state build arc new`) | Creation + manual update | Scope, goal, success criteria |
+| PHASE.md | Agent (`state build phase new`) | Creation + manual update | Goal, slices, verify_rollup |
+| SLICE.md | Agent (`state build slice new`) | Creation + manual update | Goal, steps, depends_on |
+| STEP.md | Agent (`state build step plan`) | Creation + manual update | Goal, verify_contract, depends_on |
+| DISCUSS.md | Agent (`state build step discuss`) | Discuss phase output | Gray-area decisions, approach |
+| PLAN.md | Agent (`state build step plan`) | Plan phase output | Task decomposition, test plan |
+| VERIFY.md | Agent/Verifier (`state build step verify`) | Verify phase output | Pass/fail + evidence |
+| **STATE.md** | **Projector (daemon)** | **Every event append + startup** | **State projection from events** |
+| EXECUTE.log | Agent (structured) | Execute phase | Per-subtask commit hashes |
+| index.json | Projector (daemon) | Same as STATE.md | Machine-readable artifact index |
+
+### 12.3 Health Validation
+
+```python
+async def validate_consistency() -> list[ConsistencyWarning]:
+    """Validate that STATE.md files reflect event-store truth.
+    
+    Checks:
+    1. Every STATE.md exists at its expected path
+    2. STATE.md status matches the event-derived state
+    3. No orphaned artifacts (files without events)
+    4. No phantom artifacts (events without files)
+    5. Parent-child counts match (e.g., ARC.md says 3 phases, events show 3 phases)
+    """
+```
+
+Run on daemon startup and on-demand via `state build health`.
+
+---
+
+## 13. Open Design Questions
+
+These are deliberately left open for the discuss-phase (v40 HANDOFF.md §"Key Questions for Discuss-Phase"):
+
+1. **Arc → Phase dependency:** Can an Arc contain Phases that depend on Phases in another Arc? (Recommendation: YES — cross-Arc Phase dependencies via fully-qualified IDs. This enables "Arc A provides foundation that Arc B's Phase builds on.")
+
+2. **Arc planning depth:** Is ARC.md just a list of Phases with goals, or does it include the dependency graph between Phases? (Recommendation: ARC.md lists Phases + goals + `depends_on` for cross-Arc edges. The Phase-level DAG lives in each PHASE.md's `slices` + `depends_on` fields.)
+
+3. **Phase planning depth:** Does PHASE.md include the DAG of Slices? (Recommendation: YES — `slices` lists all Slices, `depends_on` edges live in each SLICE.md. The Phase plan is the union of its Slice DAGs.)
+
+4. **Slice dependency DAG boundary:** Can Slices depend on Slices in other Phases? (Recommendation: YES — fully-qualified Slice IDs. This enables cross-Phase integration.)
+
+5. **Step serialization:** Always serial within a Slice? (Recommendation: YES. If parallel Steps needed, split into separate Slices. This is the cleanest model and matches the worktree-per-Slice design.)
+
+6. **Decimal insertions:** Supported at Slice and Step level. (Recommendation: YES — `slice-12.1` and `step-003.1`. No decimal at Arc/Phase.)
+
+7. **STATE.md at every tier:** Yes — all four tiers. (Recommendation: YES. Storage is negligible; utility for health validation is high. The projector rebuilds all STATE.md files in <1 second for a typical project of 100+ Phases.)
+
+8. **Artifact immutability:** STEP.md immutable after execution begins? (Recommendation: `verify_contract` is immutable after execution begins. Goal and description can be updated. ARC.md/PHASE.md/SLICE.md can be updated at any time; the projector will reflect changes in STATE.md.)
+
+9. **Naming style:** Sequential numeric IDs with decimal insertion. (Recommendation: `arc-{n}`, `phase-{n:02d}`, `slice-{n:02d}`, `step-{n:03d}`. Human-readable slugs can be added as a `title` field, not the ID.)
+
+10. **Cross-reference format:** Hierarchical slash-delimited IDs. (Recommendation: `arc-01/phase-03/slice-12/step-004` — unambiguous, machine-parseable, human-scannable.)
+
+---
+
+## 14. Sources
+
+### Primary (code read directly)
+
+- `src/state_core/schema.py` — 34+ event types, aggregate definitions, mode enforcement
+- `src/state_core/projector.py` — CQRS projection engine (19 handlers, 3 cache tables)
+- `src/state_core/events.py` — Event store API (append, read_stream, post-commit callbacks)
+- `src/state_build/kernel.py` — StepMachine skeleton (existing states)
+- `src/state_core/scheduler.py` — DAG scheduler (frontier, topo_sort, cycle detection, priority inversion, deadlock detection)
+- `src/state_core/worktree.py` — WorktreeService protocol
+- `.planning/PROJECT.md` — Cardinal rules, constraints, decisions
+- `.planning/milestones/v40/HANDOFF.md` — Milestone scope, key questions, artifact catalog template
+- `.planning/research/ARCHITECTURE.md` — Existing architecture (6 components, 9 hooks, 28+ events)
+- `.planning/research/SCHEDULER_ARCHITECTURE.md` — (if exists — DAG details)
+
+### GSD patterns studied
+
+- `state-inputs/get-shit-done/bin/lib/artifacts.cjs` — Artifact registry pattern (exact-match + pattern-match)
+- `state-inputs/get-shit-done/bin/lib/state.cjs` — STATE.md operations
+- `state-inputs/get-shit-done/bin/lib/verify.cjs` — Health check patterns (19 warning codes)
+- `state-inputs/get-shit-done/bin/lib/frontmatter.cjs` — YAML frontmatter handling
+
+### Architecture principles
+
+- CQRS/Event Sourcing pattern — Greg Young, "CQRS Documents"
+- Aggregate design — Vaughn Vernon, "Implementing Domain-Driven Design" (aggregate boundaries per tier)
+- Projection pattern — SQLite cache tables as read-optimized projections of event stream

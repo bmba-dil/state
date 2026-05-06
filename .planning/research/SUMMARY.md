@@ -1,251 +1,242 @@
-# Research Synthesis — `state`
+# Project Research Summary
 
-**Researched:** 2026-04-22 • **Confidence:** HIGH on stack + opencode surface + auth; MEDIUM on teach-mode internals + sequencing granularity
+**Project:** state — v40 Build Hierarchy & Artifact System Architecture (Design-Phase Milestone)
+**Domain:** Multi-tier product hierarchy (Arc → Phase → Slice → Step) for event-sourced agentic workflow engine
+**Researched:** 2026-05-06
+**Confidence:** HIGH on event-sourcing integration, CQRS projection, and hierarchy patterns (code read directly); MEDIUM on naming convention details and on-disk layout tradeoffs (tension between ARCHITECTURE.md and PITFALLS.md recommendations)
 
-This synthesis distills four research files so the roadmapper can start shaping the Arc DAG without re-reading the primary sources:
+## Executive Summary
 
-- [STACK.md](./STACK.md) — Python + opencode plugin stack, version floors, rejected alternatives
-- [FEATURES.md](./FEATURES.md) — 85 GSD commands, 26 modules, 33 subagents, 11 hooks, 10 AOL workflows, 4 modes, 7 personalities, 60+ skills — each with disposition
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — 6-process topology, 9-hook wiring, two MCP servers, build + teach kernels, SQLite + SyncEvent dual-write
-- [PITFALLS.md](./PITFALLS.md) — 20 surfaces, 16 P0 release blockers, plus P1/P2 detail
+State's four-tier hierarchy (Arc → Phase → Slice → Step) replaces GSD's flat two-tier milestone→phase model with a richer decomposition that separates scope, concurrency, and the full discuss→plan→execute→verify cycle into distinct tiers. Every tier is an independent CQRS aggregate with its own event types, state machine, projector handlers, and on-disk artifacts. The event store (events.sqlite) is the single source of truth at every tier; STATE.md files at each level are projector-rebuilt projections, never agent-written — directly eliminating the GSD problem where agents forget to update tracking files.
 
----
+The research across four parallel domains (stack, features, architecture, pitfalls) converges on a clear recommendation: define the four-tier hierarchy using Pydantic v2 models and Mermaid diagrams as the design contract, enforce machine-generated hierarchical IDs (`arc-001/phase-003/slice-012/step-004`), keep tier state machines simple (Arc: 3-4 states, Phase: 4-5, Slice: 4-5, Step: 8), and use a hybrid tree+DAG model where structural hierarchy is a tree (one parent per node) but execution ordering is a DAG (typed `depends_on` edges). Cross-tier coordination flows upward through composite events emitted by the daemon, never through cross-tier `depends_on` edges that would create deadlock cycles.
 
-## 1. TL;DR
+Three critical design tensions emerged across the research files and must be resolved during the v40 discuss-phase: (1) whether on-disk STATE.md files exist per-directory (ARCHITECTURE.md) or as consolidated JSON projections (PITFALLS.md), (2) whether canonical IDs are sequential integers (ARCHITECTURE.md) or UUIDs/ULIDs (PITFALLS.md), and (3) whether Step artifacts are separate files (DISCUSS.md, PLAN.md, VERIFY.md, EXECUTE.log) or consolidated into a single ARTIFACTS.md (PITFALLS.md). These are explicitly flagged below as discuss-phase agenda items.
 
-1. `state` is six physical artifacts: **state-daemon** (always-on), **state-worker** (per-session), **state-build** + **state-teach** (sibling MCP servers), **@state/opencode-plugin** (one TS bundle: hook shim + SolidJS TUI), and the **.state/** on-disk artifacts (dual-write events.sqlite + opencode SyncEvent). Build and Teach share the kernel, silo everything else.
-2. The stack is **load-bearing and prescriptive**: Python 3.12+, `mcp>=1.27.0` (matches opencode's TS SDK 1.27.1), `litellm>=1.80.0` + `anthropic>=0.80.0` escape-hatch, `pygit2>=1.19.2`, `pydantic>=2.13.2`, `aiosqlite>=0.22.1`, `filelock>=3.20.3` (CVE floor), `pluggy>=1.6.0`, `httpx>=0.28.1`. `uv` + `uv_build` for packaging. Plugin matches opencode's catalog byte-for-byte (bun 1.3.13, typescript 5.8.2, effect 4.0.0-beta.48, zod 4.1.8, solid-js 1.9.10).
-3. **Five auth methods ship day-one** (Anthropic OAuth stealth, Gemini CLI, Antigravity, Copilot device-code, API keys). The Anthropic stealth path alone carries 8 of the 16 P0 pitfalls — it's the tallest release blocker in the whole project.
-4. The full opencode hook surface (9 hooks: `chat.message`, `tool.execute.before/after`, `permission.ask`, `event`, `experimental.chat.system.transform`, `experimental.session.compacting`, `chat.params`, `command.execute.before`, `shell.env`) is wired from day one. Each hook wiring is a first-class Slice per PROJECT.md.
-5. Planning is **four tiers** (Arc → Phase → Slice → Step), Step owns the full discuss/plan/execute/verify cycle, Slice is the concurrency unit (one worktree per Slice), Arc/Phase are scope containers. The DAG scheduler is **~300 LOC of pure Python** — no Prefect/Dask/Airflow/NetworkX.
-6. Research consolidates **27 candidate Arcs** (see §5). Confidence is HIGH on component-boundary Arcs and feature coverage. Complexity skews heavy: ~6 XL, ~10 L, rest M/S.
-7. Under-planning is the explicit failure mode. Expected roadmap output: 20+ Arcs, 60–100+ Phases, hundreds of Slices.
+## Key Findings
 
----
+### Design Stack (from STACK.md)
 
-## 2. Stack Commitments (load-bearing pins)
+The v40 design-phase milestone uses a documentation and specification stack, not a runtime stack. The recommended tools:
 
-| Layer | Pin | Why load-bearing |
-|---|---|---|
-| Runtime | CPython **3.12.0+** | Project mandate; TaskGroup semantics |
-| MCP SDK | `mcp>=1.27.0` | Matches opencode's `@modelcontextprotocol/sdk@1.27.1` protocol version |
-| Provider routing | `litellm>=1.80.0` + `anthropic>=0.80.0` | Anthropic direct SDK escape for extended thinking + fine-grained cache-control; **OAuth stealth never routes through litellm** |
-| Git/worktree | `pygit2>=1.19.2` | libgit2 wheels; fallback when opencode worktree service absent |
-| Data/async | `pydantic>=2.13.2`, `orjson>=3.11.8`, `aiosqlite>=0.22.1`, `httpx>=0.28.1` | Shared httpx client across daemon |
-| Locking | `filelock>=3.20.3` | **CVE-2026-22701 floor** — do not float below |
-| Plugins | `pluggy>=1.6.0` | Extension points inside daemon |
-| Auth libs | `google-auth>=2.35`, `google-auth-oauthlib>=1.2`, `cryptography>=43.0` | Gemini + Antigravity OAuth |
-| Packaging | `uv>=0.5.0` + `uv_build` | Default; `hatchling` fallback only if C deps demand |
-| CLI | `typer>=0.15` + `rich>=13.9` | Typed CLI |
-| Observability | `structlog>=25.1` | OpenTelemetry **deferred to v2** |
-| Opencode plugin | bun **1.3.13**, typescript **5.8.2**, effect **4.0.0-beta.48**, zod **4.1.8**, solid-js **1.9.10**, @opentui/{core,solid} **0.1.99**, ulid **3.0.1**, remeda **2.26.0**, oxlint **1.60.0**, prettier **3.6.2** (semi:false, printWidth:120) | Plugin runs inside opencode's runtime |
+**Core technologies:**
+- **Mermaid state diagrams + C4 diagrams** — All architecture and state machine visualization. Zero-dependency text format; renders in VS Code, GitHub, opencode. C4 diagrams (C4Context/C4Container/C4Component) are marked experimental upstream but sufficient for design docs. Fallback: Structurizr DSL export to Mermaid if C4 proves insufficient.
+- **Pydantic v2 `BaseModel` with `extra="forbid"`** — Formal artifact schemas. The same models that validate frontmatter at creation time serve as the design contract. `model_json_schema()` emits JSON Schema for cross-language use. Already proven in state's runtime event schemas (34+ event types).
+- **Python `Enum` + `Literal`** — State name enumerations, event type enumerations, guard condition lists. Type-safe, IDE-auto-completing, importable at runtime.
+- **YAML frontmatter in Markdown** — Human-readable artifact metadata. GSD convention carried forward. Every `.md` artifact has a Pydantic-validated frontmatter block.
 
-Testing: `pytest>=8.4.0` + `pytest-asyncio>=1.3.0` + `hypothesis>=6.120` + `pytest-httpx>=0.35` + `freezegun>=1.5`. E2E via spawned bun opencode binary pinned in `resources/opencode-version.txt`.
+**Rejected for design docs:** XState v5 (JS-only, no Python runtime), SCXML (XML-based, verbose, no Python ecosystem), Structurizr DSL (Java toolchain adds friction), PlantUML (requires JVM renderer), Arc42 (overly formal 12-section template), OpenAPI (category error for artifact schemas).
 
-**Explicit rejects:** Prefect/Dask/Airflow, LangChain/LangGraph, SQLAlchemy/Alembic, GitPython, NetworkX, Textual (primary TUI), FastAPI (primary daemon), Poetry, AnyIO/Trio, third-party `fastmcp`, tiktoken.
+### Feature Landscape (from FEATURES.md)
 
----
+**Table stakes (every tier must support):**
+- Unique stable ID per artifact + human-readable slug (display-only)
+- Per-tier state machine with event-driven transitions
+- Typed dependency edges (`blocks`, `soft`, `data`)
+- DAG cycle validation on edge insert
+- Per-tier status rollup (parent aggregates child states)
+- Path-based discovery + ID-based lookup + parent-chain navigation
 
-## 3. Table Stakes (day-one MUST ship)
+**Differentiators (what makes state's hierarchy great):**
+- **Projector-built STATE.md at every tier** — Agents NEVER write STATE.md directly. The daemon's CQRS projector rebuilds all STATE.md files from the event stream on every state change. This eliminates the #1 tracking problem in agentic systems.
+- **Typed dependency DAG with descope awareness** — Three edge kinds (`blocks`, `soft`, `data`) with full DFS cycle detection. Scheduler handles abandoned/descoped nodes by surfacing dependents rather than silently blocking.
+- **Stable identity with decimal insertions** — Machine-sortable sequential IDs support gap-closure inserts (`phase-003.1` between 003 and 004) without renumbering. IDs survive renames; slugs are display-only.
+- **Tiered immutability** — STEP.md plan freezes when execution begins. ARC.md goal/success_criteria freeze when the first child Phase enters `in_progress`.
+- **Canonical artifact catalog** — Single registry of every recognized artifact with schema validation on read.
 
-- **Dual-write event store** — `.state/events.sqlite` is truth; opencode `SyncEvent` derived. Daemon is the only writer. WAL, `synchronous=NORMAL/FULL`, commit-then-emit.
-- **All five auth methods** — Anthropic OAuth stealth (headers `user-agent: claude-cli/...`, `x-app: cli`, `anthropic-beta: claude-code-20250219,oauth-2025-04-20,...`; PKCE verifier = OAuth `state`; client_id `9d1c250a-e61b-44d9-88ed-5944d1962f5e`; Bearer for `sk-ant-oat*`), Gemini CLI OAuth, Antigravity OAuth, Copilot device-code, API keys. Multi-cred round-robin with filelock-guarded refresh.
-- **Two independent MCP servers** — `state-build` + `state-teach`, each ≤15 tools with ≤80-token descriptions, mode-gated.
-- **Single opencode plugin bundle** — `@state/opencode-plugin` exports `server` (9 hooks, ~300 LOC) + `tui` (sidebar, routes, dialogs, statusline).
-- **Four-tier planning hierarchy** with typed `depends_on` edges (`blocks`/`soft`/`data`) and Step-owned discuss/plan/execute/verify cycle.
-- **Pure-Python DAG scheduler** — reactive, per-Slice worktree concurrency, watchdog for TaskGroup cancellation bug (P0-16).
-- **Per-Slice worktree** — opencode worktree service preferred, pygit2 fallback. Transactional bootstrap; GC for orphan locked worktrees.
-- **Step + Slice snapshots** — content-addressed, via opencode `Snapshot.track/revert`. Prefix-only revert within Slice.
-- **Mode enforcement, 6 layers** — `.state/mode.json` + MCP registration + plugin hook + command dispatch + daemon HTTP middleware (**canonical**) + Python import-graph lint.
-- **Build kernel** — Step state machine + STEP.md frontmatter (goal, `verify_contract`, `depends_on`, `model_profile`, `snapshots`) + goal-backward verifier + Slice/Phase/Arc rollup + cross-tier integration verifier.
-- **Teach kernel** — Kolb state machine (CE→RO→AC→AE), concept-graph projection, drill engine bound to opencode `question` tool, event-sourced mental-model projection, learning verifier.
-- **Four teaching modes** as first-class Phases with mode-selector (PRIMM <30% → Scaffolded 30–50% → Socratic 50–70% → Constructivist 70–80%), drop-to-simpler on frustration.
-- **Security baseline** — path-traversal + prompt-injection + shell-meta + JSON + regex-DoS guards; `auth.json` chmod 0600 verified on every read; root-logger token redactor.
-- **TUI extensions** — build dashboard, teach dashboard, DAG viewer (shared), drill UI, statusline, toasts, gray-area decision dialog.
-- **Docs + test infra + packaging** — `uvx state install` auto-registers plugin + MCP servers.
+**Anti-features (explicitly NOT building):**
+- Agent-written tracking files (projector-only)
+- Arbitrary "relates to" graph links (typed edges only)
+- Deeply nested decimal insertions (cap at one decimal layer)
+- Mixed agent/projector field ownership (clear ownership per field)
+- Five+ tiers or dynamic tier creation (four fixed tiers)
 
----
+**Cross-referencing pattern:** ID-based with path lookup. Every cross-reference stores the target's unique ID (survives renames). The projector maintains an ID→path index in SQLite. Hybrid model: structural hierarchy is a tree (one parent per node), execution ordering is a DAG (`depends_on` edges across the tree).
 
-## 4. Differentiators
+**MVP priority (for v40 design spike):**
 
-| Differentiator | Why it matters |
-|---|---|
-| **Build + Teach fused** | Shared kernel with siloed mode logic; nobody else ships both. |
-| **4-tier Arc/Phase/Slice/Step with Step-owned cycle** | GSD's 2-tier is too coarse + implicitly serial. |
-| **DAG concurrency native** | Roadmaps are DAGs not lists; one-worktree-per-Slice parallelism. |
-| **Opencode as primary host** | Mid-session provider switching, typed bus events, client/server split, 9 hook types. |
-| **Five-auth day-one incl. Anthropic OAuth stealth** | Pro/Max users are primary audience. |
-| **Cross-host portability via MCP** | Claude Code / Gemini CLI / Qwen Code get reduced-UX access. |
-| **Event-sourced everything** | STATE.md / MENTAL-MODEL.json are projections; replay + forensics + cross-session restore. |
-| **Personalities × modes orthogonal** | 4 modes × 7 personalities × subject compose cleanly. |
-| **Python as user-facing learning surface** | Thomas learns via building; cardinal. |
+| Priority | What to Specify |
+|----------|----------------|
+| **Must (Phase 1)** | Tier state machines, artifact catalog, naming conventions, on-disk layout, cross-referencing rules |
+| **Should (Phase 2)** | STATE.md projection schemas, consistency validator, artifact immutability rules, decimal insertion protocol |
+| **Defer** | Agent harness (v41), quality pipeline (v42), GSD command porting (v43), teach-mode equivalents (v46) |
 
----
+### Architecture Approach (from ARCHITECTURE.md)
 
-## 5. Arc Candidate Rollup — 27 Arcs
+The four-tier hierarchy integrates with every existing subsystem in state. The fundamental insight: each tier is a CQRS aggregate with its own event stream, projector handler, and on-disk artifacts.
 
-| # | Arc | Source(s) | Opencode surface | GSD/AOL source | Predecessors | Complexity |
-|---|---|---|---|---|---|---|
-| A1 | **Event store foundation** (SQLite + SyncEvent dual-write) | ARCH, FEATURES §2, §10 | `sync/`, `storage/` | state.cjs | — | L |
-| A2 | **Auth coverage — 5 methods + multi-cred** | ARCH, FEATURES §10, PITFALLS S1–5 | `auth/index.ts`, plugin `AuthHook` | claude-oauth.md + gsd2-auth-analysis.md | — | L |
-| A3 | **Provider routing + model profiles** | ARCH, FEATURES §2, §10 | `chat.params`, `chat.headers`, `provider` hook | model-profiles.cjs | A2 | L |
-| A4 | **Worktree + snapshot service** | ARCH, FEATURES §11 | `worktree/`, `snapshot/` | — (new) | — | M |
-| A5 | **DAG scheduler** (~300 LOC pure Python) | ARCH, FEATURES §10, §11 | — (standalone) | — (new) | A1 | L |
-| A6 | **State daemon + HTTP + SSE + mode middleware** | ARCH, FEATURES §10 | opencode HTTP API, SSE bus | — (new) | A1, A2 | L |
-| A7 | **Per-session worker** | ARCH | opencode HTTP session ops | — (new) | A6 | M |
-| A8 | **Plugin server hooks** (all 9) | ARCH, FEATURES §4 | `plugin/src/index.ts:222-333` | hooks/*.js,*.sh | A7 | L |
-| A9 | **Plugin TUI bundle** | ARCH, FEATURES §11 | `plugin/src/tui.ts` | gsd-statusline.js | A7 | L |
-| A10 | **TUI DAG viewer** | ARCH, FEATURES §12 | `route.register`, `ui.Slot` | — (new) | A8, A9 | M |
-| A11 | **Mode enforcement** (6 layers) | ARCH, FEATURES §11, PITFALLS S7, S16 | `config`, `command.execute.before`, `tool.execute.before` | — (new) | A6, A8 | M |
-| A12 | **state-build MCP server** | ARCH, FEATURES §11 | `mcp/index.ts` | — (new) | A11 | M |
-| A13 | **state-teach MCP server** | ARCH, FEATURES §11 | `mcp/index.ts` | — (new) | A11 | M |
-| A14 | **Build kernel — Step FSM + verifiers** | ARCH, FEATURES §1, §2, §3, §11 | `tool.execute.after`, `system.transform`, `task` | gsd-executor + gsd-verifier + verify.cjs | A5, A12 | XL |
-| A15 | **Build commands — plan/execute/verify/ship** | ARCH, FEATURES §1.2 | `command.*`, `task`, `Snapshot` | plan-phase, execute-phase, verify-work, ship | A14, A4 | L |
-| A16 | **Build commands — GSD ports** | FEATURES §1.3–1.9 | `task` + built-ins | 50+ GSD commands | A15 | XL |
-| A17 | **Build TUI** | ARCH, FEATURES §11 | `sidebar_content`, `route.register` | gsd-statusline.js | A9, A14 | M |
-| A18 | **Teach kernel — Kolb + concepts + mental-model** | ARCH, FEATURES §5, §8 | `system.transform`, `tool.execute.after` | aol-concept-teacher + workflows/teach.md | A5, A13 | L |
-| A19 | **Teach drill engine** | ARCH, FEATURES §8 | `question/index.ts` | aol drill prepare/verify | A18 | M |
-| A20 | **Teach modes** (PRIMM + Scaffolded + Socratic + Constructivist + selector) | FEATURES §6 | `chat.params` | skills/{primm,scaffolded,socratic,constructivist}.md | A18 | XL |
-| A21 | **Teach personalities + teaching-style** | FEATURES §7 | `chat.params`, `chat.headers` | personalities/*.md (7) + workflows/style.md | A18 | M |
-| A22 | **Scaffolding-mentor + coding-partner** | FEATURES §8 | `permission.ask`, `task` | aol-scaffolding-mentor + coding-partner | A20, A21 | L |
-| A23 | **Teach TUI** | ARCH, FEATURES §11 | `route.register`, `ui.Prompt`, `ui.DialogSelect` | workflows/state.md | A9, A18 | M |
-| A24 | **Subject authoring + 4-gate promoter** | FEATURES §5 | — | workflows/build-subject.md | A18 | M |
-| A25 | **Migration & import** (GSD `.planning/`, AOL `.aol/` → `.state/`) | FEATURES §11 | — | from-gsd2.md (reversed), AOL | A1, A11 | M |
-| A26 | **Portability shims** (Claude Code / Gemini / Qwen — MCP-only) | ARCH, FEATURES §12 | — | — | A12, A13 | L |
-| A27 | **Release & packaging** | ARCH, FEATURES §10, §11 | `cfg.skills.urls` | gsd update | most of A1–A23 | M |
+**Major components and their tier integration:**
 
-**Roadmapper may also split/fold:** Event replay/forensics CLI, Knowledge graph (graphify + ingest-docs), Documentation (threaded vs standalone), Test infrastructure, Verification split, Eval infrastructure.
+1. **Event Store** — Each tier is an aggregate type. Arc/Phase events carry parent IDs. Daemon emits composite events for cross-tier rollup (Step→Slice→Phase→Arc cascade via post-commit callbacks). Hierarchical aggregate IDs (`arc-01/phase-03/slice-12/step-004`) make parent extraction trivial via prefix parsing.
 
-**Arc DAG hard edges:**
+2. **CQRS Projector** — New cache tables for `arcs` and `phases` (extending existing `steps`, `slices`, `concepts`). New projection handlers for Arc/Phase aggregate events. Projector rebuilds STATE.md files at every tier on daemon startup. `validate_consistency()` function detects drift between filesystem STATE.md and event-store state.
 
-```
-A1 ─┬─► A5 ─┬─► A14 ─► A15 ─► A16
-    │       └─► A18 ─┬─► A19
-    │                ├─► A20 ─► A22
-    │                ├─► A21 ─► A22
-    │                └─► A24
-    └─► A6 ─► A7 ─┬─► A8 ─┬─► A10 ─► (A17, A23)
-                  │       └─► A17, A23
-                  └─► A9 ─► A10
-A2 ─► A3 (and A6)
-A2, A6 ─► A11 ─► A12 ─► A14
-A2, A6 ─► A11 ─► A13 ─► A18
-A4 ─► A15
-A25 soft-depends on A1, A11
-A26 soft-depends on all build + teach Arcs
-A27 soft-depends on most everything
-```
+3. **DAG Scheduler** — Extended to handle four-tier nodes. Scheduler reads `depends_on` edges from SLICE.md and STEP.md frontmatter. Frontier computation includes Slice nodes. Slice dispatch triggers worktree creation, then dispatches Steps serially within the Slice. Cross-Phase Slice dependencies supported via fully-qualified IDs.
+
+4. **Worktree Service** — Unchanged model: one worktree per Slice. Steps execute serially within the Slice's single worktree. Worktree naming follows hierarchical ID convention. Parallel work requires separate Slices.
+
+5. **MCP Tools** — Follow `state_build__{tier}_{action}` naming convention. Tier-scoped: Arc tools (roadmap, retire), Phase tools (verify, complete), Slice tools (ship, revert), Step tools (discuss, plan, execute, verify). Cross-tier tools (dag_show, progress, health) use no tier prefix.
+
+6. **TUI (`@state/opencode-plugin`)** — Four-tier expandable tree in sidebar with status icons. DAG viewer renders all four tiers with hierarchical grouping. Statusline shows active hierarchy path (`build | arc-02:auth | phase-01:oauth | slice-12:anthropic | step-004:verify | DONE`).
+
+**Key design decisions (with recommendations):**
+- Hierarchical slash-delimited aggregate IDs (YES)
+- Daemon emits composite events for rollup, not synchronous nested writes (YES)
+- STATE.md at every tier (YES — projector-rebuilt, throwaway)
+- Sequential per-parent numeric IDs with decimal insertion (Arc/Phase: no decimals; Slice/Step: one decimal layer)
+- `depends_on` edges at both Slice and Step levels
+- Steps always serial within a Slice; parallel work requires separate Slices
+- Cross-Arc and cross-Phase dependencies allowed via fully-qualified IDs
+
+### Critical Pitfalls (from PITFALLS.md)
+
+Nine critical pitfalls identified, ranked by severity and likelihood:
+
+1. **Hierarchy Over-Engineering — Too Many Tiers, Too Many States** — Cap states per tier: Arc (3), Phase (4), Slice (4-5), Step (8 max). No substates at Arc/Phase/Slice. If you find yourself wanting a substate, the dependency DAG should handle it, not the state machine. Total states across all 4 tiers should be ≤ 20.
+
+2. **Under-Specified Cross-Referencing — Orphan Artifacts** — Use UUIDs/ULIDs as canonical IDs (not human-readable slugs). Include content hashes in cross-references to detect drift. Run `validate_consistency` as a daemon post-commit hook (not a manual CLI command). Broken references become `state.reference.broken` events that trigger TUI toasts immediately.
+
+3. **Inconsistent State Machine Behavior Across Tiers** — Define explicit composite state rules for each parent-child pair (e.g., "Arc is `shipped` if ALL Phases are `shipped`"). These rules live in the projector (CQRS read-side), not in the FSM (command-side). No tier should have a `BLOCKED` state if a child tier already has one — let the projector compute "effectively blocked" from child states.
+
+4. **Naming Convention Drift** — Machine-enforce ID generation via CLI commands. IDs are globally unique hierarchical integers (`arc-001-phase-003-slice-012-step-004`). Slugs are display-only metadata in frontmatter. Directory names use slugs for human browsing; cross-references use IDs. No human-chosen slugs as canonical identifiers.
+
+5. **On-Disk Layout Proliferation** — Flatten where possible. Consolidate DISCUSS.md, PLAN.md, VERIFY.md, EXECUTE.log into a single `ARTIFACTS.md` per Step. No per-directory STATE.md files (use consolidated JSON projections under `.state/build/state/`). Snapshots are content-addressed under a shared pool. File count reduction: ~8,200 → ~2,480 for a typical project.
+
+6. **Frontmatter Schema Bloat** — Tier-specific field budgets (ARC.md: 6 required/4 optional; PHASE.md: 7/5; SLICE.md: 7/5; STEP.md: 10/8). Frontmatter is for machine-readable metadata, not prose (>200 chars = belongs in body). Temporal data (snapshot history, cost accounting) lives in events.sqlite, not frontmatter.
+
+7. **Over-Coupling to GSD's Legacy Hierarchy Model** — Define tiers by behavioral primitives, not GSD analogies. Explicit anti-GSD rules: no linear roadmap (DAG of Arcs), no "verification at the end" (continuous per-tier), no "one active thing at a time" (concurrent Slices across Arcs), no `.planning/` monolith (federated `.state/build/` tree).
+
+8. **State Machine Deadlocks — Cross-Tier Blocking** — DAG edges only point child→parent, never parent→child. Cross-tier coordination is event-driven, not dependency-edge-driven. The scheduler rejects cross-tier edges at creation time. Runtime deadlock detection as a daemon health check.
+
+9. **Artifact Immutability Violations — Mid-Execution Plan Changes** — Tiered freezing rules: STEP.md freezes on `executing` entry, DISCUSS.md/PLAN.md freeze on `planning` entry, SLICE.md's `depends_on` freezes on `worktree_ready` entry, ARC.md's `goal`/`success_criteria` freeze on `in_progress` entry. Daemon HTTP middleware enforces immutability server-side. For necessary changes: abandon and replan via successor artifact.
+
+## Implications for Roadmap
+
+Based on combined research, the v40 design spike should be structured in two phases, followed by implementation milestones v41-v47:
+
+### v40 Phase 1: Tier Definitions & State Machines (Discuss + Specify)
+
+**Rationale:** The tier definitions are the foundation every other artifact depends on. State machines, event taxonomies, and behavioral primitives must be locked before naming conventions or on-disk layouts can be designed. Per PITFALLS.md, the state counts per tier must be capped at design time to prevent over-engineering during implementation.
+
+**Delivers:**
+- Arc, Phase, Slice, Step tier specifications (behavioral primitives, NOT GSD analogies)
+- State machine diagrams (Mermaid) with all transitions, guards, and events
+- Event taxonomy extension (28+ → ~40 events) with composite event definitions
+- Tension resolution: tier state counts (cap at Arc:3, Phase:4, Slice:5, Step:8)
+- Tension resolution: canonical ID format (sequential vs UUID — discuss-phase decides)
+
+**Addresses features:** Tier identity/lifecycle, event-driven state transitions, parent pointers, state machines mapped to artifact lifecycles
+
+**Avoids pitfalls:** Hierarchy over-engineering (#1), GSD coupling (#7), state machine deadlocks (#8)
+
+**Needs research:** Light — well-understood domain. The discuss-phase should resolve the ID format tension.
 
 ---
 
-## 6. P0 Pitfalls — Release-Blocker Rollup
+### v40 Phase 2: Artifact Catalog, Naming, Layout, Cross-Refs (Specify)
 
-| # | Pitfall | Surface | Arc(s) |
-|---|---------|---------|--------|
-| P0-1 | Missing `user-agent: claude-cli/<version>` header | Anthropic OAuth stealth | A2, A3 |
-| P0-2 | Missing `anthropic-beta: claude-code-20250219,oauth-2025-04-20,…` header | Anthropic OAuth stealth | A2 |
-| P0-3 | Missing `x-app: cli` header | Anthropic OAuth stealth | A2 |
-| P0-4 | Using `x-api-key` instead of Bearer for `sk-ant-oat*` | Anthropic OAuth stealth | A2 |
-| P0-5 | Registering fresh OAuth client instead of `9d1c250a-e61b-44d9-88ed-5944d1962f5e` | Anthropic OAuth stealth | A2 |
-| P0-6 | Dual-refresh race invalidates live token | Refresh lock | A2 |
-| P0-7 | `expires_in` verbatim (no 5-min buffer) | Anthropic OAuth stealth | A2 |
-| P0-8 | PKCE `state` not reused as verifier | Anthropic OAuth stealth | A2 |
-| P0-9 | SQLite event-sequence non-monotonic after crash → replay breaks | Dual-write | A1 |
-| P0-10 | Orphan locked worktrees fill disk | Worktree | A4, A6 |
-| P0-11 | Mode isolation leakage | Cross-mode | A11 |
-| P0-12 | MCP tool-name collision / cross-mode invocation | MCP | A11, A12, A13 |
-| P0-13 | `auth.json` world-readable | Auth vault | A2 |
-| P0-14 | OAuth refresh writes plaintext tokens to log when debug=true | Secret leakage | A2, observability |
-| P0-15 | Stale pid-file refuses daemon start | Daemon | A6 |
-| P0-16 | TaskGroup silently swallows `CancelledError`, deadlocking scheduler | Py 3.12 asyncio | A5 |
+**Rationale:** Once tiers are defined, the artifacts that populate them, the conventions that name them, and the cross-references that connect them can be specified. This phase resolves the three major tensions identified across research files.
 
-All 16 need explicit regression tests before v1. A2 carries 9 of them (P0-1..P0-8 + P0-13); give it a dedicated header-capture test Phase.
+**Delivers:**
+- Complete artifact catalog (every file, schema, owner, cross-refs)
+- Naming conventions (ID formats, slug rules, directory naming, MARKER conventions)
+- On-disk layout specification (resolves ARCHITECTURE.md vs PITFALLS.md tension)
+- Cross-referencing rules (ID-based with path lookup, broken-reference handling)
+- Pydantic schema models for every artifact (ArcFrontmatter, PhaseFrontmatter, etc.)
+- Tension resolution: STATE.md placement (per-directory vs consolidated JSON)
+- Tension resolution: Step file count (separate files vs consolidated ARTIFACTS.md)
+- Tension resolution: canonical ID type (sequential numeric vs UUID/ULID)
+
+**Addresses features:** Artifact discovery/navigation, canonical artifact catalog, cross-referencing patterns, naming conventions, on-disk layout, STATE.md consistency model
+
+**Avoids pitfalls:** Cross-reference drift (#2), naming convention drift (#4), on-disk proliferation (#5), frontmatter bloat (#6), artifact immutability violations (#9)
+
+**Needs research:** MEDIUM — the three tensions above need discuss-phase resolution. Decimal insertion depth and descoped-dependency semantics also flagged.
 
 ---
 
-## 7. Open Questions for the Roadmapper
+### v41-v47 Implementation Ordering Rationale
 
-1. **Verification Arc granularity** — keep inside A14 (current) vs split (a) A14 + rollup/cross-tier Arc, or (b) full split (Step / Rollup / Cross-tier / Eval-audit).
-2. **Mode-runtime factoring** — shared plumbing (selector, drop rules, Kolb runner, observation emission) lives (a) as a cross-cutting Phase before the four mode Phases, (b) duplicated inside each, or (c) in A18 (Teach kernel).
-3. **Concept-teacher ↔ modes direction** — AOL: concept-teacher invokes modes. Cleaner state shape: modes invoke concept-teacher. Roadmapper picks — affects A18/A20/A22 boundaries.
-4. **Docs Arc timing** — threaded per-Arc (living docs) vs a single late Arc.
-5. **Test-infra Arc timing** — same question; thoroughness-philosophy favors threaded.
-6. **Workstreams ↔ Arcs overlap** — collapse, keep both, or make workstreams a projection of Arc metadata.
-7. **Knowledge-graph Arc fit** — own Arc (Kuzu/DuckDB — L) vs folded into Codebase Intelligence.
-8. **MVP personality count** — 3 of 7 (FEATURES-suggested) vs full 7 day-one.
-9. **Quick/Sketch/Spike collapse** — three Arcs vs one "Ad-hoc" Arc with modes as Slices.
-10. **Eval infrastructure timing** — MVP (threaded into verifiers) vs post-MVP.
-11. **MVP scope boundary** — especially host portability (A26): FEATURES "required before GA" vs PROJECT.md "deprioritized."
+Based on architecture dependencies extracted from research:
 
----
+1. **v41 (Agent Harness)** — Consumes artifact schemas produced by v40. Needs the on-disk layout and artifact catalog locked first because the harness reads/writes these files. The harness's `system.transform` hook must know which frontmatter fields are context-relevant (~200 tokens, not ~2000).
 
-## 8. Watch Out For — Top 10
+2. **v42 (Quality Pipeline)** — Needs the event taxonomy and state machines from v40, plus the harness from v41 to verify agent behavior. The verifier must traverse all 4 tiers for cross-tier rollup verification. Consistency validator (19+ warning codes) is specified in v40 Phase 2.
 
-1. **Anthropic OAuth stealth header trio** (P0-1/2/3) — version-lock doc + captured-header regression test; **OAuth never through litellm** (P1-38).
-2. **Refresh-lock double-check** (P0-6) — re-read `auth.json` inside filelock; 10s acquire + 15s HTTP timeouts.
-3. **Events SQLite-first, SyncEvent-after** (P0-9) — startup reconciliation; deterministic payloads only (no `datetime.now()` in handlers).
-4. **TaskGroup CancelledError swallow** (P0-16) — scheduler watchdog + nested-TaskGroup regression test.
-5. **Orphan worktrees GC** (P0-10) — inspect `.git/worktrees/*/locked`; nightly daemon GC; never silently swallow `remove` errors.
-6. **Mode isolation at daemon middleware** (P0-11/12) — canonical gate is daemon-side; `mode` field on every event; projector filters.
-7. **MCP tool-budget cap** (P1-10) — ≤15 tools per server, ≤80 tokens per description; `state dev tool-budget` command.
-8. **Daemon pid-file with `start_time_ns`** (P0-15) — `/proc/<pid>/stat` verification; socket path `$XDG_RUNTIME_DIR/state-<hash>.sock`.
-9. **auth.json vault hygiene** (P0-13/14) — `os.open(..., 0o600)` + `os.fchmod`; root-logger token redactor.
-10. **Gemini OAuth client_secret in plaintext** (P1-3) — do NOT base64/XOR; comment Desktop-OAuth PKCE rationale.
+3. **v43 (GSD Command Porting)** — Maps GSD's commands to state's four-tier model. Per PITFALLS.md pitfall #7, every ported command must be audited for serial execution assumptions and redesigned for DAG-based concurrency.
 
-Also: drill prompt ≤3000 tokens (P1-33), structured-only observations (P1-34), plugin/daemon version header (P1-21), Google refresh-token rotation persistence (P2-2), pydantic `extra = "forbid"` on all specs (P2-16).
+4. **v44 (Rust DB)** — Independent of hierarchy design. Only needs the event schema from v40 Phase 1.
 
----
+5. **v46 (Teach-Mode Equivalents)** — Needs the complete build-mode hierarchy (v41-v43) as a template for teach-mode adaptation.
 
-## 9. Suggested Build Order
+### Research Flags
 
-**Tier 1 — Foundation** (parallel): A1 Event store, A2 Auth (start early — tallest P0 concentration), A3 Provider routing, A4 Worktree+snapshot, A5 DAG scheduler.
+**Phases needing deeper research during planning:**
+- **v40 Phase 2 (Artifact Catalog):** The three tensions (STATE.md placement, ID format, file consolidation) need discuss-phase exploration. Recommended: `/gsd-discuss-phase v40.P2` before planning.
+- **v42 (Quality Pipeline):** Cross-tier verification and deadlock detection are novel patterns with sparse prior art. Needs research on verifier architecture for hierarchical state machines.
 
-**Tier 2 — Kernels**: A6 Daemon, A7 Worker, A8 Plugin hooks, A9 Plugin TUI bundle, A10 DAG viewer, A11 Mode enforcement, A12 state-build skeleton, A13 state-teach skeleton.
+**Phases with standard patterns (skip research-phase):**
+- **v40 Phase 1 (Tier Definitions):** Well-understood domain. CQRS aggregate design, UML state machine patterns, and event taxonomy are documented in existing state codebase and industry sources.
+- **v41 (Agent Harness):** Standard plugin architecture. Follows opencode's 9-hook extension surface. The harness design is largely prescribed by opencode's API.
+- **v44 (Rust DB):** Standard database design. Independent of hierarchy complexity.
 
-**Tier 3 — Domain kernels** (build + teach parallel):
-- Build: A14 Step FSM + verifiers, A15 plan/execute/verify/ship, A16 GSD ports, A17 Build TUI.
-- Teach: A18 Kolb + concepts + mental-model, A19 Drill engine, A20 Four modes + selector, A21 Personalities + style, A22 Scaffolding/coding-partner, A23 Teach TUI, A24 Subject authoring.
-
-**Tier 4 — Polish & portability**: A25 Migration, A26 Portability shims, A27 Release & packaging.
-
-Test-infra + docs threading is open (see §7); if threaded, every Arc grows `-tests` + `-docs` tail-Slices.
-
----
-
-## 10. Confidence & Gaps
+## Confidence Assessment
 
 | Area | Confidence | Notes |
-|---|---|---|
-| Stack pins | HIGH | Validated against opencode `package.json` catalog + PyPI |
-| Opencode hook/TUI/bus/task/question/snapshot/worktree surface | HIGH | Source read directly |
-| Auth 5-method + stealth headers | HIGH | claude-oauth.md + gsd2-auth-analysis.md verbatim |
-| GSD command/module/agent/hook inventory | HIGH | 85 + 26 + 33 + 11 files enumerated |
-| Teaching modes breakdown | HIGH | All four skill files read; Slice counts from numbered rules |
-| Personalities | HIGH | All 7 read; trivial port |
-| Event store + daemon architecture | HIGH | Topology + taxonomy + SQL schema concrete |
-| Kolb/scaffold/mastery math | MEDIUM | Exact `drill verify` Bayesian update formula not confirmed in sources read — flag A18/A19 deep-dive |
-| GSD state-machine internals (bin/lib/*.cjs function-level) | MEDIUM | Top-level roles enumerated; PROJECT.md mandates redesign |
-| Arc granularity (27) | MEDIUM | Component-boundary is HIGH; XL Arcs may split |
-| Exotic cross-compat skills | LOW | Default `keep`; low stakes |
+|------|------------|-------|
+| Stack (design tools) | HIGH | Mermaid and Pydantic are mature, verified via official docs v11.14.0 and pydantic.dev. Mermaid C4 is experimental but sufficient for design docs. |
+| Features | HIGH | Hierarchy patterns validated against Jira, Azure DevOps, and Linear. State's existing event store, projector, and scheduler code read directly. MEDIUM on descoped-dependency resolution (needs discuss-phase). |
+| Architecture | HIGH | Event-store integration, CQRS projector, DAG scheduler, and worktree service code read directly from state's codebase. Composite event flow and cross-tier projection handlers are well-specified. MEDIUM on TUI visualization (inferred from plugin structure). |
+| Pitfalls | HIGH | Pitfalls #1, #2, #3, #7, #8, #9 grounded in formalisms (UML HSM, CQRS patterns, Martin Fowler) and direct GSD implementation experience (13 milestones). MEDIUM on #4 (naming drift patterns inferred from large-scale post-mortems), #5 (layout scale concerns are projections, not measured), #6 (schema bloat synthesized from best practices, no dedicated literature). |
 
-**Gaps for roadmap-time research:**
-- AOL `aol drill verify` internals (grader signatures, mastery update formula) — feeds A18/A19.
-- `TuiPluginInstallOptions` + opencode plugin install-discovery mechanics — feeds A27.
-- Interaction of opencode's `experimental.primary_tools` whitelist with `mcp__state-*__` names — A12/A13 compatibility test.
-- GSD's current hook-adapter interface-set confirmation (not porting) — feeds A8.
-- litellm's exact 1.80+ Anthropic beta-flag forwarding — capture-and-assert at A3 research.
+**Overall confidence: HIGH**
+
+The four research streams are complementary and internally consistent on the core architecture (CQRS aggregates, composite events, projector-built STATE.md, typed DAG edges, tiered immutability). The tensions that exist (ID format, STATE.md placement, file consolidation) are explicit and scoped — they don't undermine the foundational design but represent implementation detail choices resolvable in discuss-phase.
+
+### Gaps to Address
+
+- **UUID vs sequential IDs:** PITFALLS.md strongly recommends UUIDs for referential integrity; ARCHITECTURE.md recommends sequential per-parent numbers for readability and sortability. Resolve in v40 discuss-phase. Recommendation: sequential integers with decimal insertion, augmented by content-hash cross-references to catch drift (hybrid approach).
+
+- **STATE.md placement:** ARCHITECTURE.md recommends per-directory STATE.md files; PITFALLS.md recommends consolidated JSON projections under `.state/build/state/`. Resolve in v40 discuss-phase. Recommendation: consolidated JSON files for the projector's read cache, with an optional `state build export-state` command that renders per-directory STATE.md on demand for human inspection. This satisfies both the "STATE.md files are throwaway projections" principle and the "don't create 400+ files that are redundant cache" concern.
+
+- **Step file consolidation:** ARCHITECTURE.md lists 5 files per Step (STEP.md, DISCUSS.md, PLAN.md, VERIFY.md, EXECUTE.log); PITFALLS.md recommends consolidating into STEP.md + ARTIFACTS.md (2 files). Resolve in v40 discuss-phase. Recommendation: start with separate files for design clarity (easier tooling, clearer lifecycle), add consolidation as an optimization in v42 if file count becomes a performance problem. The architecture research notes that 2000 Steps at 5 files each = 10,000 files, which is manageable on modern filesystems.
+
+- **Descope semantics:** What happens when a `blocks` dependency is abandoned? Cascade-abandon, assume-satisfied with manual flag, or block-and-surface? Flagged as discuss-phase decision in both FEATURES.md and ARCHITECTURE.md. Recommendation: surface dependents with a health warning (W011) and require explicit `assume_satisfied: true` flag on the dependent's `depends_on` edge to proceed.
+
+## Sources
+
+### Primary (HIGH confidence — code read directly)
+- `src/state_core/schema.py` — 34+ event types, aggregate definitions, mode enforcement
+- `src/state_core/projector.py` — CQRS projection engine (19 handlers, 3 cache tables)
+- `src/state_core/events.py` — Event store API (append, read_stream, post-commit callbacks)
+- `src/state_build/kernel.py` — StepMachine skeleton (8 states defined)
+- `src/state_core/scheduler.py` — DAG scheduler (frontier, topo_sort, cycle detection)
+- `src/state_core/worktree.py` — WorktreeService protocol
+- `.planning/PROJECT.md` — Cardinal rules, constraints, architectural decisions
+- `.planning/milestones/v40/HANDOFF.md` — Milestone scope, artifact catalog, key questions
+
+### Primary (HIGH confidence — official documentation)
+- [Mermaid.js v11.14.0 — State Diagrams](https://mermaid.js.org/syntax/stateDiagram.html)
+- [Mermaid.js v11.14.0 — C4 Diagrams](https://mermaid.js.org/syntax/c4.html)
+- [Pydantic v2 — Models](https://docs.pydantic.dev/latest/concepts/models/)
+- [Pydantic v2 — JSON Schema](https://docs.pydantic.dev/latest/concepts/json_schema/)
+- [Azure CQRS Pattern (Microsoft Learn, 2025-02-20)](https://learn.microsoft.com/en-us/azure/architecture/patterns/cqrs)
+- [UML State Machine (Wikipedia)](https://en.wikipedia.org/wiki/UML_state_machine)
+
+### Secondary (MEDIUM confidence — industry patterns studied)
+- GSD v1-v13 implementation experience (13 milestones, 784+ tests, ~26K LoC)
+- GSD `artifacts.cjs` — canonical registry pattern (10 exact-match + 2 pattern-match)
+- GSD `verify.cjs` — health checks (19 warning codes for drift detection)
+- Jira hierarchy model (Epic→Story→Task, workflow states, link types)
+- Azure DevOps hierarchy (Epic→Feature→PBI→Task, work item states)
+- [Martin Fowler on CQRS (2011)](https://martinfowler.com/bliki/CQRS.html)
+- [C4 Model official site](https://c4model.com)
+
+### Tertiary (LOW confidence — inference/community)
+- Linear hierarchy model (Project→Cycle→Issue — documentation 404, inferred from training data)
+- Large-scale project directory layout post-mortems (naming drift patterns)
+- Mermaid C4 diagram syntax (marked experimental upstream — may evolve)
 
 ---
-
-## 11. Sources
-
-- PROJECT.md
-- `state-inputs/opencode/` (especially `packages/plugin/src/{index,tui}.ts`, `packages/opencode/src/{sync,storage,mcp,auth,task,question,permission,snapshot,worktree,skill,command}/`)
-- `state-inputs/claude-oauth.md` (load-bearing)
-- `state-inputs/gsd2-auth-analysis.md`
-- `state-inputs/opencode-extension-surface.md` + `opencode-integration-analysis.md`
-- `state-inputs/get-shit-done/` (commands, bin/lib, agents, hooks)
-- `state-inputs/gsd-2pi-codebase-analysis/{10-python-rebuild-mapping,11-architecture-discussion}.md`
-- `~/.claude/agent-of-learning/` (workflows, personalities, skills, learner JSON)
-- `~/.claude/skills/` (60+ cross-compat enumerated)
-- PyPI/GitHub releases for version floors; filelock CVE-2026-22701 advisory
+*Research completed: 2026-05-06*
+*Ready for roadmap: yes — with flagged tensions for v40 discuss-phase resolution*
