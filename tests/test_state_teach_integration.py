@@ -39,7 +39,7 @@ class TestServerRegistration:
         from state_teach.mcp import mcp
 
         tools = mcp._tool_manager._tools
-        assert len(tools) == 14, f"Expected 14 tools, got {len(tools)}"
+        assert len(tools) == 15, f"Expected 15 tools, got {len(tools)}"
 
     def test_tool_descriptions_within_budget(self) -> None:
         """Every tool description is ≤80 tokens (o200k_base) — MCP-T-02."""

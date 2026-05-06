@@ -105,6 +105,7 @@ EXPECTED_TOOLS: list[str] = [
     "concept_teach",
     "drill_prepare",
     "drill_verify",
+    "knowledge_check",
     "learner_state",
     "learning_verify",
     "mental_model_show",

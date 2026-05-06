@@ -148,6 +148,12 @@ def learning_verify() -> SkeletonResponse:
     return SkeletonResponse(tool="learning_verify")
 
 
+@mcp.tool()
+def knowledge_check() -> SkeletonResponse:
+    """Quiz the learner with retrieval-practice questions on the active concept"""
+    return SkeletonResponse(tool="knowledge_check")
+
+
 if __name__ == "__main__":
     _check_mode_gate(Path.cwd())
     asyncio.run(mcp.run_stdio_async())

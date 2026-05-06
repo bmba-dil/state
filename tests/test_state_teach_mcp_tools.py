@@ -65,8 +65,11 @@ async def test_all_tools_return_not_implemented() -> None:
             result = await fn()
         else:
             result = fn()
-        assert result == {"error": "not_implemented"}, (
+        assert result.tool == tool.name, (
             f"Tool {tool.name!r} returned {result!r}"
+        )
+        assert result.status == "not_implemented", (
+            f"Tool {tool.name!r} status is {result.status!r}"
         )
 
 
