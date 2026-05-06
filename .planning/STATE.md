@@ -73,7 +73,7 @@ A1–A11 (= v1–v11) complete. A13 (= v13) complete.
 | v10 shipped | 2026-05-05 |
 | v11 shipped | 2026-05-05 |
 | Phases defined | 260 |
-| Milestones defined | 27 |
+| Milestones defined | 38 (27 core + 11 design spike v40-v50) |
 | v1 requirements captured | 221 |
 | Coverage | 100% |
 | P0 pitfalls identified | 16 |
@@ -133,8 +133,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 ### Next actions (when resuming or starting)
 
 1. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this. Only remaining milestone in Tier 2.
-2. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
-3. **Optional cleanup:** v1–v11+v13 shipped; old phase branches safe to clean.
+2. **v40–v50 Design Spike:** 11 design-phase milestones to fully architect the build and teach kernels before v14–v27 are executed. Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`. Feed these into `gsd-new-milestone` in new sessions. User will be present for all discuss-phases (NOT autonomous).
+3. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
+4. **Optional cleanup:** v1–v11+v13 shipped; old phase branches safe to clean.
 
 ### v11 milestone delivered
 

@@ -13,14 +13,15 @@
 
 | Metric | Value |
 |---|---|
-| Milestones (= product Arcs) | **27** |
-| Phases total | **260** |
+| Milestones (= product Arcs) | **38** (27 core + 11 design spike) |
+| Phases total | **260** (+ v40–v50 phases TBD during design) |
 | v1 requirements mapped | **221 / 221 (100%)** |
 | Tier 1 (Foundation) milestones | 5 (parallel) |
 | Tier 2 (Kernel & Plumbing) milestones | 8 |
 | Tier 3a (Build domain) milestones | 4 |
 | Tier 3b (Teach domain) milestones | 7 |
 | Tier 4 (Polish & portability) milestones | 3 |
+| Tier 5 (Design Spike — v40–v50) milestones | 11 |
 | P0 pitfalls owned in v1 | 16 / 16 |
 
 ---
@@ -69,6 +70,22 @@
 - [ ] **v26 — Portability Shims** — Claude Code / Gemini CLI / Qwen Code MCP-only shims
 - [ ] **v27 — Release & Packaging** — pyproject + uvx installer + opencode plugin bundle + updater
 
+### Tier 5 — Design Spike (v40–v50) — Build & Teach Kernel Architecture
+
+These milestones architect the "business logic" layer — the hierarchy, harness, quality pipeline, workflow orchestration, and Rust DB — before v14–v27 are rewritten. All are design-phase only; no implementation code is produced.
+
+- [ ] **v40 — Build Hierarchy & Artifact System Architecture** — Arc/Phase/Slice/Step definitions, file layout, artifact catalog, naming conventions, cross-references, tracking file consistency
+- [ ] **v41 — Agent Harness & Context Control Design** — Context window management, opencode-specific task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, subagent management
+- [ ] **v42 — Build Quality Pipeline Architecture** — 4-level verifier, goal-backward planning, adversarial verification, stub detection, anti-pattern scanner, threat model, plan checker, evidence chain
+- [ ] **v43 — Build Workflow Orchestration & GSD Port Map** — Full discuss→plan→execute→verify→ship cycle, DAG scheduler integration, session management, error recovery, all 30 GSD commands mapped
+- [ ] **v44 — Rust DB & RTK Agent Interception System** — Agent tool-call interception, fast Rust database, whitespace stripping, context compression, RTK integration
+- [ ] **v45 — Consolidated Design & v14–v27 Rewrite Specs** — Gap analysis, updated REQ-IDs, updated phase decompositions for v14–v17, updated tracking files
+- [ ] **v46 — Teach Mode Structure & Artifact Architecture** — Subject/Module/Concept/Drill hierarchy, Kolb FSM, mental model schema, teach artifact catalog
+- [ ] **v47 — Teach Mode Harness & Teaching Control** — Teaching session management, mode selection, personality/style injection, frustration detection, hint escalation
+- [ ] **v48 — Teach Quality & Learning Verification Pipeline** — Bayesian mastery formula, drill engine (8 types), spaced repetition, misconception detection, growth verification
+- [ ] **v49 — Teach Workflow Architecture & AOL Port Map** — Full lesson→code→drills cycle, teaching subagents, subject authoring, scaffolding/coding-partner workflows, AOL port map
+- [ ] **v50 — Consolidated Teach Design & v18–v24 Rewrite Specs** — Gap analysis, updated REQ-IDs, updated phase decompositions for v18–v24, Phase 178 resolved
+
 ---
 
 ## Milestone DAG (Dependencies)
@@ -101,6 +118,16 @@ Tier 4:
   v1, v11          ──► v25 (soft)
   v12, v13         ──► v26
   most-of-v1..v24  ──► v27
+
+Tier 5 (Design Spike — design-phase only, no implementation code):
+  v11               ──► v40 ──┬──► v41 ──┬──► v42 ──┬──► v43
+                                 │          │          │
+                                 └──► v44   │          │
+                                            │          │
+  v40 (patterns)    ──► v46 ──┬──► v47 ──┬──► v48 ──┬──► v49
+                                                       │
+  v40+v41+v42+v43   ──► v45 (build consolidate)        │
+  v46+v47+v48+v49   ──► v50 (teach consolidate)        │
 ```
 
 <!-- TODO: tighten phase-level depends-on edges (v11.P3/P4 → v8 phase specificity; v9.P5 → v6/v7 split; v17 → v14.P10 soft-dep) before v5 wave planning. See REVIEW-ROADMAP.md §5b/§5c. -->
@@ -169,6 +196,17 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v25. Migration & Import | 0/8 | Not started | - | - |
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
+| v40. Build Hierarchy & Artifact Architecture | — | Not started (design spike) | - | - |
+| v41. Agent Harness & Context Control | — | Not started (design spike) | - | - |
+| v42. Build Quality Pipeline | — | Not started (design spike) | - | - |
+| v43. Build Workflow & GSD Port Map | — | Not started (design spike) | - | - |
+| v44. Rust DB & RTK Interception | — | Not started (design spike) | - | - |
+| v45. Consolidated Build Design & Rewrite | — | Not started (design spike) | - | - |
+| v46. Teach Mode Structure & Artifacts | — | Not started (design spike) | - | - |
+| v47. Teach Mode Harness & Control | — | Not started (design spike) | - | - |
+| v48. Teach Quality & Learning Verification | — | Not started (design spike) | - | - |
+| v49. Teach Workflow & AOL Port Map | — | Not started (design spike) | - | - |
+| v50. Consolidated Teach Design & Rewrite | — | Not started (design spike) | - | - |
 | **TOTAL** | **106/260** | — | — | — |
 
 ---

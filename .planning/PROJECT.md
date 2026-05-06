@@ -223,7 +223,7 @@ This document evolves at phase transitions and milestone boundaries.
 - ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests.
 - 784+ tests passing (321 v1 baseline + 463 v2 net-new).
 - Subsystems shipped: `state_core.events` (v1), `state_core.auth` (v2), `state_core.providers` (v3), `state_core.worktree` (v4), `state_core.scheduler` (v5), `state_daemon` (v6), `state_worker` (v7), `@state/opencode-plugin` (v8/v9/v10), `state_core.mode` (v11).
-- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked.
+- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked; v13 shipped. **v40–v50 design spike initiated (2026-05-06) — 11 design-phase milestones to fully architect build and teach kernels before v14–v27 execution.** Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`.
 
 **Patterns proven by v2:**
 - Wave-based TDD execution (Wave 0 RED → Wave 1+ GREEN drilling) keeps each plan auditable; 463 net-new tests landed without flaking.
