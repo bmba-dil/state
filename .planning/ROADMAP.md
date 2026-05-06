@@ -14,7 +14,7 @@
 | Metric | Value |
 |---|---|
 | Milestones (= product Arcs) | **27** |
-| Phases total | **256** |
+| Phases total | **260** |
 | v1 requirements mapped | **221 / 221 (100%)** |
 | Tier 1 (Foundation) milestones | 5 (parallel) |
 | Tier 2 (Kernel & Plumbing) milestones | 8 |
@@ -38,11 +38,11 @@
 ### Tier 2 — Kernel & Plumbing (depends on Tier 1)
 
 - [x] **v6 — State Daemon (HTTP + SSE + mode middleware)** — Always-on user service with canonical mode gate ✓ Shipped 2026-05-04
-- [ ] **v7 — Per-Session Worker** — Session-scoped worker bridging plugin and daemon
-- [ ] **v8 — Plugin Server Hooks (9 hooks)** — Full opencode hook surface wired
-- [ ] **v9 — Plugin TUI Bundle** — SolidJS TUI extensions (sidebar, statusline, toasts)
-- [ ] **v10 — TUI DAG Viewer** — Shared DAG visualization route
-- [ ] **v11 — Mode Enforcement (6 layers)** — Physical + runtime + static enforcement of exclusive modes
+- [x] **v7 — Per-Session Worker** — Session-scoped worker bridging plugin and daemon ✓ Shipped 2026-05-05
+- [x] **v8 — Plugin Server Hooks (9 hooks)** — Full opencode hook surface wired ✓ Shipped 2026-05-05 (11/12 phases; HOOK-05 deferred)
+- [x] **v9 — Plugin TUI Bundle** — SolidJS TUI extensions (sidebar, statusline, toasts) ✓ Shipped 2026-05-05
+- [x] **v10 — TUI DAG Viewer** — Shared DAG visualization route ✓ Shipped 2026-05-05
+- [x] **v11 — Mode Enforcement (6 layers)** — Physical + runtime + static enforcement of exclusive modes ✓ Shipped 2026-05-05
 - [ ] **v12 — state-build MCP Server (skeleton)** — Mode-gated MCP server with 15-tool budget
 - [ ] **v13 — state-teach MCP Server (skeleton)** — Mode-gated MCP server with 15-tool budget
 
@@ -132,7 +132,7 @@ Tier 4:
 ### Tier boundaries
 
 Tier 1 ends when v1..v5 all report `shipped`. **v1 ✓ + v2 ✓ + v3 ✓ + v4 ✓ + v5 ✓ — Tier 1 complete (5/5).**
-Tier 2 ends when v6..v13 all report `shipped`.
+Tier 2 ends when v6..v13 all report `shipped`. **v6 ✓ + v7 ✓ + v8 ✓ + v9 ✓ + v10 ✓ + v11 ✓ — 2 left (v12, v13).**
 Tier 3 ends when v14..v24 all report `shipped` (Build + Teach kernels complete).
 Tier 4 ends at v27 shipped — this is v1 release.
 
@@ -148,13 +148,13 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v4. Worktree + Snapshot | 9/9 | **Complete** — Shipped 2026-05-04 | - | 2026-05-04 |
 | v5. DAG Scheduler | 9/9 | **Complete** — Shipped 2026-05-04 | - | 2026-05-04 |
 | v6. State Daemon | 10/10 | Shipped | 2026-05-04 | 2026-05-04 |
-| v7. Per-Session Worker | 0/8 | Not started | - | - |
-| v8. Plugin Server Hooks | 0/12 | Not started | - | - |
-| v9. Plugin TUI Bundle | 0/9 | Not started | - | - |
-| v10. TUI DAG Viewer | 0/8 | Not started | - | - |
-| v11. Mode Enforcement | 0/9 | Not started | - | - |
+| v7. Per-Session Worker | 8/8 | **Complete** — Shipped 2026-05-05 | - | 2026-05-05 |
+| v8. Plugin Server Hooks | 11/12 | **Complete** — Shipped 2026-05-05 (HOOK-05 deferred) | - | 2026-05-05 |
+| v9. Plugin TUI Bundle | 9/9 | **Complete** — Shipped 2026-05-05 | - | 2026-05-05 |
+| v10. TUI DAG Viewer | 8/8 | **Complete** — Shipped 2026-05-05 | - | 2026-05-05 |
+| v11. Mode Enforcement | 9/9 | **Complete** — Shipped 2026-05-05 | - | 2026-05-05 |
 | v12. state-build MCP | 0/9 | Not started | - | - |
-| v13. state-teach MCP | 0/9 | Not started | - | - |
+| v13. state-teach MCP | 2/9 | In progress | - | - |
 | v14. Build Kernel Step FSM | 0/11 | Not started | - | - |
 | v15. Build Core Commands | 0/10 | Not started | - | - |
 | v16. Build GSD Ports | 0/14 | Not started | - | - |
@@ -169,7 +169,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v25. Migration & Import | 0/8 | Not started | - | - |
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
-| **TOTAL** | **61/256** | — | — | — |
+| **TOTAL** | **106/260** | — | — | — |
 
 ---
 
