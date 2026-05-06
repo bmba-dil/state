@@ -6,8 +6,8 @@ Hypothesis property tests for correctness across arbitrary inputs.
 
 from __future__ import annotations
 
-from hypothesis import given, strategies as st
-
+from hypothesis import given
+from hypothesis import strategies as st
 
 # ── Edge-case unit tests ───────────────────────────────────────
 
@@ -75,11 +75,13 @@ def test_token_count_monotonic(a: str, b: str) -> None:
     assert count_ab >= count_b
 
 
-@given(st.text(min_size=12000, max_size=20000))
+@given(st.text(min_size=1000, max_size=8000))
 def test_long_text_upper_bound(text: str) -> None:
-    """Even long prompts have bounded token counts (never negative overflow)."""
+    """Even long prompts have bounded token counts that scale linearly."""
     from state_teach.tokens import count_tokens
 
     count = count_tokens(text)
-    # For 20000 chars max, token count cannot exceed ceil(20000/4)=5000
-    assert 0 <= count <= 5000
+    # chars // 4 must stay within reasonable bounds
+    expected = len(text) // 4
+    assert count == expected
+    assert 0 <= count <= 2000  # ceil(8000/4)
