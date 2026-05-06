@@ -42,6 +42,10 @@ Plans:
 **Depends on:** 002
 **Requirements:** MCP-T-05
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [x] 118-01-PLAN.md — Pydantic Observation model with 5 structured kinds, kind discriminator, extra="forbid"
 
 #### Phase 119 — Drill prompt token cap (≤3000 tokens)
 **Goal:** Helper to count + cap; Hypothesis property test.
