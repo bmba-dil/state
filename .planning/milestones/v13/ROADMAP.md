@@ -75,13 +75,17 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [x] 121-PLAN.md — Refactor state-teach mode gate to lightweight Phase 112 pattern (no structlog/schema deps, sys.exit(78))
+- [x] 121-01-PLAN.md — Refactor state-teach mode gate to lightweight Phase 112 pattern (no structlog/schema deps, sys.exit(78))
 
 #### Phase 122 — Tool-budget CI assertion (shared helper w/ v12)
 **Goal:** `state dev tool-budget --server state-teach` green.
 **Depends on:** 116
 **Requirements:** (shares MCP-B-06 infra)
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [x] 122-01-PLAN.md — CLI entry point + CI assertion script for state-teach tool budget (shared MCP-B-06 infra)
 
 #### Phase 123 — Integration test against real opencode MCP client
 **Goal:** As 114.
