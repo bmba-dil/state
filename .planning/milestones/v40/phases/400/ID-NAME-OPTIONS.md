@@ -1,0 +1,182 @@
+# Phase 400 — ID Format & Naming Convention Options
+
+## Folder Tree (conceptual)
+
+```
+.state/build/
+├── arcs/
+│   ├── arc{ID}{-Display-Slug}/
+│   │   ├── ARC.md                  # arc definition + frontmatter
+|   |   |-- STATE.md
+|   |   |-- CRIT.md      #our 'REQUIREMENTS' stands for 'must have criteria'
+|   |   |-- MAP.md
+│   │   └── phases/
+│   │       └── phase{ID}{-display-slug}/
+|   |           |-- CRIT.md
+|   |           |-- MAP.md
+│   │           ├── PHASE.md         # phase definition + frontmatter
+│   │           └── slices/
+│   │               └── slice{ID}{-display-slug}/
+│   │                   ├── DESIGN.md    # design output
+│   │                   ├── RESEARCH.md       # plan output
+│   │                   ├── step1PLAN.md     # run plan
+│   │                   ├── step2PLAN.md     # run plan
+│   │                   ├── step3PLAN.md     # run plan
+│   │                   ├── VERIFICATION.md     # verify output
+│   │                   ├── SUMMARY.md     # verify output
+
+***** all of the above changes are extremely important for the workflow design. each slice with be run end to end with /state-plan-slice{ID} and /state-run-slice{ID} *** We will be using the word 'run' in place of 'execute' from now on.
+***** AND I have decided that all usage of the word 'discuss' will now be 'design' in all instances. so /state-design-slice{ID}
+
+```
+
+The **Slice** is the terminal container — every Slice folder holds all Step workflow documents.
+
+^^^This is true, but a HUGE change(which follows gsd structure) steps are the markdown files determined by the design and research phase. steps do not get thier own folders
+
+---
+
+## Option A: Dash Prefix (kebab-case)
+
+```
+.state/build/arcs/arc-45-auth-system/phases/phase-22-oauth-migration/slices/slice-12-anthropic-oauth/steps/step-5-implement-pkce/
+
+Commands:
+  /state-new-arc
+  /state-plan-slice 12          (resolves without slug, bare ID)
+  /state-audit-phase 22
+  /state-discuss-step 5
+  /state-execute-slice 12
+```
+
+| What | Example |
+|------|---------|
+| Arc ID | `arc-45` |
+| Phase ID | `phase-22` |
+| Slice ID | `slice-12` |
+| Step ID | `step-5` |
+| Folder (Arc) | `arc-45-auth-system/` |
+| Folder (Phase) | `phase-22-oauth-migration/` |
+| Folder (Slice) | `slice-12-anthropic-oauth/` |
+| Folder (Step) | `step-5-implement-pkce/` |
+
+**Separator rules:** Dash between prefix and number. Optional dash+kebab-slug after number. ID parse: split on first `-` gets prefix, then number, remainder is slug.
+
+---
+
+## Option B: No Dashes, Lowecase Slug
+
+```
+.state/build/arcs/arc45authsystem/phases/phase22oauthmigration/slices/slice12anthropicoauth/steps/step5implementpkce/
+```
+
+| What | Example |
+|------|---------|
+| Arc ID | `arc45` |
+| Folder (Arc) | `arc45authsystem/` |
+
+**Problem:** Can't parse where ID ends and slug begins. `arc45authsystem` — is it arc 45 or arc 4? If always ≥1 digit, `arc45` is unambiguous but the slug boundary is not.
+
+---
+
+## Option C: CamelCase
+
+```
+.state/build/arcs/arc45AuthSystem/phases/phase22OauthMigration/slices/slice12AnthropicOauth/steps/step5ImplementPkce/
+```
+
+| What | Example |
+|------|---------|
+| Arc ID | `arc45` |
+| Folder (Arc) | `arc45AuthSystem/` |
+
+**Problem:** Same boundary issue — `arc45AuthSystem` requires knowing the number ends before the first uppercase letter.
+
+---
+
+## Option D: Dash Prefix + CamelCase Slug
+
+```
+.state/build/arcs/arc-45-AuthSystem/phases/phase-22-OauthMigration/slices/slice-12-AnthropicOauth/steps/step-5-ImplementPkce/
+```
+
+**Separator rules:** Dash between all segments. ID parse: first segment is prefix, second is number, remainder is CamelCase slug.
+
+---
+
+## Option E: Dot Separator (no prefix)
+
+```
+.state/build/arcs/45/auth-system/phases/22/oauth-migration/slices/12/anthropic-oauth/steps/5/implement-pkce/
+```
+
+| What | Example |
+|------|---------|
+| Arc ID | `45` |
+| Phase ID | `22` |
+| Slice ID | `12` |
+| Step ID | `5` |
+
+**Problem:** No prefix means loss of context in isolation. `5` alone doesn't tell you it's a Step.
+
+---
+
+## Option F: Minima (shortest possible folders)
+
+```
+.state/build/arcs/a45-auth/phases/p22-oauth/slices/s12-anthropic/steps/st5-pkce/
+```
+
+| What | Example |
+|------|---------|
+| Arc ID | `a45` |
+| Phase ID | `p22` |
+| Slice ID | `s12` |
+| Step ID | `st5` |
+
+---
+
+## Slash Command Styles
+
+### Style 1: OpenCode convention (dashes)
+```
+/state-new-arc
+/state-new-phase 22
+/state-plan-slice 12
+/state-discuss-step 5
+/state-execute-slice 12
+/state-verify-step 5
+/state-audit-phase 22
+/state-ship-slice 12
+/state-progress
+/state-status arc-45
+```
+
+### Style 2: GSD convention (colons)
+```
+/state:build:new-arc
+/state:build:plan-slice 12
+/state:build:discuss-step 5
+```
+
+### Style 3: Minimal collapsed
+```
+/state-plan  12   (slice is default/context-aware)
+/state-discuss 5  (step**NEEDS TO BE 'slice' is default/context-aware) **Again, steps are the output of the run phase, they are generated by them as markdown tracking files of what was done. and each 'step' can be cut into pieces WITHIN. so a step could be step 1.1, 1.2, 1.3, ALL contained in one 'step', and all of the steps MUST be completed in the slice for the slice to be considered finished, and then verification and summary workflows run, and there may be optional 'review' 'lock-in' 'ship' sub-flows that create tracking file output that would be in the slice folder as well.
+/state-new arc     (tier is argument, not fused) ** i like this, 'new' is a special use variable that isn't used all that often and i like it as /state-new arc, /state-new phase
+
+```
+
+---
+
+## Resolution Rules (how commands find their target)
+
+1. User types `/state-plan-slice 12` → system resolves to `slice-12-*` by scanning `index.json`
+2. User types `/state-plan-slice 12` with multiple `slice-12-*` matches → error "ambiguous: slice-12-foo, slice-12-bar"
+3. User types `/state-plan-slice anthropic-oauth` → full-text search slugs in index.json → resolves to `slice-12-anthropic-oauth`
+4. User types `/state-plan-slice` with no ID → uses "current active slice" from session context
+5. Same rules apply for Arc, Phase, and Step prefixes
+
+
+****** ONE LAST HUGE CHANGE!@!!!!!!. WE MUST RENAME THE 'PHASE' VARIABLE! its too confusing to have a whole tier of work that will eventuallly include a LOT of slices and steps be called phase when we also use phase as a verb in like 'run phase' 'verify phase' etc etc.
+I'm thinking sprint??? or 'chunk'? or 'piece'? what do you think?

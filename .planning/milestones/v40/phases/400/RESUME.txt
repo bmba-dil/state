@@ -1,0 +1,15 @@
+---RESUME---
+phase: 400
+milestone: v40
+auto: false
+nextCommand: /gsd-plan-phase 400
+contextFiles:
+  - .planning/milestones/v40/phases/400/400-CONTEXT.md
+  - .planning/milestones/v40/ROADMAP.md
+  - .planning/PROJECT.md
+  - .planning/STATE.md
+  - .planning/milestones/v40/REQUIREMENTS.md
+skillFile: skills/gsd-plan-phase/SKILL.md
+autoInject:
+  - AGENTS.md
+  - ~/.claude/CLAUDE.md
