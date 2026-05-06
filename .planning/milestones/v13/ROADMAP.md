@@ -22,6 +22,10 @@ Plans:
 **Depends on:** 115
 **Requirements:** MCP-T-02, MCP-T-03
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 116-01-PLAN.md — Register 14 skeleton teach-mode tools with ≤80-word descriptions + budget verification tests
 
 #### Phase 117 — Opencode `question` tool binding wrapper
 **Goal:** `ask_structured(questions: list[Question])` → typed answers via `client.question.ask(...)`.
