@@ -32,6 +32,10 @@ Plans:
 **Depends on:** 115
 **Requirements:** MCP-T-04
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 117-01-PLAN.md — Question binding module with Pydantic Question/Option/Answer models and skeleton `ask_structured()` function
 
 #### Phase 118 — Observation schema (structured-only, reject freeform)
 **Goal:** Pydantic `Observation` with discriminator `kind`; `extra = "forbid"`.
