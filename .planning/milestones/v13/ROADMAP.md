@@ -52,12 +52,20 @@ Plans:
 **Depends on:** 115
 **Requirements:** MCP-T-06
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [ ] 119-01-PLAN.md — Token counting + cap enforcement module with Hypothesis property tests
 
 #### Phase 120 — Shared library wiring (auth, events via `state_core`)
 **Goal:** As 111.
 **Depends on:** 115
 **Requirements:** (infrastructure)
 **Parallelizable:** yes
+**Plans:** 1 plan
+
+Plans:
+- [x] 120-01-PLAN.md — wire state_teach to state_core.auth and state_core.events
 
 #### Phase 121 — Mode-gate integration (refuse start when mode=build)
 **Goal:** As 112.
