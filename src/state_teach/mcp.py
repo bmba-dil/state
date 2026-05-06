@@ -1,4 +1,4 @@
-"""state-teach MCP server entry point — Phase 115. FastMCP stdio; mode-gate check."""
+"""state-teach MCP server entry point. FastMCP stdio; mode-gate check."""
 
 from __future__ import annotations
 
@@ -7,17 +7,12 @@ import json
 import sys
 from pathlib import Path
 
-import structlog
 from mcp.server.fastmcp import Context, FastMCP  # noqa: F401 (Context: Phase 120 wiring)
 from pydantic import BaseModel
-
-from state_core.schema import validate_mode_config
 
 # Shared library wiring (Phase 120) — single import surface for all tools
 from state_core.auth import load_credentials as _load_credentials  # noqa: F401
 from state_core.events import SqliteEventStore as _SqliteEventStore  # noqa: F401
-
-log = structlog.get_logger(__name__)
 
 
 class SkeletonResponse(BaseModel):
@@ -27,38 +22,34 @@ class SkeletonResponse(BaseModel):
     status: str = "not_implemented"
 
 
-def check_mode_gate(project_root: Path) -> None:
-    """Read .state/mode.json and refuse to start if mode is 'build'.
+def _check_mode_gate(project_root: Path) -> None:
+    """Verify mode.json allows state-teach to run.
+
+    Reads .state/mode.json and exits with a clear error if the active
+    mode is 'build'.  Called before the server starts.
 
     Args:
         project_root: Project root directory (where .state/ lives).
 
     Raises:
-        SystemExit(1): If mode is 'build' or mode.json is invalid.
+        SystemExit(78): If mode is 'build'.
     """
     mode_path = project_root / ".state" / "mode.json"
     if not mode_path.exists():
-        log.warning("mcp.mode_gate_no_file", path=str(mode_path))
-        return
+        return  # No mode file — allow startup (development mode)
 
     try:
-        raw = mode_path.read_text(encoding="utf-8")
-        data = json.loads(raw)
-    except (json.JSONDecodeError, OSError) as exc:
-        log.error("mcp.mode_gate_invalid_json", path=str(mode_path), error=str(exc))
-        sys.exit(1)
+        data = json.loads(mode_path.read_text())
+        mode = data.get("mode")
+    except (json.JSONDecodeError, OSError):
+        return  # Corrupt or unreadable — allow startup
 
-    try:
-        cfg = validate_mode_config(data)
-    except ValueError as exc:
-        log.error("mcp.mode_gate_invalid_config", path=str(mode_path), error=str(exc))
-        sys.exit(1)
-
-    if cfg.mode == "build":
-        log.error("mcp.mode_gate_blocked", reason="state-teach cannot start in build mode")
-        sys.exit(1)
-
-    log.info("mcp.mode_gate_passed", mode=cfg.mode)
+    if mode not in ("teach", "both"):
+        sys.stderr.write(
+            f"state-teach: mode mismatch — .state/mode.json has mode={mode}, "
+            f"but state-teach requires mode=teach or mode=both.\n",
+        )
+        sys.exit(78)  # EX_CONFIG: configuration error
 
 
 mcp = FastMCP("state-teach")
@@ -158,5 +149,5 @@ def learning_verify() -> SkeletonResponse:
 
 
 if __name__ == "__main__":
-    check_mode_gate(Path.cwd())
+    _check_mode_gate(Path.cwd())
     asyncio.run(mcp.run_stdio_async())

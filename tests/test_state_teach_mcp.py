@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-from state_teach.mcp import SkeletonResponse, check_mode_gate, mcp
+from state_teach.mcp import SkeletonResponse, _check_mode_gate, mcp
 
 
 def test_mcp_server_name() -> None:
@@ -22,64 +22,62 @@ def test_mcp_server_name() -> None:
 
 
 def test_mode_gate_rejects_build(tmp_path: Path) -> None:
-    """check_mode_gate exits with code 1 when mode.json mode is 'build'."""
+    """_check_mode_gate exits with code 78 when mode.json mode is 'build'."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
     mode_file.write_text(json.dumps({"mode": "build"}))
 
     with pytest.raises(SystemExit) as exc_info:
-        check_mode_gate(tmp_path)
-    assert exc_info.value.code == 1
+        _check_mode_gate(tmp_path)
+    assert exc_info.value.code == 78
 
 
 def test_mode_gate_allows_teach(tmp_path: Path) -> None:
-    """check_mode_gate returns normally when mode.json mode is 'teach'."""
+    """_check_mode_gate returns normally when mode.json mode is 'teach'."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
     mode_file.write_text(json.dumps({"mode": "teach"}))
 
-    check_mode_gate(tmp_path)
+    _check_mode_gate(tmp_path)
 
 
 def test_mode_gate_allows_both(tmp_path: Path) -> None:
-    """check_mode_gate returns normally when mode.json mode is 'both'."""
+    """_check_mode_gate returns normally when mode.json mode is 'both'."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
     mode_file.write_text(json.dumps({"mode": "both"}))
 
-    check_mode_gate(tmp_path)
+    _check_mode_gate(tmp_path)
 
 
 def test_mode_gate_missing_file(tmp_path: Path) -> None:
-    """check_mode_gate returns normally when .state/mode.json does not exist."""
-    check_mode_gate(tmp_path)
+    """_check_mode_gate returns normally when .state/mode.json does not exist."""
+    _check_mode_gate(tmp_path)
 
 
 def test_mode_gate_invalid_json(tmp_path: Path) -> None:
-    """check_mode_gate exits with code 1 when mode.json is invalid JSON."""
+    """_check_mode_gate returns normally when mode.json is invalid JSON (leniency matching Phase 112)."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
     mode_file.write_text("{not json}")
 
-    with pytest.raises(SystemExit) as exc_info:
-        check_mode_gate(tmp_path)
-    assert exc_info.value.code == 1
+    _check_mode_gate(tmp_path)  # Must not raise — corrupt JSON allows startup
 
 
 def test_mode_gate_invalid_mode_value(tmp_path: Path) -> None:
-    """check_mode_gate exits with code 1 when mode.json has an unsupported mode value."""
+    """_check_mode_gate exits with code 78 when mode.json has an unsupported mode value."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
     mode_file.write_text(json.dumps({"mode": "kernel"}))
 
     with pytest.raises(SystemExit) as exc_info:
-        check_mode_gate(tmp_path)
-    assert exc_info.value.code == 1
+        _check_mode_gate(tmp_path)
+    assert exc_info.value.code == 78
 
 
 def test_import_lint_clean() -> None:
@@ -172,7 +170,7 @@ def test_skeleton_tools_return_not_implemented() -> None:
 
 
 def test_mode_gate_still_works_after_tool_registration(tmp_path: Path) -> None:
-    """Phase 116 tool additions must not break the Phase 115 mode-gate."""
+    """Phase 116 tool additions must not break the Phase 121 mode-gate."""
     state_dir = tmp_path / ".state"
     state_dir.mkdir()
     mode_file = state_dir / "mode.json"
@@ -180,9 +178,9 @@ def test_mode_gate_still_works_after_tool_registration(tmp_path: Path) -> None:
     # Build mode must still block
     mode_file.write_text(json.dumps({"mode": "build"}))
     with pytest.raises(SystemExit) as exc_info:
-        check_mode_gate(tmp_path)
-    assert exc_info.value.code == 1
+        _check_mode_gate(tmp_path)
+    assert exc_info.value.code == 78
 
     # Teach mode must still allow
     mode_file.write_text(json.dumps({"mode": "teach"}))
-    check_mode_gate(tmp_path)  # no exception
+    _check_mode_gate(tmp_path)  # no exception
