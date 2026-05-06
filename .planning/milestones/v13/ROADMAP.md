@@ -55,7 +55,7 @@ Plans:
 **Plans:** 1 plan
 
 Plans:
-- [ ] 119-01-PLAN.md — Token counting + cap enforcement module with Hypothesis property tests
+- [x] 119-01-PLAN.md — Token counting + cap enforcement module with Hypothesis property tests
 
 #### Phase 120 — Shared library wiring (auth, events via `state_core`)
 **Goal:** As 111.
