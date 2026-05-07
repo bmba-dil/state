@@ -15,7 +15,7 @@
 ## Phases
 
 - [x] **Phase 400: Tier Definitions & State Machines** (Completed 2026-05-06) — Complete behavioral definitions, state machines, event taxonomies, and pydantic frontmatter models for all four tiers
-- [ ] **Phase 401: Artifact Catalog, Naming, Layout, Cross-Refs** — Every artifact, naming convention, on-disk path, and cross-reference rule fully specified
+- [x] **Phase 401: Artifact Catalog, Naming, Layout, Cross-Refs** — Every artifact, naming convention, on-disk path, and cross-reference rule fully specified (completed 2026-05-07)
 
 ---
 
@@ -54,9 +54,9 @@ Plans:
 **Plans**: 3 plans in 3 waves
 
 Plans:
-- [ ] 401-01-PLAN.md — Artifact catalog + templates + immutability + schema ownership (ART-01..05)
-- [ ] 401-02-PLAN.md — Directory tree + naming + STATE placement + index.json schema (DSK-01..06)
-- [ ] 401-03-PLAN.md — Cross-reference format + W-codes + validate_consistency() (REF-01..06)
+- [x] 401-01-PLAN.md — Artifact catalog + templates + immutability + schema ownership (ART-01..05)
+- [x] 401-02-PLAN.md — Directory tree + naming + STATE placement + index.json schema (DSK-01..06)
+- [x] 401-03-PLAN.md — Cross-reference format + W-codes + validate_consistency() (REF-01..06)
 
 ---
 
@@ -65,7 +65,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 400. Tier Definitions & State Machines | 3/3 | Complete | 2026-05-06 |
-| 401. Artifact Catalog, Naming, Layout, Cross-Refs | 3/3 | Planned | 2026-05-07 |
+| 401. Artifact Catalog, Naming, Layout, Cross-Refs | 3/3 | Complete    | 2026-05-07 |
 
 ---
 
