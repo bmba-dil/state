@@ -84,9 +84,15 @@ harness concern, documented here for design contract completeness.
         │              │
         └──────────────┘
 
-  Forward states (count toward ≤8 total): idle, designing, planning, running, verifying, done = 6
-  Exit states (count toward ≤8 total): blocked, abandoned = 2
-  Total: 8 states ≤ 8 budget ✓
+  Step is the ONLY tier with a count limit. The number of Steps per Slice is bounded by
+  the context token limit of a single agent session. When planning a Slice, the Stage
+  estimates how many Steps can fully execute end-to-end within the available context window,
+  and that becomes the Slice's Step count. This means Stages with broad CRIT.md scope
+  naturally produce many Slices, each with a manageable number of Steps.
+
+  Forward states: idle, designing, planning, running, verifying, done = 6
+  Exit states: blocked, abandoned = 2
+  Total states: 8 (the Step machine's internal state count; distinct from Step-per-Slice count)
 
   Key design decisions:
   - "designing" (NOT "discussing") per D-03
@@ -99,18 +105,18 @@ harness concern, documented here for design contract completeness.
 
 ## State Transition Table
 
-| From | To | Event Trigger | Guard Condition | Budget Check |
-|------|----|---------------|-----------------|-------------|
-| `idle` | `designing` | `state.step.designed` | Step created, agent invokes design | ≤8 ✓ |
-| `designing` | `planning` | `state.step.planned` | DESIGN.md completed | ≤8 ✓ |
-| `idle` | `planning` | `state.step.planned` | Design skipped by agent (simple work, no research needed) | ≤8 ✓ |
-| `planning` | `running` | `state.step.ran` | PLAN.md completed | ≤8 ✓ |
-| `running` | `verifying` | `state.step.verify_started` | All sub-steps complete | ≤8 ✓ |
-| `verifying` | `done` | `state.step.verify_passed` | VERIFICATION.md passes | ≤8 ✓ |
-| `verifying` | `running` | `state.step.verify_failed` | Fix needed; loop back to running | ≤8 ✓ |
-| `*` | `blocked` | `state.step.blocked` | `blocked_reason` set in frontmatter | ≤8 ✓ |
-| `blocked` | `running` | `state.step.unblocked` | Blocking condition resolved; resume running (D-15) | ≤8 ✓ |
-| `*` | `abandoned` | `state.step.abandoned` | Explicit abandon command | ≤8 ✓ |
+| From | To | Event Trigger | Guard Condition |
+|------|----|---------------|-----------------|
+| `idle` | `designing` | `state.step.designed` | Step created, agent invokes design |
+| `designing` | `planning` | `state.step.planned` | DESIGN.md completed |
+| `idle` | `planning` | `state.step.planned` | Design skipped by agent (simple work, no research needed) |
+| `planning` | `running` | `state.step.ran` | PLAN.md completed |
+| `running` | `verifying` | `state.step.verify_started` | All sub-steps complete |
+| `verifying` | `done` | `state.step.verify_passed` | VERIFICATION.md passes |
+| `verifying` | `running` | `state.step.verify_failed` | Fix needed; loop back to running |
+| `*` | `blocked` | `state.step.blocked` | `blocked_reason` set in frontmatter |
+| `blocked` | `running` | `state.step.unblocked` | Blocking condition resolved; resume running (D-15) |
+| `*` | `abandoned` | `state.step.abandoned` | Explicit abandon command |
 
 **Design skip path:** Steps for simple work (e.g., "add a type annotation", "fix a typo") can skip the `designing` state entirely by transitioning directly from `idle` → `planning`. This is an agent decision — the agent determines whether design is needed.
 

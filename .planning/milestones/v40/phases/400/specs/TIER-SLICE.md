@@ -57,8 +57,16 @@ Decimal insertions (slice-12.1, slice-12.2) are supported at the Slice level per
          ▼
   (back to prior state)
 
-  Forward states (count toward ≤4 budget): planned, worktree_ready, in_progress, shipped = 4
-  Alternative/exit states (excluded from budget): reverted, blocked, deferred
+  Forward states: planned, worktree_ready, in_progress, shipped = 4
+  Alternative/exit states: reverted, blocked, deferred
+
+  Slices are limitless — there is no cap on the number of Slices per Stage. Each
+  Slice scope is determined by its parent Stage's CRIT.md.
+
+  The only count constraint at the Slice level is the number of child Steps:
+  a Slice is planned to contain only enough Steps to fill the context token limit
+  of a single agent session end-to-end. Each Stage plans its Slices accordingly,
+  producing a potentially large number of Slices depending on the Stage's CRIT scope.
 
   Blocked entered via: (1) abandon-cascade from dependency Slice (D-13)
                        (2) explicit block with blocked_reason in frontmatter
@@ -68,18 +76,18 @@ Decimal insertions (slice-12.1, slice-12.2) are supported at the Slice level per
 
 ## State Transition Table
 
-| From | To | Event Trigger | Guard Condition | Budget Check |
-|------|----|---------------|-----------------|-------------|
-| `planned` | `worktree_ready` | `state.slice.worktree_ready` | Worktree bootstrap completes (git worktree create) | ≤4 ✓ |
-| `worktree_ready` | `in_progress` | `state.slice.started` | ≥1 child Step is `idle` | ≤4 ✓ |
-| `in_progress` | `shipped` | `state.slice.shipped` | ALL child Steps are `done` + VERIFICATION.md passes (D-19 composite) | ≤4 ✓ |
-| `planned` | `deferred` | `state.slice.deferred` | `deferred_reason` set in frontmatter (D-14) | — |
-| `deferred` | `planned` | `state.slice.undeferred` | Manual un-defer command | — |
-| `*` | `reverted` | `state.slice.reverted` | Explicit revert command; worktree destroyed + rebuilt → planned | — |
-| `reverted` | `planned` | `state.slice.worktree_ready` | Worktree rebuild completes (after revert destroys old worktree) | — |
-| `*` | `blocked` | `state.slice.blocked` | Contains `blocked_reason` in frontmatter. Entered via abandon-cascade (D-13) or explicit block | — |
-| `blocked` | `in_progress` | `state.slice.unblocked` | Blocking dependency resolved; unblocked (D-15) | — |
-| `in_progress` → `*` | `blocked` | `state.slice.blocked` | Abandon-cascade: a dependency Slice was abandoned (D-13) | — |
+| From | To | Event Trigger | Guard Condition |
+|------|----|---------------|-----------------|
+| `planned` | `worktree_ready` | `state.slice.worktree_ready` | Worktree bootstrap completes (git worktree create) |
+| `worktree_ready` | `in_progress` | `state.slice.started` | ≥1 child Step is `idle` |
+| `in_progress` | `shipped` | `state.slice.shipped` | ALL child Steps are `done` + VERIFICATION.md passes (D-19 composite) |
+| `planned` | `deferred` | `state.slice.deferred` | `deferred_reason` set in frontmatter (D-14) |
+| `deferred` | `planned` | `state.slice.undeferred` | Manual un-defer command |
+| `*` | `reverted` | `state.slice.reverted` | Explicit revert command; worktree destroyed + rebuilt → planned |
+| `reverted` | `planned` | `state.slice.worktree_ready` | Worktree rebuild completes (after revert destroys old worktree) |
+| `*` | `blocked` | `state.slice.blocked` | Contains `blocked_reason` in frontmatter. Entered via abandon-cascade (D-13) or explicit block |
+| `blocked` | `in_progress` | `state.slice.unblocked` | Blocking dependency resolved; unblocked (D-15) |
+| `in_progress` → `*` | `blocked` | `state.slice.blocked` | Abandon-cascade: a dependency Slice was abandoned (D-13) |
 
 **Deferment semantics (D-14):** When a Slice is `deferred`, its dependents treat it as soft-done — they unblock and proceed with a `deferred_dep` flag. The `deferred_reason` frontmatter field documents why the Slice was deferred. The deferred Slice itself can later be `undeferred` back to `planned`.
 

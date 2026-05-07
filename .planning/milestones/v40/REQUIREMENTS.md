@@ -34,7 +34,7 @@
 - [x] **FSM-03** (Phase 400): Descope and abandon semantics are specified — when a Step or Slice is abandoned, dependents are resolved via cascade-abandon, assume-satisfied with explicit flag, or block-and-surface based on the dependency edge type.
 - [x] **FSM-04** (Phase 400): The decimal insertion protocol is specified — how Slice/Step IDs support single-level decimal inserts (003.1, 003.2) without renumbering, with a hard cap at one decimal level (no 003.1.2), and with the structural reorganization threshold for when to create a new Stage/Slice instead.
 - [x] **FSM-05** (Phase 400): Blocked state semantics are specified — how a Step enters BLOCKED (depends_on unresolved, external condition), what `blocked_reason` stores, and how the scheduler detects unblocking to transition to RUNNING.
-- [x] **FSM-06** (Phase 400): State machine tier budgets are enforced — Arc ≤4, Stage ≤4, Slice ≤4, Step ≤8, with no substates at higher tiers (composite state is computed by the projector, not the state machine).
+- [x] **FSM-06** (Phase 400): Arcs, Stages, and Slices are limitless. The only count constraint is Steps per Slice, bounded by the context token limit so a Slice can complete end-to-end in one agent session. Stage planning scopes each Slice to fit the context window, naturally producing many Slices for broad CRIT.md scope.
 
 ### On-Disk Layout (DSK)
 

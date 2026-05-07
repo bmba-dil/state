@@ -27,10 +27,10 @@
 **Requirements**: TIER-01, TIER-02, TIER-03, TIER-04, TIER-05, TIER-06, TIER-07, TIER-08, FSM-01, FSM-02, FSM-03, FSM-04, FSM-05, FSM-06
 **Success Criteria** (what must be TRUE):
   1. Every tier (Arc, Stage, Slice, Step) has a standalone specification document that can be read and understood without referencing other documents — defining role, owned artifacts, behavioral primitives, and cross-tier relationships.
-  2. State transition tables exist for all four tiers specifying every valid state transition with guard conditions, event triggers, and budget enforcement (Arc ≤4 forward, Stage ≤4 forward, Slice ≤4 forward, Step ≤8 total).
-  3. The composite event cascade from Step→Slice→Stage→Arc is fully specified with explicit trigger conditions at each tier.
-  4. Pydantic models with `extra="forbid"` are defined for all tier artifact frontmatter, with explicit agent-owned vs projector-owned field classification (TIER-07 boundaries respected per field).
-  5. Descope, abandon, blocked, and decimal-insertion semantics are specified consistently across all four tiers with cascade rules per edge type.
+2. State transition tables exist for all four tiers specifying every valid state transition with guard conditions and event triggers. Arcs, Stages, and Slices are limitless. Only Steps per Slice are bounded by the token context limit.
+3. The composite event cascade from Step→Slice→Stage→Arc is fully specified with explicit trigger conditions at each tier.
+4. Pydantic models with `extra="forbid"` are defined for all tier artifact frontmatter, with explicit agent-owned vs projector-owned field classification (TIER-07 boundaries respected per field).
+5. Both Arcs and Stages require a formal auditing state before shipping. Slices self-verify inline, recording verification in their directory's tracking files. Descope, abandon, blocked, and decimal-insertion semantics are specified consistently across all four tiers with cascade rules per edge type.
 
 **Plans**: 3 plans in 2 waves (01 autonomous, 02+03 autonomous)
 

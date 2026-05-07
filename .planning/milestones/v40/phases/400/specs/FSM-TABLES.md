@@ -5,9 +5,9 @@
 
 ## Design Conventions
 
-- All transition tables use the same five-column format: `| From State | To State | Trigger Event | Guard Condition | Budget |`
+- All transition tables use the same four-column format: `| From State | To State | Trigger Event | Guard Condition |`
 - `*` in the From column means "any state" — the transition applies regardless of current state.
-- Budget column shows the per-tier state count constraint (D-17, FSM-06). Exit/alt states (abandoned, blocked, reverted, deferred) are NOT counted in the budget — only the forward progression chain counts. Step is the exception: ≤8 total states (all states counted).
+- Arcs, Stages, and Slices are limitless — there is no cap on their count. The only tier with a count constraint is Step, where the number of Steps per Slice is bounded by the token context limit of a single agent session.
 - Composite states (D-19) are projector-computed at query time, NOT explicit machine states. They do NOT appear in these transition tables. The composite state computation is specified in COMPOSITE-CASCADE.md.
 - All event type strings use the D-03 renamed terminology: `designing` (not `discussing`), `running` (not `executing`). All tier-event aggregators use `state.stage.*` (not `state.phase.*`) per D-01 rename.
 - Guard conditions reference child tier states — the projector validates these at event processing time.
@@ -17,17 +17,16 @@
 ## Arc State Transition Table
 
 Arc is the root tier. It defines a feature block or project branch containing multiple Stages.
-Forward states: `planned`, `in_progress`, `auditing`, `shipped` = 4 (budget ≤4 ✓).
-Exit state: `abandoned` (not counted in budget).
+Arcs are limitless — no cap on the number of Arcs or Stages per Arc.
 
-| From | To | Trigger Event | Guard Condition | Budget |
-|------|----|---------------|-----------------|--------|
-| `planned` | `in_progress` | `state.arc.started` | ≥1 child Stage is `planned` (D-08: Stages can be added mid-flight) | ≤4 ✓ |
-| `in_progress` | `auditing` | `state.arc.stages_shipped` | ALL child Stages are `shipped` (projector composite check per D-19) | ≤4 ✓ |
-| `auditing` | `shipped` | `state.arc.shipped` | Manual `/state-ship-arc`; ARC-SUMMARY.md produced; audit passes (D-18) | ≤4 ✓ |
-| `auditing` | `in_progress` | `state.arc.unshipped` | Audit failed; return to `in_progress` for remediation | ≤4 ✓ |
-| `*` | `abandoned` | `state.arc.abandoned` | Explicit abandon command. Cascade: child Stages→abandoned; their Slices→blocked (D-13). | — |
-| `in_progress` | `abandoned` | `state.arc.abandoned` | (same as above; explicit listing for clarity) | — |
+| From | To | Trigger Event | Guard Condition |
+|------|----|---------------|-----------------|
+| `planned` | `in_progress` | `state.arc.started` | ≥1 child Stage is `planned` (D-08: Stages can be added mid-flight) |
+| `in_progress` | `auditing` | `state.arc.stages_shipped` | ALL child Stages are `shipped` (projector composite check per D-19) |
+| `auditing` | `shipped` | `state.arc.shipped` | Manual `/state-ship-arc`; ARC-SUMMARY.md produced; audit passes (D-18) |
+| `auditing` | `in_progress` | `state.arc.unshipped` | Audit failed; return to `in_progress` for remediation |
+| `*` | `abandoned` | `state.arc.abandoned` | Explicit abandon command. Cascade: child Stages→abandoned; their Slices→blocked (D-13). |
+| `in_progress` | `abandoned` | `state.arc.abandoned` | (same as above; explicit listing for clarity) |
 
 **Notes:**
 - `auditing` is a discrete machine state (per D-18), NOT a projector-computed composite state. It requires an explicit `state.arc.stages_shipped` trigger and entry guard (all child Stages shipped).
@@ -39,20 +38,22 @@ Exit state: `abandoned` (not counted in budget).
 ## Stage State Transition Table
 
 Stage (formerly Phase, renamed per D-01) groups related Slices and tracks cross-Slice verification.
-Forward states: `planned`, `in_progress`, `verified`, `shipped` = 4 (budget ≤4 ✓).
-Exit state: `abandoned` (not counted in budget).
+Stages, like Arcs, have an explicit `auditing` state before shipping. Stages are limitless — no cap on
+the number of Stages per Arc or Slices per Stage.
 
-| From | To | Trigger Event | Guard Condition | Budget |
-|------|----|---------------|-----------------|--------|
-| `planned` | `in_progress` | `state.stage.started` | ≥1 child Slice is `worktree_ready` | ≤4 ✓ |
-| `in_progress` | `verified` | `state.stage.slices_shipped` | ALL child Slices are `shipped` (projector composite check per D-19) | ≤4 ✓ |
-| `verified` | `shipped` | `state.stage.completed` | Manual verify-stage command; cross-Slice UAT passes | ≤4 ✓ |
-| `verified` | `in_progress` | `state.stage.verification_failed` | Verification failed; return to `in_progress` for remediation | ≤4 ✓ |
-| `*` | `abandoned` | `state.stage.abandoned` | Explicit abandon. Cascade: child Slices→blocked; same-Arc dependent Stages→blocked (D-13). | — |
+| From | To | Trigger Event | Guard Condition |
+|------|----|---------------|-----------------|
+| `planned` | `in_progress` | `state.stage.started` | ≥1 child Slice is `worktree_ready` |
+| `in_progress` | `verified` | `state.stage.slices_shipped` | ALL child Slices are `shipped` (projector composite check per D-19) |
+| `verified` | `auditing` | `state.stage.audited` | Manual audit initiated; cross-Slice integration + UAT verified |
+| `auditing` | `shipped` | `state.stage.completed` | Audit passes; STAGE-SUMMARY.md produced |
+| `auditing` | `verified` | `state.stage.verification_failed` | Audit failed; return to `verified` for remediation |
+| `*` | `abandoned` | `state.stage.abandoned` | Explicit abandon. Cascade: child Slices→blocked; same-Arc dependent Stages→blocked (D-13). |
 
 **Notes:**
 - Migration: This tier was formerly called "Phase." Event types `state.phase.*` in existing code (`src/state_core/schema.py`) map to `state.stage.*` in the v40 design. The rename is a design contract for v41+ migration.
-- The transition `in_progress → verified` uses `state.stage.slices_shipped` (D-18 guard: all child Slices shipped). This is a separate event from `state.stage.completed` which transitions `verified → shipped`.
+- The transition `in_progress → verified` uses `state.stage.slices_shipped` (D-18 guard: all child Slices shipped). This is separate from `state.stage.audited` which transitions `verified → auditing`.
+- Like Arcs, Stages require a formal audit (`auditing` state) before shipping.
 - Cascading abandon (D-13): When a Stage is abandoned, all child Slices → `abandoned`, and any Slices that depended on those Slices → `blocked`.
 
 ---
@@ -60,49 +61,45 @@ Exit state: `abandoned` (not counted in budget).
 ## Slice State Transition Table
 
 Slice is the terminal container tier — the finest-grained scheduler-dispatched unit. One Slice maps to one worktree.
-Forward states: `planned`, `worktree_ready`, `in_progress`, `shipped` = 4 (budget ≤4 ✓).
-Exit/alt states: `reverted`, `blocked`, `deferred` (not counted in budget).
+Slices are limitless — no cap on the number of Slices per Stage. The only constraint is the number of child Steps,
+bounded by the context token limit so a Slice can complete end-to-end in one agent session.
 
-| From | To | Trigger Event | Guard Condition | Budget |
-|------|----|---------------|-----------------|--------|
-| `planned` | `worktree_ready` | `state.slice.worktree_ready` | Worktree bootstrap completes; directory created under `.state/build/` | ≤4 ✓ |
-| `worktree_ready` | `in_progress` | `state.slice.started` | ≥1 child Step is `idle` or `designing` | ≤4 ✓ |
-| `in_progress` | `shipped` | `state.slice.shipped` | ALL child Steps are `done` (composite). VERIFICATION.md passes. SUMMARY.md produced. | ≤4 ✓ |
-| `*` | `blocked` | `state.slice.blocked` | `blocked_reason` set in frontmatter. Entry via abandon-cascade (D-13) or external condition. NO timeout (D-15). | — |
-| `blocked` | `in_progress` | `state.slice.unblocked` | Blocking dependency resolved or deferred (D-14). Scheduler polls dep states on each event. | — |
-| `*` | `reverted` | `state.slice.reverted` | Explicit revert command. Worktree destroyed; snapshot restored. | — |
-| `reverted` | `planned` | `state.slice.replanned` | Re-plan after revert; new worktree created. | — |
-| `planned` | `deferred` | `state.slice.deferred` | `deferred_reason` set (D-14). Dependents treat as soft-done with `deferred_dep` flag. | — |
-| `deferred` | `planned` | `state.slice.undeferred` | Manual un-defer; re-enters planning. | — |
+| From | To | Trigger Event | Guard Condition |
+|------|----|---------------|-----------------|
+| `planned` | `worktree_ready` | `state.slice.worktree_ready` | Worktree bootstrap completes; directory created under `.state/build/` |
+| `worktree_ready` | `in_progress` | `state.slice.started` | ≥1 child Step is `idle` or `designing` |
+| `in_progress` | `shipped` | `state.slice.shipped` | ALL child Steps are `done` (composite). VERIFICATION.md passes. SUMMARY.md produced. |
+| `*` | `blocked` | `state.slice.blocked` | `blocked_reason` set in frontmatter. Entry via abandon-cascade (D-13) or external condition. NO timeout (D-15). |
+| `blocked` | `in_progress` | `state.slice.unblocked` | Blocking dependency resolved or deferred (D-14). Scheduler polls dep states on each event. |
+| `*` | `reverted` | `state.slice.reverted` | Explicit revert command. Worktree destroyed; snapshot restored. |
+| `reverted` | `planned` | `state.slice.replanned` | Re-plan after revert; new worktree created. |
+| `planned` | `deferred` | `state.slice.deferred` | `deferred_reason` set (D-14). Dependents treat as soft-done with `deferred_dep` flag. |
+| `deferred` | `planned` | `state.slice.undeferred` | Manual un-defer; re-enters planning. |
 
 **Notes:**
 - The Slice is the only tier with `worktree_ready` — it owns the git worktree lifecycle.
-- `blocked` state has NO timeout (D-15). A Slice stays blocked indefinitely until dependencies resolve or the user defers the blocker.
-- `deferred` is soft-done: dependents unblock with `deferred_dep` flag (D-14). The deferred Slice itself can later be `undeferred`.
-- `reverted → planned`: The `state.slice.replanned` event triggers worktree recreation. Not the same as `worktree_ready` which is the bootstrap completion event.
-- Decimal insertions allowed at Slice level (D-16): `slice-12.1`, `slice-12.354`. No double decimals.
 
 ---
 
 ## Step State Transition Table
 
 Step is the leaf tier — the smallest unit of work. Steps are markdown FILES (NOT directories) within the parent Slice folder (D-04). Steps are NOT scheduler-dispatched (D-11); they run serially within one agent session.
-Forward states: `idle`, `designing`, `planning`, `running`, `verifying`, `done` = 6.
-Exit states: `blocked`, `abandoned` = 2. Total: 8 (budget ≤8 ✓).
+The number of Steps per Slice is bounded by the context token limit — a Slice contains only as many Steps
+as can fully execute end-to-end within one agent session.
 
-| From | To | Trigger Event | Guard Condition | Budget |
-|------|----|---------------|-----------------|--------|
-| `idle` | `designing` | `state.step.designed` | Step created; agent invokes design phase | ≤8 ✓ |
-| `designing` | `planning` | `state.step.planned` | DESIGN.md completed | ≤8 ✓ |
-| `idle` | `planning` | `state.step.planned` | Design skipped (simple work, no research needed) | ≤8 ✓ |
-| `planning` | `running` | `state.step.ran` | PLAN.md (or stepNPLAN.md) completed | ≤8 ✓ |
-| `running` | `verifying` | `state.step.verify_started` | All sub-steps complete; agent initiates verification | ≤8 ✓ |
-| `verifying` | `done` | `state.step.verify_passed` | VERIFICATION.md all checks pass | ≤8 ✓ |
-| `verifying` | `running` | `state.step.verify_failed` | Verification failed; return to `running` for fixes | ≤8 ✓ |
-| `*` | `blocked` | `state.step.blocked` | `blocked_reason` set. NO timeout (D-15). | — |
-| `blocked` | `planning` | `state.step.unblocked` | Blocking condition resolved; return to `planning` | — |
-| `*` | `abandoned` | `state.step.abandoned` | Explicit abandon. No cascade to sibling Steps. | — |
-| `idle` | `blocked` | `state.step.blocked` | Created with unresolved dependency | — |
+| From | To | Trigger Event | Guard Condition |
+|------|----|---------------|-----------------|
+| `idle` | `designing` | `state.step.designed` | Step created; agent invokes design phase |
+| `designing` | `planning` | `state.step.planned` | DESIGN.md completed |
+| `idle` | `planning` | `state.step.planned` | Design skipped (simple work, no research needed) |
+| `planning` | `running` | `state.step.ran` | PLAN.md (or stepNPLAN.md) completed |
+| `running` | `verifying` | `state.step.verify_started` | All sub-steps complete; agent initiates verification |
+| `verifying` | `done` | `state.step.verify_passed` | VERIFICATION.md all checks pass |
+| `verifying` | `running` | `state.step.verify_failed` | Verification failed; return to `running` for fixes |
+| `*` | `blocked` | `state.step.blocked` | `blocked_reason` set. NO timeout (D-15). |
+| `blocked` | `planning` | `state.step.unblocked` | Blocking condition resolved; return to `planning` |
+| `*` | `abandoned` | `state.step.abandoned` | Explicit abandon. No cascade to sibling Steps. |
+| `idle` | `blocked` | `state.step.blocked` | Created with unresolved dependency |
 
 **Notes:**
 - State names use D-03 renamed terminology: `designing` (not `discussing`), `running` (not `executing`).
@@ -115,21 +112,26 @@ Exit states: `blocked`, `abandoned` = 2. Total: 8 (budget ≤8 ✓).
 
 ---
 
-## Budget Enforcement Summary (FSM-06)
+## Tier Count Rules
 
-Per-tier state count budgets from D-17, with forward/exit classification.
+Tier counts (number of Arcs, Stages per Arc, Slices per Stage) are **limitless** — there is no cap.
+Each tier's scope is defined by its parent's planning artifacts:
 
-| Tier | Forward States | Exit / Alt States | Total | Budget | Satisfies |
-|------|---------------|-------------------|-------|--------|-----------|
-| Arc | 4 (`planned`, `in_progress`, `auditing`, `shipped`) | 1 (`abandoned`) | 5 | ≤4 forward | ✓ |
-| Stage | 4 (`planned`, `in_progress`, `verified`, `shipped`) | 1 (`abandoned`) | 5 | ≤4 forward | ✓ |
-| Slice | 4 (`planned`, `worktree_ready`, `in_progress`, `shipped`) | 3 (`reverted`, `blocked`, `deferred`) | 7 | ≤4 forward | ✓ |
-| Step | 6 (`idle`, `designing`, `planning`, `running`, `verifying`, `done`) | 2 (`blocked`, `abandoned`) | 8 | ≤8 total | ✓ |
+| Tier | Count Rule | Governed By |
+|------|-----------|-------------|
+| Arc | Limitless — defined by project scope | Project-level decisions |
+| Stage | Limitless — defined by parent Arc's CRIT.md | Arc planning |
+| Slice | Limitless — defined by parent Stage's CRIT.md | Stage planning |
+| Step | Bounded — ≤N per Slice, where N fills the context token limit of one agent session | Slice planning (context budget) |
 
-**Budget rules:**
-- **Arc, Stage, Slice:** Only forward progression states count toward the ≤4 budget. Exit/alt states (abandoned, reverted, blocked, deferred) are excluded.
-- **Step:** ALL states count toward the ≤8 budget (forward + exit). Step has the most granular lifecycle and thus the largest budget.
-- FSM-06 satisfied: All four tiers meet their state count budgets as verified in the transition tables above.
+**Step count constraint:** The only numerical constraint in the system is Steps per Slice.
+When a Stage plans its Slices, each Slice is scoped to contain only as many Steps as can
+complete end-to-end within the available token context of a single agent session. This
+means a Stage with broad CRIT.md scope naturally produces many Slices, each scoped to fit
+the context window.
+
+The Step internal state machine has 8 states (6 forward + 2 exit) — this is a design
+property of the machine itself, not a system-wide budget.
 
 ---
 
@@ -165,4 +167,4 @@ The projector recomputes these on every event, ensuring they never drift from th
 
 ---
 
-*Design contract for v41+ runtime state machine and scheduler implementation. All state transitions validated against D-17 budgets and D-18/D-19 composite state rules.*
+*Design contract for v41+ runtime state machine and scheduler implementation. All state transitions validated against D-18/D-19 composite state rules.*

@@ -192,4 +192,4 @@ The daemon's mode-enforcement middleware validates that an event's type string s
 
 ---
 
-*Design contract for v41+ runtime event handling. All events validated against FSM-TABLES.md transition tables and D-17 state budgets. Consumed by COMPOSITE-CASCADE.md for cross-tier rollup logic.*
+*Design contract for v41+ runtime event handling. All events validated against FSM-TABLES.md transition tables. Consumed by COMPOSITE-CASCADE.md for cross-tier rollup logic.*

@@ -8,9 +8,10 @@ block or project branch containing multiple Stages. An Arc represents a complete
 to a GSD milestone. Arcs are flexible — Stages can be added mid-flight while other Stages are
 already in progress (D-08). The Arc is the root tier; it has no parent.
 
-Arc is the **only tier with an explicit auditing state** (D-18). Before an Arc can ship, all
-child Stages must be shipped, the Arc must pass a cross-Stage audit, and an ARC-SUMMARY.md
-must be produced. The ship action is a manual command (`/state-ship-arc`), not automatic.
+Arc has an **explicit auditing state** (D-18), shared with Stage — both tiers require a formal
+audit before shipping. Before an Arc can ship, all child Stages must be shipped, the Arc must
+pass a cross-Stage audit, and an ARC-SUMMARY.md must be produced. The ship action is a manual
+command (`/state-ship-arc`), not automatic.
 
 ## State Machine
 
@@ -42,24 +43,27 @@ must be produced. The ship action is a manual command (`/state-ship-arc`), not a
                  │             │                      │              │
                  └─────────────┘                      └──────────────┘
 
-  Forward states (count toward ≤4 budget): planned, in_progress, auditing, shipped = 4
-  Exit state (excluded from budget): abandoned = 1
+  Forward states: planned, in_progress, auditing, shipped = 4
+  Exit state: abandoned = 1
 
-  NOTE: Auditing is a discrete machine state with an entry guard (all child Stages shipped),
+  Arcs are limitless — there is no cap on the number of Arcs, nor on the number
+  of Stages per Arc. Each Stage's scope determines how many Slices and Steps it contains.
+
+  Auditing is a discrete machine state with an entry guard (all child Stages shipped),
   NOT a projector-computed composite state. Composite states (D-19) are computed separately.
 ```
 
 ## State Transition Table
 
-| From | To | Event Trigger | Guard Condition | Budget Check |
-|------|----|---------------|-----------------|-------------|
-| `planned` | `in_progress` | `state.arc.started` | ≥1 child Stage is `planned` (D-08) | ≤4 ✓ |
-| `in_progress` | `auditing` | `state.arc.stages_shipped` | ALL child Stages are `shipped` (D-18, D-19 composite check) | ≤4 ✓ |
-| `auditing` | `shipped` | `state.arc.shipped` | Audit passes + ARC-SUMMARY.md produced (manual `/state-ship-arc` command) | ≤4 ✓ |
-| `*` | `abandoned` | `state.arc.abandoned` | Explicit abandon command | — |
-| `planned` | `abandoned` | `state.arc.abandoned` | Explicit abandon command | — |
-| `in_progress` | `abandoned` | `state.arc.abandoned` | Cascade: child Stages → abandoned; dependents → blocked (D-13) | — |
-| `auditing` | `abandoned` | `state.arc.abandoned` | Explicit abandon command | — |
+| From | To | Event Trigger | Guard Condition |
+|------|----|---------------|-----------------|
+| `planned` | `in_progress` | `state.arc.started` | ≥1 child Stage is `planned` (D-08) |
+| `in_progress` | `auditing` | `state.arc.stages_shipped` | ALL child Stages are `shipped` (D-18, D-19 composite check) |
+| `auditing` | `shipped` | `state.arc.shipped` | Audit passes + ARC-SUMMARY.md produced (manual `/state-ship-arc` command) |
+| `*` | `abandoned` | `state.arc.abandoned` | Explicit abandon command |
+| `planned` | `abandoned` | `state.arc.abandoned` | Explicit abandon command |
+| `in_progress` | `abandoned` | `state.arc.abandoned` | Cascade: child Stages → abandoned; dependents → blocked (D-13) |
+| `auditing` | `abandoned` | `state.arc.abandoned` | Explicit abandon command |
 
 **Composite state note (D-19):** The projector computes whether an Arc is "shipped" (all Stages shipped) at query time. The `auditing` state is entered only when that composite condition is true AND an explicit audit is triggered. This means the Arc can remain in `in_progress` even when all Stages are shipped if the audit has not yet been initiated — `auditing` requires an explicit transition trigger.
 

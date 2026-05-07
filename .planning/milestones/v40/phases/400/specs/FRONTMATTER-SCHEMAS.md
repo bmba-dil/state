@@ -34,7 +34,8 @@ class ArcFrontmatter(BaseModel):
     id: str                              # "arc-{n}" per D-01. Example: "arc-45"
     title: str                           # Human-readable name. Example: "Auth System"
     goal: str                            # One-line outcome describing what the Arc delivers
-    success_criteria: list[str]           # Measurable outcomes (3-7 items) that define Arc completion
+    success_criteria: list[str]           # Measurable outcomes that define Arc completion. CRIT.md defines the
+                                            # full set — this field is limitless, bound only by scope.
     depends_on: list[dict[str, str]] = []  # [{id: "arc-02", edge: "blocks"}]. Edge types: blocks, soft, data (D-12). Arc is root tier — cross-Arc deps allowed.
 
     # ── Projector-owned fields (written by daemon projector, NEVER by agent) ──
@@ -46,7 +47,7 @@ class ArcFrontmatter(BaseModel):
 
 **Field count:** 5 agent-owned, 4 projector-owned = 9 total fields.
 
-**Status valid values** (from D-17 Arc state machine):
+**Status valid values** (from Arc state machine):
 `planned`, `in_progress`, `auditing`, `shipped`, `abandoned`
 
 ---
@@ -80,7 +81,7 @@ class StageFrontmatter(BaseModel):
     depends_on: list[dict[str, str]] = []  # [{id: "stage-02", edge: "blocks"}]. Edge types: blocks, soft, data (D-12). Same-parent-only: Stages can only depend on sibling Stages within the same Arc (D-10).
 
     # ── Projector-owned fields (written by daemon projector, NEVER by agent) ──
-    status: Literal["planned", "in_progress", "verified", "shipped", "abandoned"] = "planned"
+    status: Literal["planned", "in_progress", "verified", "auditing", "shipped", "abandoned"] = "planned"
     slice_count: int = 0                 # Number of child Slices (all statuses)
     shipped_slice_count: int = 0         # Number of child Slices in "shipped" state
     completed_at: str | None = None      # ISO 8601 timestamp when Stage reached "shipped"
@@ -88,8 +89,8 @@ class StageFrontmatter(BaseModel):
 
 **Field count:** 6 agent-owned, 4 projector-owned = 10 total fields.
 
-**Status valid values** (from D-17 Stage state machine):
-`planned`, `in_progress`, `verified`, `shipped`, `abandoned`
+**Status valid values** (from Stage state machine):
+`planned`, `in_progress`, `verified`, `auditing`, `shipped`, `abandoned`
 
 **Migration note:** This model replaces `PhaseFrontmatter` from existing code. The `depends_on` field uses the key `edge` (per D-12), not `kind`. The `arc_id` field is a mandatory parent reference — every Stage must belong to an Arc.
 
@@ -135,7 +136,7 @@ class SliceFrontmatter(BaseModel):
 
 **Field count:** 6 agent-owned (including reasons), 7 projector-owned, 2 agent-written reasons = 15 total fields.
 
-**Status valid values** (from D-17 Slice state machine):
+**Status valid values** (from Slice state machine):
 `planned`, `worktree_ready`, `in_progress`, `shipped`, `reverted`, `blocked`, `deferred`
 
 **Design note:** `deferred_reason` and `blocked_reason` are agent-owned fields — the agent writes them when entering the deferred/blocked state, and the projector NEVER modifies them. The projector only reads them for display in STATE.md. This preserves agent intent even across projection rebuilds.
@@ -181,7 +182,7 @@ class StepFrontmatter(BaseModel):
 
 **Field count:** 6 agent-owned, 2 projector-owned, 1 agent-written reason = 9 total fields.
 
-**Status valid values** (from D-17 Step state machine, using D-03 renamed values):
+**Status valid values** (from Step state machine, using D-03 renamed values):
 `idle`, `designing`, `planning`, `running`, `verifying`, `done`, `blocked`, `abandoned`
 
 **Design note:** Step frontmatter deliberately omits:
@@ -299,4 +300,4 @@ The schema design enforces trust boundaries from the plan's threat model:
 
 ---
 
-*Design contract for v41+ runtime pydantic validation. All models validated against FSM-TABLES.md state lists, TIER-07 field ownership rules, and D-01/D-03/D-17 naming conventions. Consumed by Phase 401 artifact catalog (ART-02 templates, ART-05 validation rules).*
+*Design contract for v41+ runtime pydantic validation. All models validated against FSM-TABLES.md state lists, TIER-07 field ownership rules, and D-01/D-03 naming conventions. Consumed by Phase 401 artifact catalog (ART-02 templates, ART-05 validation rules).*
