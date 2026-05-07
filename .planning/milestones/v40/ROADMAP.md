@@ -14,7 +14,7 @@
 
 ## Phases
 
-- [ ] **Phase 400: Tier Definitions & State Machines** — Complete behavioral definitions, state machines, event taxonomies, and pydantic frontmatter models for all four tiers
+- [x] **Phase 400: Tier Definitions & State Machines** (Completed 2026-05-06) — Complete behavioral definitions, state machines, event taxonomies, and pydantic frontmatter models for all four tiers
 - [ ] **Phase 401: Artifact Catalog, Naming, Layout, Cross-Refs** — Every artifact, naming convention, on-disk path, and cross-reference rule fully specified
 
 ---
@@ -35,9 +35,9 @@
 **Plans**: 3 plans in 2 waves (01 autonomous, 02+03 autonomous)
 
 Plans:
-- [ ] 400-01-PLAN.md — Four tier specification documents (Arc, Stage, Slice, Step)
-- [ ] 400-02-PLAN.md — State transition tables, event taxonomy, composite cascade, frontmatter schemas
-- [ ] 400-03-PLAN.md — Descope, abandon, blocked, and decimal insertion semantics
+- [x] 400-01-PLAN.md — Four tier specification documents (Arc, Stage, Slice, Step)
+- [x] 400-02-PLAN.md — State transition tables, event taxonomy, composite cascade, frontmatter schemas
+- [x] 400-03-PLAN.md — Descope, abandon, blocked, and decimal insertion semantics
 
 ---
 
@@ -59,7 +59,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 400. Tier Definitions & State Machines | 3/3 | Planned | - |
+| 400. Tier Definitions & State Machines | 3/3 | Complete | 2026-05-06 |
 | 401. Artifact Catalog, Naming, Layout, Cross-Refs | 0/TBD | Not started | - |
 
 ---

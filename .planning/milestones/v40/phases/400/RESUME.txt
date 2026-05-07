@@ -2,15 +2,15 @@
 phase: 400
 milestone: v40
 auto: false
-nextCommand: /gsd-execute-phase 400 --milestone v40
+nextCommand: /gsd-verify-work 400
 contextFiles:
-  - .planning/milestones/v40/phases/400/400-CONTEXT.md
-  - .planning/milestones/v40/phases/400/400-RESEARCH.md
-  - .planning/milestones/v40/phases/400/400-PLAN.md
-  - .planning/milestones/v40/phases/400/400-PATTERNS.md
+  - .planning/milestones/v40/phases/400/PLAN.md
+  - .planning/milestones/v40/phases/400/400-01-SUMMARY.md
+  - .planning/milestones/v40/phases/400/400-02-SUMMARY.md
+  - .planning/milestones/v40/phases/400/400-03-SUMMARY.md
   - .planning/milestones/v40/ROADMAP.md
   - .planning/milestones/v40/STATE.md
-skillFile: skills/gsd-execute-phase/SKILL.md
+skillFile: skills/gsd-verify-work/SKILL.md
 autoInject:
   - AGENTS.md
   - ~/.claude/CLAUDE.md

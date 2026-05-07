@@ -22,6 +22,21 @@ concurrency model.
 > dependency-DAG concurrency, cross-host portability — so I never have to
 > choose between "make progress on my project" and "grow as an engineer."
 
+## Current Milestone: v40 Build Hierarchy & Artifact System Architecture
+
+**Goal:** Fully architect the four-tier product hierarchy (Arc → Phase → Slice → Step) — its on-disk file structure, artifact catalog, cross-referencing rules, naming conventions, state machines, and tracking-file consistency model.
+
+**Target features:**
+- Tier definitions (Arc, Phase, Slice, Step) — state machines, events, artifacts, frontmatter, cross-tier relationships
+- Artifact catalog — every file type (.md, JSON, SQLite projection) with purpose, tier ownership, fields, templates
+- State machine specs — all state transitions and guard conditions per tier
+- On-disk layout — `.state/build/` directory tree with naming conventions and hierarchy mirroring
+- Cross-referencing system — how artifacts reference each other across tiers
+
+**Status:** Phase 400 ✓ Complete — 9 spec docs (3,332 lines), 14/14 requirements satisfied. Phase 401 next.
+
+**Type:** Design-phase milestone (v40–v50 spike). No code — only architecture documents.
+
 ## Requirements
 
 ### Validated
@@ -37,6 +52,7 @@ concurrency model.
 - ✓ **Plugin TUI extensions — mode-aware sidebar, build-progress, teach-concept, statusline, toasts, install script** — v9 (2026-05-05): 9 phases (080-088), 344 tests, TUI-01..TUI-05 satisfied.
 - ✓ **TUI DAG viewer — shared route with topological layout, shared status palette, filtering, SSE live updates, keyboard nav** — v10 (2026-05-05): 8 phases (089-096), DAG-VIEW-01..DAG-VIEW-04 satisfied.
 - ✓ **Mode enforcement (6 layers) — mode.json schema, directory presence, MCP registration toggle, plugin hook gates, daemon HTTP middleware, import-graph lint** — v11 (2026-05-05): 9 phases (097-105), all 6 layers verified.
+- ✓ **Four-tier hierarchy definitions (Arc, Stage, Slice, Step) — complete behavioral specs, state machines, event taxonomy, composite cascade, pydantic frontmatter schemas with `extra="forbid"`, descope/abandon/blocked/decimal semantics** — Phase 400 (2026-05-06): 3 plans, 9 spec docs, 14/14 TIER+FSM requirements satisfied, Phase→Stage rename applied.
 
 ### Active
 
@@ -48,8 +64,8 @@ concurrency model.
       independently in opencode
 - [~] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
       hook shim and TUI extensions (sidebar, routes, dialogs) — ✓ shipped (v8 server hooks + v9 TUI + v10 DAG viewer)
-- [ ] Four-tier planning hierarchy: **Arc → Phase → Slice → Step**, with the
-      full discuss/plan/execute/verify cycle at Step level
+- [~] Four-tier planning hierarchy: **Arc → Stage → Slice → Step**, with the
+      full design/plan/run/verify cycle at Step level — Phase 400 complete (tier definitions); Phase 401 next (artifact catalog, layout, cross-refs)
 - [x] Per-Slice worktree isolation for concurrent work (opencode worktree
       service preferred, pygit2 fallback for other hosts) — v4 shipped
 - [x] Snapshot/diff/revert at Step and Slice boundaries — v4 shipped
@@ -179,7 +195,7 @@ milestone list is wrong on purpose.
 | Python 3.12+ implementation language | User is learning Python; learn-through-build | ✓ Good — sustained through v1+v2; mypy-strict on auth modules has been a forcing function for clear types. |
 | Opencode is the primary host; own no TUI framework | Opencode has a mature plugin + TUI extension surface; duplicating is waste | — Pending (TUI work is v9+) |
 | Build and Teach modes are exclusive | Different domains, different users, different artifacts; forcing a shared abstraction dilutes both | ✓ Good — mode-isolation grep gates pass on every v2 phase; `state_core.observability` and `state_core.auth` provably do not import `state_build.*` / `state_teach.*`. |
-| Four-tier planning hierarchy (Arc → Phase → Slice → Step) | GSD's two-tier is too coarse and implicitly serial; four tiers separate scope from concurrency from discuss/plan cycle | — Pending (Slice/Step land with the build kernel in v14+) |
+| Four-tier planning hierarchy (Arc → Stage → Slice → Step) | GSD's two-tier is too coarse and implicitly serial; four tiers separate scope from concurrency from design/plan cycle | Phase 400 complete — all tier definitions, state machines, and event taxonomies specified (2026-05-06); Phase 401 (artifact catalog/layout) next |
 | Dependency DAG over linear ordering | Mirrors how a real dev team parallelizes work once foundations are in | — Pending (scheduler is v5) |
 | Hybrid daemon (always-on + per-session worker) | Always-on serves dashboards/watchers when opencode is closed; per-session workers keep hot state cheap | — Pending (daemon HTTP surface is v6) |
 | Dual-write events (SyncEvent + SQLite) | Opencode drives live UI; SQLite gives the daemon authoritative history when opencode is down | ✓ Good — v1 shipped; SQLite remains authoritative; deterministic replay holds across 10K-event fixture. |
@@ -223,7 +239,7 @@ This document evolves at phase transitions and milestone boundaries.
 - ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests.
 - 784+ tests passing (321 v1 baseline + 463 v2 net-new).
 - Subsystems shipped: `state_core.events` (v1), `state_core.auth` (v2), `state_core.providers` (v3), `state_core.worktree` (v4), `state_core.scheduler` (v5), `state_daemon` (v6), `state_worker` (v7), `@state/opencode-plugin` (v8/v9/v10), `state_core.mode` (v11).
-- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked; v13 shipped. **v40–v50 design spike initiated (2026-05-06) — 11 design-phase milestones to fully architect build and teach kernels before v14–v27 execution.** Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`.
+- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked; v13 shipped. **v40 design spike active (2026-05-06): Phase 400 complete (Tier Definitions & State Machines), Phase 401 next (Artifact Catalog, Naming, Layout, Cross-Refs).** 11 design-phase milestones (v40–v50) to fully architect build and teach kernels before v14–v27 execution. Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`.
 
 **Patterns proven by v2:**
 - Wave-based TDD execution (Wave 0 RED → Wave 1+ GREEN drilling) keeps each plan auditable; 463 net-new tests landed without flaking.
@@ -238,4 +254,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-05 — v11 (Mode Enforcement) shipped. 11/27 milestones complete (v1–v11). Tier 1 complete (5/5). Tier 2 active — v12/v13 remaining.*
+*Last updated: 2026-05-06 — Phase 400 complete (Tier Definitions & State Machines: 9 spec docs, 3,332 lines, 14/14 requirements). Phase 401 next (Artifact Catalog, Naming, Layout, Cross-Refs). 13/38 milestones shipped (v1–v11 + v12 + v13). v40 design spike active.*
