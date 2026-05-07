@@ -14,7 +14,7 @@
 | Metric | Value |
 |---|---|
 | Milestones (= product Arcs) | **38** (27 core + 11 design spike) |
-| Phases total | **260** (+ v40–v50 phases TBD during design) |
+| Phases total | **262** (+ v41–v50 phases TBD during design) |
 | v1 requirements mapped | **221 / 221 (100%)** |
 | Tier 1 (Foundation) milestones | 5 (parallel) |
 | Tier 2 (Kernel & Plumbing) milestones | 8 |
@@ -196,7 +196,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v25. Migration & Import | 0/8 | Not started | - | - |
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
-| v40. Build Hierarchy & Artifact Architecture | — | Not started (design spike) | - | - |
+| v40. Build Hierarchy & Artifact Architecture | 0/2 | Not started (design spike) | - | - |
 | v41. Agent Harness & Context Control | — | Not started (design spike) | - | - |
 | v42. Build Quality Pipeline | — | Not started (design spike) | - | - |
 | v43. Build Workflow & GSD Port Map | — | Not started (design spike) | - | - |
@@ -207,7 +207,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v48. Teach Quality & Learning Verification | — | Not started (design spike) | - | - |
 | v49. Teach Workflow & AOL Port Map | — | Not started (design spike) | - | - |
 | v50. Consolidated Teach Design & Rewrite | — | Not started (design spike) | - | - |
-| **TOTAL** | **106/260** | — | — | — |
+| **TOTAL** | **106/262** | — | — | — |
 
 ---
 
@@ -2744,6 +2744,60 @@ Plans:
 
 ---
 
+## v40 — Build Hierarchy & Artifact System Architecture
+
+**Version:** v0.7 (design-phase only)
+**Goal:** Fully architect the four-tier product hierarchy (Arc → Phase → Slice → Step) — tier definitions, state machines, event taxonomies, artifact catalog, on-disk layout, naming conventions, cross-referencing rules, and tracking-file consistency model. This is the backbone of the entire Build mode — everything downstream depends on the decisions made here.
+**Depends on:** v11, v5, v4, v1
+**Tier:** 5 (Design Spike)
+**Complexity:** M (design-phase — no code)
+**Milestone workspace:** `.planning/milestones/v40/`
+**Milestone version:** v40
+
+**Type markers:** DESIGN-PHASE — zero code, only architecture documents. Every phase produces markdown specification documents, pydantic schemas, and Mermaid diagrams. No Python/TypeScript implementation.
+
+**Opencode surface extended:** (none — design only)
+
+**Source influence:**
+- `src/state_core/schema.py` — 34+ event types (design must extend taxonomy)
+- `src/state_core/projector.py` — CQRS projection engine (design must define projection tables/STATE.md)
+- `src/state_core/scheduler.py` — DAG scheduler (design must define four-tier node integration)
+- `src/state_core/worktree.py` — WorktreeService protocol (design must define Slice ownership)
+- `state-inputs/get-shit-done/bin/lib/artifacts.cjs` — canonical registry pattern
+- `state-inputs/get-shit-done/bin/lib/verify.cjs` — health check pattern (19 warning codes)
+- `.planning/research/ARCHITECTURE.md` — especially §5 (event taxonomy), §8 (build kernel), §3 (directory layout)
+
+**.state/ artifacts written:** (none — design only; specifies what artifacts WILL exist under `.state/build/`)
+
+**MCP tool surface delivered:** (none — design only)
+
+**Verifier:** Every artifact template must be complete enough that a new ARC.md, PHASE.md, SLICE.md, and STEP.md could be generated from templates. Pydantic models must pass `model_json_schema()` validation. State transition tables must cover every valid path. Research tensions (ID format, STATE.md placement, file consolidation) resolved with documented rationale.
+
+**Requirements covered:** TIER-01..TIER-08, FSM-01..FSM-06, ART-01..ART-05, DSK-01..DSK-06, REF-01..REF-06 (31 total)
+
+**Success criteria:**
+1. Every tier (Arc, Phase, Slice, Step) has a standalone specification document defining role, owned artifacts, behavioral primitives, and cross-tier relationships
+2. State transition tables exist for all four tiers with guard conditions, event triggers, and budget enforcement (Arc ≤ 3, Phase ≤ 4, Slice ≤ 4, Step ≤ 8)
+3. The composite event cascade from Step→Slice→Phase→Arc is fully specified with explicit trigger conditions at each tier
+4. The artifact catalog documents every file type across all four tiers with purpose, schema ownership, creation/update triggers, and templates
+5. The complete `.state/build/` directory tree is specified with naming conventions, the `index.json` registry, and cross-referencing rules including broken-reference handling and 15 consistency validation codes (W001–W015)
+
+### Phases
+
+#### Phase 400 — Tier Definitions & State Machines
+**Goal:** All four tiers have complete behavioral definitions, state machines, event taxonomies, and pydantic frontmatter models that are internally consistent and ready for artifact catalog design.
+**Depends on:** (none — first v40 phase)
+**Requirements:** TIER-01, TIER-02, TIER-03, TIER-04, TIER-05, TIER-06, TIER-07, TIER-08, FSM-01, FSM-02, FSM-03, FSM-04, FSM-05, FSM-06
+**Parallelizable:** no (foundational)
+
+#### Phase 401 — Artifact Catalog, Naming, Layout, Cross-Refs
+**Goal:** Every artifact, naming convention, on-disk path, and cross-reference rule is fully specified, producing a complete blueprint for the `.state/build/` filesystem.
+**Depends on:** 400
+**Requirements:** ART-01, ART-02, ART-03, ART-04, ART-05, DSK-01, DSK-02, DSK-03, DSK-04, DSK-05, DSK-06, REF-01, REF-02, REF-03, REF-04, REF-05, REF-06
+**Parallelizable:** no (depends on 400)
+
+---
+
 # Requirements Traceability
 
 All 221 v1 REQ-IDs are mapped to exactly one phase. See `REQUIREMENTS.md` Traceability table for the full matrix.
@@ -2780,8 +2834,13 @@ All 221 v1 REQ-IDs are mapped to exactly one phase. See `REQUIREMENTS.md` Tracea
 | TST (8) | TST-01..TST-08 | v27 (threaded; finalized) |
 | OBS (4) | OBS-01..OBS-04 | v27 (w/ redactor in v2.P10) |
 | SEC (6) | SEC-01..SEC-06 | v27 (w/ security verifier in v14.P9 and auth vault in v2.P2) |
+| TIER (8) | TIER-01..TIER-08 | v40 (design-phase) |
+| FSM (6) | FSM-01..FSM-06 | v40 (design-phase) |
+| ART (5) | ART-01..ART-05 | v40 (design-phase) |
+| DSK (6) | DSK-01..DSK-06 | v40 (design-phase) |
+| REF (6) | REF-01..REF-06 | v40 (design-phase) |
 
-**Total:** 221 v1 requirements → 256 phases across 27 milestones. **Coverage: 100%.**
+**Total:** 221 v1 runtime requirements → 256 phases across 27 core milestones. + 31 v40 design requirements → 2 phases. **Coverage: 100%.**
 
 ---
 

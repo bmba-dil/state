@@ -31,7 +31,12 @@
   },
   "quality": {
     "level": "high",
-    "test_exemptions": [".md", ".json", "templates/**", ".planning/**"],
+    "test_exemptions": [
+      ".md",
+      ".json",
+      "templates/**",
+      ".planning/**"
+    ],
     "context7_token_cap": 2000
   },
   "concurrent": true

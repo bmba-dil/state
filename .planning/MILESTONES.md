@@ -144,8 +144,8 @@
 ---
 
 **Layout:** milestone-scoped
-**Total milestones:** 27
-**Total phases:** 260
+**Total milestones:** 38
+**Total phases:** 262
 **Created:** 2026-04-22 (migration from monolithic)
 
 ---
@@ -235,6 +235,6 @@
 | v25 Migration & Import | 0/8 | Not started |
 | v26 Portability Shims | 0/8 | Not started |
 | v27 Release & Packaging | 0/10 | Not started |
-| **TOTAL** | **106/260** | — |
+| **TOTAL** | **106/262** | — |
 
 *See `_archived/ROADMAP.md` for the pre-migration monolithic roadmap including DAG, tier boundaries, and revision history.*

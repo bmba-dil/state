@@ -660,7 +660,7 @@ Source: Derived from D-401-16 (severity tiers), D-401-17 (blocking gate + auto-r
 | A5 | The snapshot-before-mutation protocol (D-401-13) integrates with the existing v4 Snapshot service (`src/state_core/snapshot.py`) | Immutability Rules | If the v4 Snapshot service API doesn't support the exact protocol needed, the Phase 401 spec may need adjustment. Mitigation: Phase 401 specifies the protocol contract; v41+ reconciles with existing API. |
 | A6 | The `validate_consistency()` function spec does not need to handle teach-mode artifacts (`.state/teach/`) — only build-mode | Code Examples | D-401-17 says "daemon startup gate" which implies the full daemon. If teach-mode artifacts must also be validated at startup, additional codes are needed. Mitigation: Phase 401 specs document the current scope as build-mode only, with a note that teach-mode validation is v46+. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact W001–W015 severity assignments**
    - What we know: D-401-16 defines three tiers (ERROR/WARNING/INFO). D-401-17 says ERROR blocks daemon startup. The 15 codes are under Claude's discretion.
