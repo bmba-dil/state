@@ -24,14 +24,14 @@ phase_state: executing
 ## Current Position
 
 **Milestone:** v40
-**Phase:** 400 ✓ Complete — Tier Definitions & State Machines
-**Next Phase:** 401 (Artifact Catalog, Naming, Layout, Cross-Refs)
-**Status:** Phase 400 complete, ready for Phase 401
+**Phase:** 401 ✓ Planned — Artifact Catalog, Naming, Layout, Cross-Refs
+**Next Step:** Execute phase (3 plans in 3 waves, 6 spec docs expected)
+**Status:** Planning complete, ready for execution
 
 ```
-[████████████████░░░░] 1/2 phases complete
+[████████████████████] 2/2 phases planned
 Phase 400:  ✓ Complete (9 spec docs, 3,332 lines)
-Phase 401:  Not started
+Phase 401:  ✓ Planned (3 plans, 6 spec docs expected)
 ```
 
 ---

@@ -51,7 +51,12 @@ Plans:
   3. The complete `.state/build/` directory tree is specified with all naming conventions (IDs, directories, slugs, display prefixes), concurrent access rules, and the `index.json` artifact registry.
   4. Immutability rules, projection-vs-authored distinction, schema validation rules, and broken-reference handling are specified per tier with edge-type cascade rules.
   5. The 15 consistency validation codes (W001–W015) and the `validate_consistency()` function specification are defined.
-**Plans**: TBD
+**Plans**: 3 plans in 3 waves
+
+Plans:
+- [ ] 401-01-PLAN.md — Artifact catalog + templates + immutability + schema ownership (ART-01..05)
+- [ ] 401-02-PLAN.md — Directory tree + naming + STATE placement + index.json schema (DSK-01..06)
+- [ ] 401-03-PLAN.md — Cross-reference format + W-codes + validate_consistency() (REF-01..06)
 
 ---
 
@@ -60,7 +65,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 400. Tier Definitions & State Machines | 3/3 | Complete | 2026-05-06 |
-| 401. Artifact Catalog, Naming, Layout, Cross-Refs | 0/TBD | Not started | - |
+| 401. Artifact Catalog, Naming, Layout, Cross-Refs | 3/3 | Planned | 2026-05-07 |
 
 ---
 
