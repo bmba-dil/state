@@ -120,15 +120,17 @@ this decomposition unit is complete.
 
 ### Event Name Migration
 
+The v40 design expands the Stage event set from 4 to 6 events. Some old events do not have a 1:1 mapping — the design splits verification into two distinct events (`slices_shipped` to enter verified state, `completed` to transition to shipped).
+
 | Pre-Rename (existing code) | Post-Rename (v40 design) | Notes |
 |---|---|---|
-| `state.phase.planned` | `state.stage.planned` | Renamed aggregate: `phase` → `stage` |
-| `state.phase.started` | `state.stage.started` | Renamed aggregate |
-| `state.phase.verified` | `state.stage.verified` | Renamed aggregate |
-| `state.phase.completed` | `state.stage.completed` | Renamed aggregate |
-| `PhasePlannedData` | `StagePlannedData` | Class rename (v41+) |
+| `state.phase.planned` | `state.stage.created` | Old event signaled "planned"; v40 design uses `created` for aggregate creation (Stage enters `planned` state on creation). The "planned" concept is the initial state, not a separate event |
+| `state.phase.started` | `state.stage.started` | Renamed aggregate: `phase` → `stage`. Same semantics |
+| `state.phase.verified` | `state.stage.slices_shipped` | Old single "verified" event split in v40: `slices_shipped` transitions to `verified` state; `completed` transitions from `verified` to `shipped` |
+| `state.phase.completed` | `state.stage.completed` | Renamed aggregate. v40 design: triggers `verified` → `shipped` transition |
+| `PhasePlannedData` | `StageCreatedData` | Class rename (v41+). Old class carried "planned" semantics; new class carries creation semantics |
 | `PhaseStartedData` | `StageStartedData` | Class rename (v41+) |
-| `PhaseVerifiedData` | `StageVerifiedData` | Class rename (v41+) |
+| `PhaseVerifiedData` | `StageSlicesShippedData` | Class rename (v41+). Name reflects the split event |
 | `PhaseCompletedData` | `StageCompletedData` | Class rename (v41+) |
 | `phase_number` (field) | `stage_number` | Field rename |
 | `phase_id` (field in Slice) | `stage_id` | Field rename |
