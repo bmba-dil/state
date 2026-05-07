@@ -97,5 +97,17 @@ From HANDOFF.md and research SUMMARY.md:
 
 ---
 
+## Deferred Items
+
+Items acknowledged and deferred at milestone close on 2026-05-07:
+
+| Category | Item | Status |
+|----------|------|--------|
+| quick_task | 1-pre-execution-audit-of-roadmap-md-review | missing |
+| quick_task | 2-audit-roadmap-md-for-domain-confusion-an | missing |
+| quick_task | 3-revise-roadmap-md-to-apply-review-roadma | missing |
+
+---
+
 *State file created: 2026-05-06*
-*Last updated: 2026-05-06*
+*Last updated: 2026-05-07*

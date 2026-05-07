@@ -22,18 +22,11 @@ concurrency model.
 > dependency-DAG concurrency, cross-host portability — so I never have to
 > choose between "make progress on my project" and "grow as an engineer."
 
-## Current Milestone: v40 Build Hierarchy & Artifact System Architecture
+## Current Milestone: v40 ✓ Complete — v41 Build Agent Harness & Context Control Design
 
-**Goal:** Fully architect the four-tier product hierarchy (Arc → Phase → Slice → Step) — its on-disk file structure, artifact catalog, cross-referencing rules, naming conventions, state machines, and tracking-file consistency model.
+**Goal:** Design the agent harness, context window management, task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, and subagent management — the opencode-specific "brain" that drives the build kernel.
 
-**Target features:**
-- Tier definitions (Arc, Phase, Slice, Step) — state machines, events, artifacts, frontmatter, cross-tier relationships
-- Artifact catalog — every file type (.md, JSON, SQLite projection) with purpose, tier ownership, fields, templates
-- State machine specs — all state transitions and guard conditions per tier
-- On-disk layout — `.state/build/` directory tree with naming conventions and hierarchy mirroring
-- Cross-referencing system — how artifacts reference each other across tiers
-
-**Status:** Phase 400 ✓ Complete — 9 spec docs (3,332 lines), 14/14 requirements satisfied. Phase 401 next.
+**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. Next milestone v41 (similarly design-phase only).
 
 **Type:** Design-phase milestone (v40–v50 spike). No code — only architecture documents.
 
@@ -53,6 +46,7 @@ concurrency model.
 - ✓ **TUI DAG viewer — shared route with topological layout, shared status palette, filtering, SSE live updates, keyboard nav** — v10 (2026-05-05): 8 phases (089-096), DAG-VIEW-01..DAG-VIEW-04 satisfied.
 - ✓ **Mode enforcement (6 layers) — mode.json schema, directory presence, MCP registration toggle, plugin hook gates, daemon HTTP middleware, import-graph lint** — v11 (2026-05-05): 9 phases (097-105), all 6 layers verified.
 - ✓ **Four-tier hierarchy definitions (Arc, Stage, Slice, Step) — complete behavioral specs, state machines, event taxonomy, composite cascade, pydantic frontmatter schemas with `extra="forbid"`, descope/abandon/blocked/decimal semantics** — Phase 400 (2026-05-06): 3 plans, 9 spec docs, 14/14 TIER+FSM requirements satisfied, Phase→Stage rename applied.
+- ✓ **Artifact catalog, naming conventions, on-disk filesystem layout, cross-reference system, consistency validation — complete `.state/build/` blueprint** — Phase 401 (2026-05-07): 3 plans, 6 spec docs (~2,900 lines), 17/17 requirements satisfied (ART-01..ART-05, DSK-01..DSK-06, REF-01..REF-06). v40 milestone complete; .state/build/ design filesystem ready for v41+ runtime implementation.
 
 ### Active
 
@@ -64,8 +58,8 @@ concurrency model.
       independently in opencode
 - [~] Single bundled opencode plugin (`@state/opencode-plugin`) carrying the
       hook shim and TUI extensions (sidebar, routes, dialogs) — ✓ shipped (v8 server hooks + v9 TUI + v10 DAG viewer)
-- [~] Four-tier planning hierarchy: **Arc → Stage → Slice → Step**, with the
-      full design/plan/run/verify cycle at Step level — Phase 400 complete (tier definitions); Phase 401 next (artifact catalog, layout, cross-refs)
+- [x] Four-tier planning hierarchy: **Arc → Stage → Slice → Step**, with the
+      full design/plan/run/verify cycle at Step level — v40 shipped (Phase 400: tier definitions, state machines; Phase 401: artifact catalog, layout, cross-refs)
 - [x] Per-Slice worktree isolation for concurrent work (opencode worktree
       service preferred, pygit2 fallback for other hosts) — v4 shipped
 - [x] Snapshot/diff/revert at Step and Slice boundaries — v4 shipped
@@ -235,11 +229,11 @@ This document evolves at phase transitions and milestone boundaries.
 
 ## Context (post-v2)
 
-**Codebase state (2026-05-05):**
+**Codebase state (2026-05-07):**
 - ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests.
 - 784+ tests passing (321 v1 baseline + 463 v2 net-new).
 - Subsystems shipped: `state_core.events` (v1), `state_core.auth` (v2), `state_core.providers` (v3), `state_core.worktree` (v4), `state_core.scheduler` (v5), `state_daemon` (v6), `state_worker` (v7), `@state/opencode-plugin` (v8/v9/v10), `state_core.mode` (v11).
-- 11/27 milestones shipped (v1–v11). v12 (state-build MCP) is next unblocked; v13 shipped. **v40 design spike active (2026-05-06): Phase 400 complete (Tier Definitions & State Machines), Phase 401 next (Artifact Catalog, Naming, Layout, Cross-Refs).** 11 design-phase milestones (v40–v50) to fully architect build and teach kernels before v14–v27 execution. Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`.
+- **14/38 milestones shipped** (v1–v11 + v13 + v40). v40 design spike complete — 2 phases (400 Tier Definitions, 401 Artifact Catalog/Layout/Cross-Refs), 6 spec documents covering `.state/build/` filesystem blueprint. **v41 (Agent Harness & Context Control) is next.** 11 design-phase milestones total (v40–v50) to fully architect build and teach kernels before v14–v27 execution.
 
 **Patterns proven by v2:**
 - Wave-based TDD execution (Wave 0 RED → Wave 1+ GREEN drilling) keeps each plan auditable; 463 net-new tests landed without flaking.
@@ -254,4 +248,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-06 — Phase 400 complete (Tier Definitions & State Machines: 9 spec docs, 3,332 lines, 14/14 requirements). Phase 401 next (Artifact Catalog, Naming, Layout, Cross-Refs). 13/38 milestones shipped (v1–v11 + v12 + v13). v40 design spike active.*
+*Last updated: 2026-05-07 — v40 milestone complete (Build Hierarchy & Artifact System Architecture: 2 phases, 6 plans, 15 spec docs, ~6,200 lines, 31/31 requirements across 400+401). 14/38 milestones shipped. v41 (Agent Harness & Context Control) next.*

@@ -22,6 +22,7 @@
 | Tier 3b (Teach domain) milestones | 7 |
 | Tier 4 (Polish & portability) milestones | 3 |
 | Tier 5 (Design Spike — v40–v50) milestones | 11 |
+| Milestones shipped | **14** (v1–v11 + v13 + v40) |
 | P0 pitfalls owned in v1 | 16 / 16 |
 
 ---
@@ -74,7 +75,7 @@
 
 These milestones architect the "business logic" layer — the hierarchy, harness, quality pipeline, workflow orchestration, and Rust DB — before v14–v27 are rewritten. All are design-phase only; no implementation code is produced.
 
-- [ ] **v40 — Build Hierarchy & Artifact System Architecture** — Arc/Phase/Slice/Step definitions, file layout, artifact catalog, naming conventions, cross-references, tracking file consistency
+- [x] **v40 — Build Hierarchy & Artifact System Architecture** — Arc/Phase/Slice/Step definitions, file layout, artifact catalog, naming conventions, cross-references, tracking file consistency ✓ Shipped 2026-05-07
 - [ ] **v41 — Agent Harness & Context Control Design** — Context window management, opencode-specific task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, subagent management
 - [ ] **v42 — Build Quality Pipeline Architecture** — 4-level verifier, goal-backward planning, adversarial verification, stub detection, anti-pattern scanner, threat model, plan checker, evidence chain
 - [ ] **v43 — Build Workflow Orchestration & GSD Port Map** — Full discuss→plan→execute→verify→ship cycle, DAG scheduler integration, session management, error recovery, all 30 GSD commands mapped
@@ -196,7 +197,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v25. Migration & Import | 0/8 | Not started | - | - |
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
-| v40. Build Hierarchy & Artifact Architecture | 0/2 | Not started (design spike) | - | - |
+| v40. Build Hierarchy & Artifact Architecture | 6/6 | **Complete** — Shipped 2026-05-07 | 2026-05-06 | 2026-05-07 |
 | v41. Agent Harness & Context Control | — | Not started (design spike) | - | - |
 | v42. Build Quality Pipeline | — | Not started (design spike) | - | - |
 | v43. Build Workflow & GSD Port Map | — | Not started (design spike) | - | - |
@@ -207,7 +208,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v48. Teach Quality & Learning Verification | — | Not started (design spike) | - | - |
 | v49. Teach Workflow & AOL Port Map | — | Not started (design spike) | - | - |
 | v50. Consolidated Teach Design & Rewrite | — | Not started (design spike) | - | - |
-| **TOTAL** | **106/262** | — | — | — |
+| **TOTAL** | **112/262** | — | — | — |
 
 ---
 
