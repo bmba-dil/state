@@ -552,27 +552,31 @@ class StagePlannedData(BaseModel):
 | A6 | Same-parent-only dependency (D-10) means cross-Arc Stage dependencies are explicitly forbidden in v40. Re-evaluation is a deferred idea, not an architecture question. | Cross-Tier Dependencies | If cross-Arc deps become needed, architecture changes significantly |
 | A7 | The "idle" state in Step FSM is the initial/creation state, entered on `state.step.created` (not explicitly in existing 10 events list but logically required before `designing`). An idle→designing transition may be explicit or auto-advanced. | Step FSM | Missing Step creation event in taxonomy |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Arc state budget: ≤3 (FSM-06) vs ≤4 (D-17) — which is authoritative?**
    - What we know: D-17 says Arc ≤4 and lists 5 states (planned, in_progress, auditing, shipped, abandoned). FSM-06 says "Arc max 3 states." D-19 says composite states are projector-computed, not explicit machine states — suggesting "auditing" may be composite-only, leaving 4 states for the machine.
    - What's unclear: Whether "auditing" counts as a machine state (D-18 describes it with entry guards) or is purely projector-computed. Whether exit states (abandoned) count toward the budget.
    - Recommendation: During planning, propose the interpretation that "auditing" IS a machine state (4 forward states) per D-18 entry guard, exit states excluded from budget count. Flag the FSM-06 inconsistency for resolution by user or context update.
+   - **RESOLVED:** D-17 is authoritative (Arc ≤4). "auditing" IS a machine state per D-18 entry guard (`all child Stages shipped`). Exit/terminal states (abandoned, blocked, reverted) are excluded from the forward-progression budget count. FSM-01 transition tables in 400-02 PLAN.md encode 4 forward states + exit states per this interpretation.
 
 2. **Step event: `state.step.created` — is it implicit or explicit?**
    - What we know: The 10 existing Step events (schema.py) don't include a `state.step.created` event. The ARCHITECTURE.md Step FSM starts from `idle`. The StepMachine skeleton starts from `idle`.
    - What's unclear: Whether `idle` is the initial state set at aggregate creation (no explicit `created` event needed) or whether a `state.step.created` event transitions from none→idle.
    - Recommendation: Define `state.step.created` as a first event that sets the Step to `idle`. This is consistent with `state.arc.created` → `planned` pattern in existing schema.py. Apply same pattern to `state.stage.created`, `state.slice.created`.
+   - **RESOLVED:** `state.step.created` is an explicit event transitioning Step from none→idle. Consistent with existing `state.arc.created`→planned pattern in schema.py. Applied to all four tiers: `state.arc.created`, `state.stage.created`, `state.slice.created`, `state.step.created`. Encoded in EVENT-TAXONOMY.md (400-02 output).
 
 3. **Step run-tracking file naming: `stepNPLAN.md` vs separate files?**
    - What we know: D-04 says Steps are "markdown FILES (`step1PLAN.md`, `step2PLAN.md`...)". D-05 says Slice-level artifacts include "stepNPLAN.md (N files)". D-06 says "run (generates step files)."
    - What's unclear: Whether ALL step tracking is in a single `stepNPLAN.md` format (one per step) or whether Steps also generate separate DESIGN.md, VERIFICATION.md files within the Slice folder. The naming convention for N (numeric, zero-padded?) is unspecified.
    - Recommendation: Per D-06 workflow order, Steps are generated during the RUN phase. Each step produces one tracking file. Naming: `step1PLAN.md`, `step2PLAN.md` (no zero-padding, matches D-01 no-leading-zeros convention). DESIGN.md and VERIFICATION.md are Slice-level (not per-Step) artifacts.
+   - **RESOLVED:** Step tracking files named `step1PLAN.md`, `step2PLAN.md` (no zero-padding per D-01). DESIGN.md and VERIFICATION.md are Slice-level artifacts, not per-Step. Encoded in TIER-STEP.md and TIER-SLICE.md (400-01 output).
 
 4. **`state.stage.*` event migration path from `state.phase.*`**
    - What we know: Existing schema.py defines `PHASE_EVENT_TYPES` with `state.phase.*` literals (lines 73-81). D-01 locks the rename to "Stage." ARCHITECTURE.md uses "phase" throughout.
    - What's unclear: Whether Phase 400 spec documents should use `state.stage.*` event names (forward-looking design contract) or `state.phase.*` (matching current code). Whether a migration table is in-scope for v40 or deferred to v41+.
    - Recommendation: Use `state.stage.*` in all spec documents (forward-looking). Include a "Migration from Phase to Stage" appendix documenting the 1:1 mapping of all existing `state.phase.*` events to their `state.stage.*` equivalents. The actual code migration is v41+.
+   - **RESOLVED:** All spec documents use `state.stage.*` (forward-looking design contract). EVENT-TAXONOMY.md includes a "Migration from Phase to Stage" appendix with 1:1 mapping of all existing `state.phase.*` events. Actual schema.py code migration is v41+.
 
 ## Environment Availability
 
