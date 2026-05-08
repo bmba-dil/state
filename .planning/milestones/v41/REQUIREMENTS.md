@@ -161,17 +161,96 @@
 
 ## Traceability
 
-Empty. Populated by gsd-roadmapper during ROADMAP creation.
+Populated by gsd-roadmapper on 2026-05-08 during v41 roadmap creation. All 72 v1 requirements mapped to phases 402–406. 100% coverage.
 
 | Requirement | Phase | Status |
 |---|---|---|
+| SLC-01 | 402 | Pending |
+| SLC-02 | 402 | Pending |
+| SLC-03 | 402 | Pending |
+| SLC-04 | 402 | Pending |
+| SLC-05 | 402 | Pending |
+| SLC-06 | 402 | Pending |
+| SLC-07 | 402 | Pending |
+| CTX-01 | 402 | Pending |
+| CTX-02 | 402 | Pending |
+| CTX-03 | 402 | Pending |
+| CTX-04 | 402 | Pending |
+| CTX-05 | 402 | Pending |
+| CTX-06 | 402 | Pending |
+| CTX-07 | 402 | Pending |
+| CTX-08 | 402 | Pending |
+| STP-01 | 403 | Pending |
+| STP-02 | 403 | Pending |
+| STP-03 | 403 | Pending |
+| STP-04 | 403 | Pending |
+| STP-05 | 403 | Pending |
+| STP-06 | 403 | Pending |
+| STP-07 | 403 | Pending |
+| STP-08 | 403 | Pending |
+| PAP-01 | 403 | Pending |
+| PAP-02 | 403 | Pending |
+| PAP-03 | 403 | Pending |
+| PAP-04 | 403 | Pending |
+| PAP-05 | 403 | Pending |
+| PAP-06 | 403 | Pending |
+| PRF-01 | 404 | Pending |
+| PRF-02 | 404 | Pending |
+| PRF-03 | 404 | Pending |
+| PRF-04 | 404 | Pending |
+| PRF-05 | 404 | Pending |
+| PRF-06 | 404 | Pending |
+| PRF-07 | 404 | Pending |
+| APG-01 | 404 | Pending |
+| APG-02 | 404 | Pending |
+| APG-03 | 404 | Pending |
+| APG-04 | 404 | Pending |
+| APG-05 | 404 | Pending |
+| APG-06 | 404 | Pending |
+| SRP-01 | 404 | Pending |
+| SRP-02 | 404 | Pending |
+| SRP-03 | 404 | Pending |
+| SRP-04 | 404 | Pending |
+| SRP-05 | 404 | Pending |
+| SRP-06 | 404 | Pending |
+| DEV-01 | 405 | Pending |
+| DEV-02 | 405 | Pending |
+| DEV-03 | 405 | Pending |
+| DEV-04 | 405 | Pending |
+| DEV-05 | 405 | Pending |
+| DEV-06 | 405 | Pending |
+| DEV-07 | 405 | Pending |
+| SUB-01 | 405 | Pending |
+| SUB-02 | 405 | Pending |
+| SUB-03 | 405 | Pending |
+| SUB-04 | 405 | Pending |
+| SUB-05 | 405 | Pending |
+| SUB-06 | 405 | Pending |
+| SUB-07 | 405 | Pending |
+| SUB-08 | 405 | Pending |
+| SUB-09 | 405 | Pending |
+| HRN-01 | 406 | Pending |
+| HRN-02 | 406 | Pending |
+| HRN-03 | 406 | Pending |
+| HRN-04 | 406 | Pending |
+| HRN-05 | 406 | Pending |
+| HRN-06 | 406 | Pending |
+| HRN-07 | 406 | Pending |
+| HRN-08 | 406 | Pending |
 
 **Coverage:**
-- v1 requirements: TBD (filled by roadmapper)
-- Mapped to phases: TBD
-- Unmapped: TBD
+- v1 requirements: 72 total (SLC: 7, CTX: 8, STP: 8, PAP: 6, PRF: 7, APG: 6, SRP: 6, DEV: 7, SUB: 9, HRN: 8)
+- Mapped to phases: 72 / 72 (100%)
+- Unmapped: 0
+
+**Phase distribution:**
+- Phase 402 (Slice-Cycle & Context Window Spec): 15 reqs (SLC + CTX)
+- Phase 403 (Step/Task Decomposition & Plan-as-Prompt): 14 reqs (STP + PAP)
+- Phase 404 (Boolean Proof Gate & Discipline Guards): 19 reqs (PRF + APG + SRP)
+- Phase 405 (Deviation Rules & Subagent Management): 16 reqs (DEV + SUB)
+- Phase 406 (Harness Architecture Rollup): 8 reqs (HRN)
 
 ---
 
 *Requirements defined: 2026-05-07*
-*Last updated: 2026-05-07 — initial v41 draft from HANDOFF.md + 12 locked design decisions (D-1..D-12)*
+*Last updated: 2026-05-08 — gsd-roadmapper populated Traceability table; 72 reqs mapped across phases 402–406; 100% coverage*

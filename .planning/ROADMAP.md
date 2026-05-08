@@ -14,7 +14,7 @@
 | Metric | Value |
 |---|---|
 | Milestones (= product Arcs) | **38** (27 core + 11 design spike) |
-| Phases total | **262** (+ v41–v50 phases TBD during design) |
+| Phases total | **267** (262 core + v41 5 phases; v42–v50 phases TBD during design) |
 | v1 requirements mapped | **221 / 221 (100%)** |
 | Tier 1 (Foundation) milestones | 5 (parallel) |
 | Tier 2 (Kernel & Plumbing) milestones | 8 |
@@ -76,7 +76,7 @@
 These milestones architect the "business logic" layer — the hierarchy, harness, quality pipeline, workflow orchestration, and Rust DB — before v14–v27 are rewritten. All are design-phase only; no implementation code is produced.
 
 - [x] **v40 — Build Hierarchy & Artifact System Architecture** — Arc/Phase/Slice/Step definitions, file layout, artifact catalog, naming conventions, cross-references, tracking file consistency ✓ Shipped 2026-05-07
-- [ ] **v41 — Agent Harness & Context Control Design** — Context window management, opencode-specific task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, subagent management
+- 🔨 **v41 — Agent Harness & Context Control Design** — Phases 402-406 — Context window management, opencode-specific task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, subagent management
 - [ ] **v42 — Build Quality Pipeline Architecture** — 4-level verifier, goal-backward planning, adversarial verification, stub detection, anti-pattern scanner, threat model, plan checker, evidence chain
 - [ ] **v43 — Build Workflow Orchestration & GSD Port Map** — Full discuss→plan→execute→verify→ship cycle, DAG scheduler integration, session management, error recovery, all 30 GSD commands mapped
 - [ ] **v44 — Rust DB & RTK Agent Interception System** — Agent tool-call interception, fast Rust database, whitespace stripping, context compression, RTK integration
@@ -198,7 +198,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v26. Portability Shims | 0/8 | Not started | - | - |
 | v27. Release & Packaging | 0/10 | Not started | - | - |
 | v40. Build Hierarchy & Artifact Architecture | 6/6 | **Complete** — Shipped 2026-05-07 | 2026-05-06 | 2026-05-07 |
-| v41. Agent Harness & Context Control | — | Not started (design spike) | - | - |
+| v41. Agent Harness & Context Control | 0/5 | **Active** — Roadmap created 2026-05-08 (Phases 402-406) | 2026-05-08 | - |
 | v42. Build Quality Pipeline | — | Not started (design spike) | - | - |
 | v43. Build Workflow & GSD Port Map | — | Not started (design spike) | - | - |
 | v44. Rust DB & RTK Interception | — | Not started (design spike) | - | - |
@@ -208,7 +208,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v48. Teach Quality & Learning Verification | — | Not started (design spike) | - | - |
 | v49. Teach Workflow & AOL Port Map | — | Not started (design spike) | - | - |
 | v50. Consolidated Teach Design & Rewrite | — | Not started (design spike) | - | - |
-| **TOTAL** | **112/262** | — | — | — |
+| **TOTAL** | **117/267** | — | — | — |
 
 ---
 
@@ -2799,6 +2799,81 @@ Plans:
 
 ---
 
+## v41 — Agent Harness & Context Control Design
+
+**Version:** v0.7.5 (design-phase only)
+**Goal:** Fully architect the Build-mode agent harness — the control plane that governs agent context, decomposes work into Steps, enforces boolean proof gates, prevents analysis paralysis and scope reduction, applies tiered deviation rules, manages subagent fanout, and intervenes when an agent breaks discipline. The output is the design contract for v14 (Build Kernel) and v15 (Build Core Commands).
+**Depends on:** v40 (shipped — hierarchy and artifact catalog), v8 (shipped — plugin hooks), v7 (shipped — worker), v6 (shipped — daemon), v11 (shipped — mode enforcement)
+**Tier:** 5 (Design Spike)
+**Complexity:** L (design-phase — no code; 5 spec documents totaling ~12,000–18,000 lines expected based on v40 density)
+**Milestone workspace:** `.planning/milestones/v41/`
+**Milestone version:** v41
+
+**Type markers:** DESIGN-PHASE — zero code, only architecture documents. Every phase produces markdown specification documents, Pydantic schemas, and Mermaid sequence/state diagrams. No Python/TypeScript implementation.
+
+**Locked design decisions (D-1..D-12):** Slice owns the cycle (D-1); context boundary = Slice (D-2); 200k absolute Slice budget (D-3); structured snapshots via Pydantic+orjson (D-4); `stepNN-PLAN.md` GSD-shape (D-5); `must_haves.{truths, artifacts, key_links}` proof block (D-6); plans mutable with audit log, `must_haves`/`<verify>` immutable (D-7); 6-strike escalation ladder (D-8); static subagent whitelist per Slice stage, default 20 parallel (D-9); 4-tier intervention (D-10); tiered autonomy with per-Slice override (D-11); plan-slice itself multi-stage (D-12).
+
+**Opencode surface extended:** (none — design only; specifies how the existing 9 hooks are wired into the harness)
+
+**Source influence:**
+- `state-inputs/get-shit-done/commands/gsd/gsd-executor.md` — deviation rules, analysis paralysis guard, auto-fix protocols
+- `state-inputs/get-shit-done/commands/gsd/gsd-planner.md` — task decomposition, scope reduction prohibition, context-budget-aware sizing
+- `state-inputs/get-shit-done/commands/gsd/gsd-execute-phase.md` — wave-based parallel execution, prompt enrichment
+- `state-inputs/get-shit-done/hooks/gsd-context-monitor.js` — context meter with WARNING/CRITICAL thresholds
+- `state-inputs/get-shit-done/hooks/gsd-workflow-guard.js` — advisory hook against un-gated edits
+- `state-inputs/opencode/packages/opencode/src/tool/task.ts` — subagent spawning, session linking
+- `state-inputs/opencode/packages/opencode/src/session/session.ts` — session lifecycle, compaction
+- `packages/opencode-plugin/src/hooks/` — the 9 already-wired hooks (control surface)
+
+**.state/ artifacts written:** (none — design only; specifies what artifacts WILL exist under `.state/build/slices/N-name/`)
+
+**MCP tool surface delivered:** (none — design only; the state-build MCP tool catalog is enumerated in Phase 406 as a specification)
+
+**Verifier:** Every spec document at `.planning/milestones/v41/phases/*/` must satisfy: (a) every requirement in its phase's coverage list is addressed in a named section, (b) all Pydantic schemas pass `model_json_schema()` validation as design contracts, (c) every harness behavior is implementable as pure-machine checks (no LLM-as-judge in proof gates), (d) Phase 406 sequence diagram covers a full Slice lifecycle showing every event emitted and every harness intervention point, (e) v40 Phase 400 amendment headers (SLC-07) are appended in-place to affected docs.
+
+**Requirements covered:** SLC-01..07, CTX-01..08, STP-01..08, PAP-01..06, PRF-01..07, APG-01..06, SRP-01..06, DEV-01..07, SUB-01..09, HRN-01..08 (72 total v1)
+
+**Success criteria:**
+1. Slice cycle is canonically Slice-owned (corrects v40 Phase 400 in-line via amendment headers); the four-stage pipeline (discuss → plan → execute → verify) plus the canonical Slice folder layout is fully specified.
+2. Context protocol is implementable: 200k absolute budget, fresh-session-per-Slice spawn, intra-Slice compaction with structured (Pydantic+orjson) snapshots, exact threshold actions, identifier-survival contract.
+3. `stepNN-PLAN.md` format is fully specified (Pydantic frontmatter + XML body) with every section/sub-tag exemplified; plan-as-prompt injection, mutability matrix, audit-log, and content-stripping are specified verbatim.
+4. Boolean proof gate is pure-machine across task/Step/Slice levels with the 6-strike escalation ladder; analysis-paralysis guard and scope-reduction prohibition are specified with exact thresholds, prohibited-language scans, and `files_modified` allowlist enforcement.
+5. Deviation framework specifies all four rules with tiered autonomy and per-Slice override; subagent management specifies whitelist-per-stage, narrowing-only override, 20-parallel default, structured returns, crash recovery, and autonomy inheritance. Phase 406 rolls everything up into a layered architecture document with full plugin-hook role inventory, MCP tool catalog, 4-tier intervention ladder, event-replay reconstruction proof, and a worked Slice-lifecycle sequence diagram.
+
+### Phases
+
+#### Phase 402 — Slice-Cycle & Context Window Spec
+**Goal:** The Slice cycle is canonically defined as the cycle owner (correcting Phase 400 in-line), and the 200k absolute Slice budget plus session/compaction protocol is fully specified — implementable without further design.
+**Depends on:** (none — first v41 phase)
+**Requirements:** SLC-01..07, CTX-01..08
+**Parallelizable:** no (foundational for v41)
+
+#### Phase 403 — Step/Task Decomposition & Plan-as-Prompt
+**Goal:** The `stepNN-PLAN.md` format is fully specified (frontmatter schema + XML body) and the plan-as-prompt injection / mutability / audit-log architecture is implementable verbatim.
+**Depends on:** 402
+**Requirements:** STP-01..08, PAP-01..06
+**Parallelizable:** no (depends on 402's CTX context)
+
+#### Phase 404 — Boolean Proof Gate & Discipline Guards
+**Goal:** Pure-machine boolean proof gate at task / Step / Slice levels, plus analysis-paralysis and scope-reduction discipline guards with exact thresholds, escalation paths, and prohibited-language scans.
+**Depends on:** 403
+**Requirements:** PRF-01..07, APG-01..06, SRP-01..06
+**Parallelizable:** no (depends on 403's STP frontmatter schema)
+
+#### Phase 405 — Deviation Rules & Subagent Management
+**Goal:** 4-rule deviation framework with tiered autonomy fully specified; subagent management protocol (whitelist, parallel fanout, structured returns, crash recovery) specified as a complete control-plane subsystem.
+**Depends on:** 404
+**Requirements:** DEV-01..07, SUB-01..09
+**Parallelizable:** no (depends on 404's intervention model for Rule-4 escalation)
+
+#### Phase 406 — Harness Architecture Rollup
+**Goal:** All prior v41 specs rolled up into a single layered harness architecture document with full plugin-hook role inventory, MCP tool catalog, 4-tier intervention specification, event-replay reconstruction guarantee, and a worked sequence diagram for one full Slice lifecycle.
+**Depends on:** 405
+**Requirements:** HRN-01..08
+**Parallelizable:** no (synthesis phase; cross-references 402–405)
+
+---
+
 # Requirements Traceability
 
 All 221 v1 REQ-IDs are mapped to exactly one phase. See `REQUIREMENTS.md` Traceability table for the full matrix.
@@ -2840,8 +2915,18 @@ All 221 v1 REQ-IDs are mapped to exactly one phase. See `REQUIREMENTS.md` Tracea
 | ART (5) | ART-01..ART-05 | v40 (design-phase) |
 | DSK (6) | DSK-01..DSK-06 | v40 (design-phase) |
 | REF (6) | REF-01..REF-06 | v40 (design-phase) |
+| SLC (7) | SLC-01..SLC-07 | v41 (design-phase) |
+| CTX (8) | CTX-01..CTX-08 | v41 (design-phase) |
+| STP (8) | STP-01..STP-08 | v41 (design-phase) |
+| PAP (6) | PAP-01..PAP-06 | v41 (design-phase) |
+| PRF (7) | PRF-01..PRF-07 | v41 (design-phase) |
+| APG (6) | APG-01..APG-06 | v41 (design-phase) |
+| SRP (6) | SRP-01..SRP-06 | v41 (design-phase) |
+| DEV (7) | DEV-01..DEV-07 | v41 (design-phase) |
+| SUB-HARNESS (9) | SUB-01..SUB-09 (v41 harness — distinct from v24 SUB) | v41 (design-phase) |
+| HRN (8) | HRN-01..HRN-08 | v41 (design-phase) |
 
-**Total:** 221 v1 runtime requirements → 256 phases across 27 core milestones. + 31 v40 design requirements → 2 phases. **Coverage: 100%.**
+**Total:** 221 v1 runtime requirements → 256 phases across 27 core milestones. + 31 v40 design requirements → 2 phases. + 72 v41 design requirements → 5 phases. **Coverage: 100%.**
 
 ---
 

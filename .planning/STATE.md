@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-status: v41 design spike active -- requirements drafted, roadmap pending
-last_updated: "2026-05-07T22:00:00.000Z"
+status: v41 design spike active -- roadmap created (5 phases, 402-406, 72/72 reqs mapped); plan-phase 402 next
+last_updated: "2026-05-08T00:00:00.000Z"
 phase_state: not_started
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-07 — v40 complete (Build Hierarchy & Artifact System: Phases 400+401 shipped). v41 (Agent Harness & Context Control Design) initialized. 12 design decisions locked (D-1..D-12) via discuss-milestone. REQUIREMENTS.md drafted with 60 v1 reqs across 10 categories. Roadmap pending.
+**Last updated:** 2026-05-08 — v40 complete (Build Hierarchy & Artifact System: Phases 400+401 shipped). v41 (Agent Harness & Context Control Design) **roadmap created** — 5 phases (402-406), 72/72 v1 reqs across 10 categories (SLC, CTX, STP, PAP, PRF, APG, SRP, DEV, SUB, HRN) mapped, all 12 locked design decisions (D-1..D-12) respected. Phase 402 ready to plan.
 
 ---
 
@@ -29,11 +29,11 @@ phase_state: not_started
 **Current tier:** Design Spike (v41 active)
 **Last shipped milestone:** v40 — Build Hierarchy & Artifact System — Shipped 2026-05-07
 **Active milestone:** v41 (Agent Harness & Context Control Design) — design-phase
-**Active phase:** Not started (defining requirements complete; roadmap pending)
+**Active phase:** Not started — Phase 402 (Slice-Cycle & Context Window Spec) ready to plan via `/gsd:plan-phase 402`
 **Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement), v13 (state-teach MCP), v40 (Hierarchy & Artifacts)
 
-**Phases complete:** 115 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 9)
-**Milestones complete:** 13 / 38 (12 core + v13) — v40 design spike active
+**Phases complete:** 117 / 267 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 9, v40: 2; v41 0/5 active)
+**Milestones complete:** 14 / 38 (12 core + v13 + v40) — v41 design spike active
 **v1 requirements satisfied:** 8 / 8 (EVT-01..EVT-08) — full coverage
 **v2 requirements satisfied:** 13 / 13 (AUTH-01..AUTH-13) — full coverage
 **v6 requirements satisfied:** 8 / 8 (DAE-01, DAE-03..DAE-09) — DAE-02 owned by v7
@@ -45,9 +45,10 @@ phase_state: not_started
 ### Unblocked milestones (ready to start, parallel-safe)
 
 - v12 — state-build MCP Server (skeleton) — depends on v11 (now shipped)
-- v13 — state-teach MCP Server (skeleton) — depends on v11 (now shipped); parallel with v12
+- v13 — state-teach MCP Server (skeleton) — depends on v11 (now shipped); parallel with v12 (v13 ✓ shipped)
+- **v41 (active design spike) — Phase 402: Slice-Cycle & Context Window Spec** — first phase of v41; ready to plan
 
-v1–v11 are all shipped. Tier 2 (v6–v13) is the active tier with v12 and v13 remaining.
+v1–v11 + v13 + v40 are all shipped. v41 design spike active (5 phases, 402-406). Tier 2 (v6–v13) has v12 remaining.
 
 ### Critical path preview
 
@@ -133,8 +134,9 @@ See `.planning/milestones/v1/` and `.planning/milestones/v2/` for full per-miles
 
 ### Next actions (when resuming or starting)
 
-1. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this. Only remaining milestone in Tier 2.
-2. **v40–v50 Design Spike:** 11 design-phase milestones to fully architect the build and teach kernels before v14–v27 are executed. Handoff documents at `.planning/milestones/v{40..50}/HANDOFF.md`. Feed these into `gsd-new-milestone` in new sessions. User will be present for all discuss-phases (NOT autonomous).
+1. **v41 Phase 402 (active):** `/gsd:plan-phase 402` — plan the Slice-Cycle & Context Window Spec. First phase of v41, no internal deps. 15 reqs (SLC-01..07 + CTX-01..08).
+2. **v12 — state-build MCP Server (skeleton):** Mode-gated MCP server with 15-tool budget. v11 mode enforcement unblocks this. Only remaining milestone in Tier 2.
+3. **v42–v50 Design Spike:** 9 remaining design-phase milestones to fully architect the build and teach kernels before v14–v27 are executed. Handoff documents at `.planning/milestones/v{42..50}/HANDOFF.md`. v41 has its roadmap; v42+ still need discuss-milestone before roadmapping.
 3. **v3 deferred items (030/031):** cache-control marker e2e (030) and provider parity matrix (031) — acknowledged tech debt, deferred to release-time smoke.
 4. **Optional cleanup:** v1–v11+v13 shipped; old phase branches safe to clean.
 
