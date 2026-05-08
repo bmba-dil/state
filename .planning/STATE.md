@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-status: v40 design spike active -- Phase 400 context gathered
-last_updated: 2026-05-07T11:26:06.442Z
+status: v41 design spike active -- requirements drafted, roadmap pending
+last_updated: "2026-05-07T22:00:00.000Z"
 phase_state: not_started
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-06 — Phase 400 context gathered. v40 design spike active. Phase 400 (Tier Definitions & State Machines) discuss complete, ready for planning.
+**Last updated:** 2026-05-07 — v40 complete (Build Hierarchy & Artifact System: Phases 400+401 shipped). v41 (Agent Harness & Context Control Design) initialized. 12 design decisions locked (D-1..D-12) via discuss-milestone. REQUIREMENTS.md drafted with 60 v1 reqs across 10 categories. Roadmap pending.
 
 ---
 
@@ -26,11 +26,11 @@ phase_state: not_started
 
 ## Current Position
 
-**Current tier:** Design Spike (v40 active)
-**Last shipped milestone:** v11 — Mode Enforcement — Shipped 2026-05-05
-**Active milestone:** v40 (Build Hierarchy & Artifact System Architecture) — design-phase
-**Active phase:** Not started (defining requirements)
-**Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement), v12 (state-build MCP), v13 (state-teach MCP)
+**Current tier:** Design Spike (v41 active)
+**Last shipped milestone:** v40 — Build Hierarchy & Artifact System — Shipped 2026-05-07
+**Active milestone:** v41 (Agent Harness & Context Control Design) — design-phase
+**Active phase:** Not started (defining requirements complete; roadmap pending)
+**Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement), v13 (state-teach MCP), v40 (Hierarchy & Artifacts)
 
 **Phases complete:** 115 / 260 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 9)
 **Milestones complete:** 13 / 38 (12 core + v13) — v40 design spike active

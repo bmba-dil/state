@@ -22,13 +22,25 @@ concurrency model.
 > dependency-DAG concurrency, cross-host portability — so I never have to
 > choose between "make progress on my project" and "grow as an engineer."
 
-## Current Milestone: v40 ✓ Complete — v41 Build Agent Harness & Context Control Design
+## Current Milestone: v41 Agent Harness & Context Control Design
 
-**Goal:** Design the agent harness, context window management, task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, and subagent management — the opencode-specific "brain" that drives the build kernel.
-
-**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. Next milestone v41 (similarly design-phase only).
+**Goal:** Design the agent harness — the **control plane** of Build mode. Specify how the daemon/MCP/plugin trio governs agent context, decomposes work into Steps, enforces boolean proof gates, prevents analysis paralysis and scope reduction, applies tiered deviation rules, manages subagent fanout, and intervenes when an agent breaks discipline.
 
 **Type:** Design-phase milestone (v40–v50 spike). No code — only architecture documents.
+
+**Target deliverables (10 design areas):**
+- Slice-cycle correction (corrects v40 Phase 400 in-line: Slice owns discuss/plan/execute/verify; Step is a leaf artifact)
+- Context window management (200k absolute Slice budget; Slice-boundary session spawn; structured compaction snapshots)
+- Step / task decomposition protocol (GSD-shape `stepNN-PLAN.md` with YAML frontmatter + XML body)
+- Plan-as-prompt architecture (mutable-with-audit-log; `must_haves` and `<verify>` immutable)
+- Boolean proof gate contract (`must_haves.{truths, artifacts, key_links}` + per-task `<verify><automated>` + slice-level `<verification>` — pure-machine checks)
+- Analysis paralysis guard (5-read default, configurable per stage; 3-advisory + escalation)
+- Scope reduction prohibition (prohibited-language scan; `files_modified` allowlist; split-recommendation)
+- Deviation rules framework (4-tier: auto-fix bug / auto-add critical / auto-fix blocking / human gate; tiered autonomy levels)
+- Subagent management (static whitelist per Slice stage; ~20 parallel default; structured returns)
+- Harness architecture diagram (hooks + MCP + daemon; 4-tier intervention)
+
+**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. v41 in progress: REQUIREMENTS.md drafted (60 reqs across 10 categories), roadmap pending.
 
 ## Requirements
 
@@ -248,4 +260,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-07 — v40 milestone complete (Build Hierarchy & Artifact System Architecture: 2 phases, 6 plans, 15 spec docs, ~6,200 lines, 31/31 requirements across 400+401). 14/38 milestones shipped. v41 (Agent Harness & Context Control) next.*
+*Last updated: 2026-05-07 — v41 milestone started (Agent Harness & Context Control Design). REQUIREMENTS.md drafted: 60 v1 requirements across 10 categories (SLC, CTX, STP, PAP, PRF, APG, SRP, DEV, SUB, HRN); 4 v2 deferred; 9 out-of-scope items. 12 design decisions locked (D-1..D-12) including Slice-owns-cycle (corrects v40 Phase 400) and 200k absolute Slice budget.*
