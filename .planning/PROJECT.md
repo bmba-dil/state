@@ -40,7 +40,7 @@ concurrency model.
 - Subagent management (static whitelist per Slice stage; ~20 parallel default; structured returns)
 - Harness architecture diagram (hooks + MCP + daemon; 4-tier intervention)
 
-**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. v41 in progress: REQUIREMENTS.md drafted (60 reqs across 10 categories), roadmap pending.
+**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. v41 in progress — roadmap created (5 phases 402–406, 73 reqs across 10 categories after Phase 402 added CTX-09). **Phase 402 complete** (2026-05-08): SLICE-CYCLE.md + CONTEXT-PROTOCOL.md authored; 7 v40 specs amended (Slice-owns-cycle correction, SLC-07 closed); CTX-09 (Reactive overflow recovery) added.
 
 ## Requirements
 
@@ -59,6 +59,7 @@ concurrency model.
 - ✓ **Mode enforcement (6 layers) — mode.json schema, directory presence, MCP registration toggle, plugin hook gates, daemon HTTP middleware, import-graph lint** — v11 (2026-05-05): 9 phases (097-105), all 6 layers verified.
 - ✓ **Four-tier hierarchy definitions (Arc, Stage, Slice, Step) — complete behavioral specs, state machines, event taxonomy, composite cascade, pydantic frontmatter schemas with `extra="forbid"`, descope/abandon/blocked/decimal semantics** — Phase 400 (2026-05-06): 3 plans, 9 spec docs, 14/14 TIER+FSM requirements satisfied, Phase→Stage rename applied.
 - ✓ **Artifact catalog, naming conventions, on-disk filesystem layout, cross-reference system, consistency validation — complete `.state/build/` blueprint** — Phase 401 (2026-05-07): 3 plans, 6 spec docs (~2,900 lines), 17/17 requirements satisfied (ART-01..ART-05, DSK-01..DSK-06, REF-01..REF-06). v40 milestone complete; .state/build/ design filesystem ready for v41+ runtime implementation.
+- ✓ **Slice-cycle specification + context-window protocol + v40 amendments — canonical v41 design contracts** — Phase 402 (2026-05-08): 4 plans, 4 SUMMARY.md, 16/16 requirements satisfied (SLC-01..07 + CTX-01..09 incl. new CTX-09 Reactive overflow recovery). SLICE-CYCLE.md (255 lines) + CONTEXT-PROTOCOL.md (400 lines, `CompactionSnapshot` Pydantic model + hybrid reinject payload + 200k Slice budget + reactive-overflow one-shot pattern). 7 v40 specs amended append-only (`## v41 Amendment` blocks forward-pointing to SLICE-CYCLE.md). 15 threats closed in SECURITY.md, code review clean.
 
 ### Active
 
@@ -260,4 +261,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-07 — v41 milestone started (Agent Harness & Context Control Design). REQUIREMENTS.md drafted: 60 v1 requirements across 10 categories (SLC, CTX, STP, PAP, PRF, APG, SRP, DEV, SUB, HRN); 4 v2 deferred; 9 out-of-scope items. 12 design decisions locked (D-1..D-12) including Slice-owns-cycle (corrects v40 Phase 400) and 200k absolute Slice budget.*
+*Last updated: 2026-05-08 — Phase 402 (Slice-Cycle & Context Window Spec) complete. v41 milestone now: 73 v1 reqs (CTX-09 added in Phase 402); 5 phases (402–406); Phase 402 ✓ shipped. Next: Phase 403 (Step / task decomposition protocol).*
