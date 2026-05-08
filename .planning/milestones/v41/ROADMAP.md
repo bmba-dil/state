@@ -28,7 +28,7 @@
 
 ## Phases
 
-- [ ] **Phase 402: Slice-Cycle & Context Window Spec** — Slice-owns-cycle correction + 200k absolute budget, fresh-session-per-Slice, compaction snapshot, threshold actions
+- [x] **Phase 402: Slice-Cycle & Context Window Spec** — Slice-owns-cycle correction + 200k absolute budget, fresh-session-per-Slice, compaction snapshot, threshold actions (completed 2026-05-08)
 - [ ] **Phase 403: Step/Task Decomposition & Plan-as-Prompt** — `stepNN-PLAN.md` GSD-shape format + plan-as-prompt injection, mutability/audit, content stripping
 - [ ] **Phase 404: Boolean Proof Gate & Discipline Guards** — `must_haves` proof block + per-task `<verify>`, analysis paralysis guard, scope reduction prohibition
 - [ ] **Phase 405: Deviation Rules & Subagent Management** — 4-rule deviation framework + tiered autonomy, static subagent whitelist + parallel fanout
@@ -49,7 +49,7 @@
   4. The compaction snapshot Pydantic model is defined (CTX-05) with `extra="forbid"` and an orjson serialization round-trip example; the rehydrate flow is specified including the exact reinject payload (active PLAN, current task pointer, last verify result, upstream `provides:` blocks, worktree path — CTX-06) and the event-store row schema for snapshots.
   5. The identifier-survival contract is specified (CTX-07): `task_id`, `step_id`, `slice_id` survive both compaction and Slice-boundary session spawn, and reinjection events reference the prior `session_id`. The context-meter read path (CTX-08) names the plugin hook (chat.params or tool.execute.after) and the daemon SSE event emitted to TUI.
 
-**Plans:** 4 plans
+**Plans:** 4/4 plans complete
 - [ ] 402-01-slice-cycle-spec-PLAN.md — Author canonical SLICE-CYCLE.md spec doc (covers SLC-01..07)
 - [ ] 402-02-context-protocol-spec-PLAN.md — Author canonical CONTEXT-PROTOCOL.md spec doc (covers CTX-01..09)
 - [ ] 402-03-v40-amendments-PLAN.md — Append v41 amendment blocks to 7 v40 spec docs (closes SLC-07)
@@ -121,7 +121,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 402. Slice-Cycle & Context Window Spec | 0/4 | Plans drafted | - |
+| 402. Slice-Cycle & Context Window Spec | 4/4 | Complete   | 2026-05-08 |
 | 403. Step/Task Decomposition & Plan-as-Prompt | 0/0 | Not started | - |
 | 404. Boolean Proof Gate & Discipline Guards | 0/0 | Not started | - |
 | 405. Deviation Rules & Subagent Management | 0/0 | Not started | - |

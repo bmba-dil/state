@@ -1,0 +1,13 @@
+---RESUME---
+milestone: v40
+auto: false
+nextCommand: STOP
+contextFiles:
+  - .planning/milestones/v40-ROADMAP.md
+  - .planning/ROADMAP.md
+  - .planning/PROJECT.md
+  - .planning/STATE.md
+skillFile: ""
+autoInject:
+  - AGENTS.md
+  - ~/.claude/CLAUDE.md
