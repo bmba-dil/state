@@ -551,3 +551,17 @@ This document depends on the following specifications. Each is referenced by doc
 ---
 
 *Design contract for v41+ filesystem layout, naming conventions, STATE.md placement, file count strategy, and concurrent access rules. All 28 catalog paths verified against ARTIFACT-CATALOG.md with no competing notations. Consumed by daemon, projector, CLI commands, worktree manager, and Plan 401-03 cross-reference resolution.*
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-06 / SLC-07 — canonical Slice folder layout + cycle ownership.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md) §"Canonical Slice Folder Layout (SLC-06 amended)"
+
+### Effect on this document
+
+Directory tree (DSK-01) Slice subdirectory layout remains authoritative for path shape (`.state/build/arcs/arc-N/stages/stage-N/slices/slice-N/`). SLICE-CYCLE.md §"Canonical Slice Folder Layout" enumerates the per-file producer stage; the two specs are non-conflicting (DIRECTORY-TREE owns paths; SLICE-CYCLE owns producer mapping).
+
+*Original v40 spec text above this amendment block is untouched.*

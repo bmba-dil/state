@@ -790,3 +790,17 @@ Mapping specification-level threats to mitigations in this document:
 ---
 
 *Design contract for v41+ runtime filesystem implementation. All 13 artifact types documented with complete property tables, 10 embedded templates with frontmatter cross-reference validation, and comprehensive immutability rules. Path variable notation uniform throughout (arc-{n}, stage-{n}, slice-{n}, step-{n}). Consumed by Phase 401 Plan 02 (DIRECTORY-TREE.md), Plan 03 (CROSS-REFERENCES.md), and v41+ daemon projector.*
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-06 / SLC-07 — canonical Slice folder layout + cycle ownership.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md) §"Canonical Slice Folder Layout (SLC-06 amended)"
+
+### Effect on this document
+
+Artifact catalog (ART-01) entries for the Slice tier remain authoritative for filename, schema owner, and immutability. SLICE-CYCLE.md adds the producer-stage mapping (which of design-slice / research-slice / run-slice / verify-slice writes each artifact) and the v41 vocabulary reconciliation. Readers consulting this catalog for v41+ scheduling should cross-reference SLICE-CYCLE.md §"Canonical Slice Folder Layout".
+
+*Original v40 spec text above this amendment block is untouched.*

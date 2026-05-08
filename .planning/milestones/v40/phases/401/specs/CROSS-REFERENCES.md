@@ -375,3 +375,17 @@ The following patterns are explicitly forbidden. They are listed here as a guard
 ---
 
 *Design contract for v41+ cross-reference resolution, dependency validation, and broken reference handling. Complete specification covering REF-01 (cross-reference format with ID resolution algorithm and hash pinning), REF-02 (edge type semantics with 5-column table and EdgeKind alignment), REF-03 (dependency policy with 6 direction types and detection logic), and REF-04 (broken reference handling with 12-scenario matrix and 3-path user resolution protocol). Consumed by daemon artifact loader, scheduler, projector, validate_consistency(), CLI commands, and quality pipeline verifier.*
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-06 / SLC-07 — canonical Slice folder layout + cycle ownership.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md) §"Canonical Slice Folder Layout (SLC-06 amended)"
+
+### Effect on this document
+
+Cross-reference format (REF-01) and edge-type semantics (REF-02) remain authoritative. The four-stage Slice cycle vocabulary (`design-slice`, `research-slice`, `run-slice`, `verify-slice`) is reconciled against v41 REQUIREMENTS' alternate vocabulary (`discuss-slice`, `plan-slice`, `execute-slice`) by the SLICE-CYCLE.md vocabulary mapping table; references that use either vocabulary resolve via that table.
+
+*Original v40 spec text above this amendment block is untouched.*
