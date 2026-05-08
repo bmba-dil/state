@@ -205,3 +205,31 @@ Existing code in `src/state_core/schema.py` defines `STEP_EVENT_TYPES` with `sta
 - **Aggregate ID (internal):** `arc-{n}/stage-{n}/slice-{n}/step-{n}` — hierarchical, slash-delimited. Example: `arc-45/stage-22/slice-12/step-5`
 - **File path:** `.state/build/arcs/arc-{n}/stages/stage-{n}/slices/slice-{n}/step{n}PLAN.md` — flat file within the parent Slice directory (D-04)
 - **Scheduler relationship:** Steps are NOT dispatched by the scheduler (D-11). The scheduler dispatches Slices; the agent manages Steps within the Slice session. Step events (`state.step.advanced`) notify the scheduler of progress for composite state computation (D-19), but do not trigger scheduler dispatch.
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-07 — Slice-owns-cycle correction; v40 cycle-ownership ambiguity is resolved canonically in v41.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md) §"Step is a Leaf Artifact (D-1 / SLC-01 explicit)"
+
+### Prior model (v40)
+
+TIER-STEP.md (v40) defined Step as the smallest unit of work, owning a `design → plan → run → verify` cycle in its own state machine (`idle → designing → planning → running → verifying → done`). D-04 constrained Steps to flat files within the parent Slice folder, but the Step state machine implied Step also "owns" a four-phase cycle.
+
+### Canonical model (v41)
+
+Step is a **leaf artifact** of the Slice's run-slice stage. Step's `state.step.designed/planned/ran/verify_passed` events represent **intra-run-slice granularity** — they track Step lifecycle as run-slice executes each `stepNPLAN.md` per DAG ordering. Step does NOT own its own four-stage Slice cycle. The cycle owner is the parent Slice; canonical definition in [`SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md).
+
+Per `.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md` §"Step is a Leaf Artifact (D-1 / SLC-01 explicit)", Step is a leaf artifact and does not own its own four-stage cycle. The Step FSM defined in this document (`state.step.designed/planned/ran/verify_passed`) is intra-`run-slice` granularity. The Slice tier owns the four-stage cycle (design-slice → research-slice → run-slice → verify-slice). See SLICE-CYCLE.md for the canonical model.
+
+### Effect on this document
+
+TIER-STEP.md's state machine and event tables remain authoritative for Step lifecycle within run-slice. Readers should treat Step as a leaf within the Slice cycle, not a parallel cycle owner.
+
+### Mode isolation
+
+All v41-introduced events remain build-mode only (`state.slice.*`, `compaction.*` prefixes). Teach-mode harness is v47 scope.
+
+*Original v40 spec text above this amendment block is untouched. This amendment is a published correction, appended per Phase 402 convention (no in-line strikethroughs).*

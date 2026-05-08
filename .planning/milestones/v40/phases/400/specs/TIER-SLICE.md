@@ -171,3 +171,29 @@ Decimal insertions (slice-12.1, slice-12.2) are supported at the Slice level per
 - **Aggregate ID (internal):** `arc-{n}/stage-{n}/slice-{n}` — hierarchical, slash-delimited. Example: `arc-45/stage-22/slice-12`
 - **Directory path:** `.state/build/arcs/arc-{n}/stages/stage-{n}/slices/slice-{n}/` containing SLICE.md, DESIGN.md, RESEARCH.md, step1PLAN.md..stepNPLAN.md, VERIFICATION.md, SUMMARY.md, STATE.md, and the git worktree
 - **Worktree:** One per Slice, created at the `worktree_ready` transition. The worktree lives in the Slice directory and is used for all Step execution within the Slice.
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-07 — Slice-owns-cycle correction; v40 cycle-ownership ambiguity is resolved canonically in v41.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md)
+
+### Prior model (v40)
+
+TIER-SLICE.md (v40) defined Slice as the terminal container tier and listed DESIGN.md / RESEARCH.md / step1PLAN.md..stepNPLAN.md / VERIFICATION.md / SUMMARY.md as owned artifacts under a `Workflow order (D-06): design → research → run → verify → summary` shape. Cycle ownership between Slice and Step was implicit — v40 D-04 already constrained Steps to flat files, but no doc explicitly said the four-stage cycle is owned by Slice.
+
+### Canonical model (v41)
+
+Slice owns the four-stage cycle: **design-slice → research-slice → run-slice → verify-slice**. Step is a leaf artifact (`stepNPLAN.md`, `stepNSUMMARY.md`) consumed by run-slice. The Slice cycle terms and the canonical Slice folder layout (with producer-stage mapping) are defined in [`SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md). The v41 vocabulary table reconciles v41 REQUIREMENTS' `discuss-slice/plan-slice/execute-slice` to the canonical `design-slice/research-slice/run-slice/verify-slice` terms.
+
+### Effect on this document
+
+TIER-SLICE.md's `## State Machine`, `## Owned Artifacts`, and `## Frontmatter Fields` sections remain authoritative for Slice FSM and frontmatter shape. The `Workflow order (D-06)` line is forward-pointed to SLICE-CYCLE.md for the canonical four-stage terminology and per-stage owner/inputs/outputs.
+
+### Mode isolation
+
+All v41-introduced events remain build-mode only (`state.slice.*`, `compaction.*` prefixes). Teach-mode harness is v47 scope.
+
+*Original v40 spec text above this amendment block is untouched. This amendment is a published correction, appended per Phase 402 convention (no in-line strikethroughs).*

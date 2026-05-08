@@ -294,3 +294,29 @@ The rebuild is deterministic because:
 ---
 
 *Design contract for v41+ projector composite event emission. All cascade logic validated against FSM-TABLES.md transition tables and EVENT-TAXONOMY.md event definitions. D-19 composite state computation rules are projector-enforced, not FSM-enforced.*
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-07 — Slice-owns-cycle correction; v40 cycle-ownership ambiguity is resolved canonically in v41.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md)
+
+### Prior model (v40)
+
+COMPOSITE-CASCADE.md (v40) documented the upward cascade Step → Slice → Stage → Arc, with composite events `state.slice.steps_completed`, `state.stage.slices_shipped`, `state.arc.stages_shipped`. Step → Slice cascade fires when ALL child Steps reach `done`.
+
+### Canonical model (v41)
+
+Cascade rules remain unchanged. Confirmation: Step is a leaf artifact (per [`SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md) §"Step is a Leaf Artifact"); the cascade STOPS at Slice. There is no Step-owned cycle to cascade above; the four Slice stage-boundary events (`state.slice.{design,research,run,verify}_completed` per the EVENT-TAXONOMY v41 amendment) fire WITHIN a Slice's lifecycle, not as Step → Slice composite cascades. They are intra-Slice progress markers, not cross-tier rollup events.
+
+### Effect on this document
+
+No cascade-rule changes. The doc's existing `## Step → Slice Cascade` section is correct; Step `state.step.verify_passed` (last child Step) still triggers `state.slice.steps_completed`, which (combined with VERIFICATION.md passing) advances the Slice to `shipped`. The four new stage-boundary events documented in EVENT-TAXONOMY's v41 amendment are NOT composite cascade events — they are intra-Slice and are emitted directly by the agent / daemon at each stage boundary.
+
+### Mode isolation
+
+All v41-introduced events remain build-mode only (`state.slice.*`, `compaction.*` prefixes). Teach-mode harness is v47 scope.
+
+*Original v40 spec text above this amendment block is untouched. This amendment is a published correction, appended per Phase 402 convention (no in-line strikethroughs).*

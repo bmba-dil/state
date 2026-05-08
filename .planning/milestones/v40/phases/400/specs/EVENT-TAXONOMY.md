@@ -193,3 +193,43 @@ The daemon's mode-enforcement middleware validates that an event's type string s
 ---
 
 *Design contract for v41+ runtime event handling. All events validated against FSM-TABLES.md transition tables. Consumed by COMPOSITE-CASCADE.md for cross-tier rollup logic.*
+
+---
+
+## v41 Amendment
+
+**Amended:** Phase 402 (v41 milestone — Slice-Cycle & Context Window Spec)
+**Cause:** SLC-07 — Slice-owns-cycle correction; v40 cycle-ownership ambiguity is resolved canonically in v41.
+**Canonical successor:** [`.planning/milestones/v41/phases/402/specs/SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md)
+
+### Prior model (v40)
+
+EVENT-TAXONOMY.md (v40) catalogued 33 events across Arc/Stage/Slice/Step tiers and 2 composite events. Slice events covered FSM transitions (`created`, `worktree_ready`, `started`, `shipped`, `reverted`, `replanned`, `blocked`, `unblocked`, `deferred`, `undeferred`, `updated`) but NOT stage-boundary events for the four Slice stages because cycle ownership was implicit.
+
+### Canonical model (v41)
+
+Four NEW stage-boundary events are added at the Slice tier — one per stage of the four-stage Slice cycle defined in [`SLICE-CYCLE.md`](../../../v41/phases/402/specs/SLICE-CYCLE.md):
+
+| Event Type                          | Trigger                                                | Aggregate | Data Fields                                                                                                          |
+|-------------------------------------|--------------------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------|
+| state.slice.design_completed        | design-slice produces DESIGN.md + DECISIONS.md         | slice     | slice_id: str, stage: Literal["design"], produced_artifacts: list[str], completed_at: datetime                       |
+| state.slice.research_completed      | research-slice's four sub-stages all produce artifacts | slice     | slice_id: str, stage: Literal["research"], produced_artifacts: list[str], completed_at: datetime                     |
+| state.slice.run_completed           | run-slice writes all stepNSUMMARY.md files             | slice     | slice_id: str, stage: Literal["run"], produced_artifacts: list[str], completed_at: datetime                          |
+| state.slice.verify_completed        | verify-slice writes N-VERIFICATION.md                  | slice     | slice_id: str, stage: Literal["verify"], produced_artifacts: list[str], completed_at: datetime                       |
+
+Plus two events added for cross-session compaction lineage:
+
+| Event Type                          | Trigger                                       | Aggregate | Data Fields                                                                                                          |
+|-------------------------------------|-----------------------------------------------|-----------|----------------------------------------------------------------------------------------------------------------------|
+| compaction.snapshot_taken           | Threshold/overflow/manual compaction fires    | session   | (see CONTEXT-PROTOCOL.md §8 — full CompactionSnapshot Pydantic shape)                                                |
+| compaction.reinject_completed       | Daemon's `chat.params` ack on new session     | session   | (see CONTEXT-PROTOCOL.md §10 — full CompactionReinjectCompleted Pydantic shape)                                       |
+
+### Effect on this document
+
+Event count rises from 33 to 39 (+4 stage-boundary, +2 compaction lifecycle). The `BUILD_ONLY_EVENT_PREFIXES` frozenset gains `"compaction."` per the new compaction events. Mode-isolation rules unchanged — all new events are build-mode only. Full schema for the compaction events is owned by [`CONTEXT-PROTOCOL.md`](../../../v41/phases/402/specs/CONTEXT-PROTOCOL.md) §8 + §10.
+
+### Mode isolation
+
+All v41-introduced events remain build-mode only (`state.slice.*`, `compaction.*` prefixes). Teach-mode harness is v47 scope.
+
+*Original v40 spec text above this amendment block is untouched. This amendment is a published correction, appended per Phase 402 convention (no in-line strikethroughs).*
