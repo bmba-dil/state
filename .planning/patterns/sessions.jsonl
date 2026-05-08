@@ -32,3 +32,8 @@
 {"timestamp":"2026-05-04T11:22:01.733Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
 {"timestamp":"2026-05-04T21:33:33.227Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
 {"timestamp":"2026-05-04T21:33:35.552Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
+{"timestamp":"2026-05-07T21:56:21.559Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
+{"timestamp":"2026-05-08T01:17:22.734Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
+{"timestamp":"2026-05-08T03:04:57Z","type":"workflow","source":"workflow","command":"discuss","phase":"402","milestone":"v41","duration":null,"outcome":"success","skills_loaded":[],"details":{"areas_discussed":4,"decisions_count":18,"deferred_count":7}}
+{"timestamp":"2026-05-08T11:35:00.778Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}
+{"timestamp":"2026-05-08T20:28:34.022Z","event":"SessionEnd","cwd":"/Users/tmac/Projects/state"}

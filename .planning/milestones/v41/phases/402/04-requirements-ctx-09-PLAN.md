@@ -126,13 +126,6 @@ No code changes. No secrets.
     - Phase 402 (Slice-Cycle & Context Window Spec): 16 reqs (SLC + CTX)
     ```
 
-    Also locate the category-counts table near the top of the doc (under "Requirement Coverage" or similar):
-    ```
-    | CTX — Context Window Management | 8 | CTX-01..CTX-08 | 402 |
-    ```
-
-    If it exists in REQUIREMENTS.md (this header line lives in ROADMAP.md, not REQUIREMENTS.md — confirm by grep `grep "Context Window Management" .planning/milestones/v41/REQUIREMENTS.md`; if present, update; if not, this sub-edit is a no-op).
-
     Also add a final-line annotation at the bottom of the doc (just before the closing `*Last updated:*` line):
 
     ```
@@ -276,15 +269,17 @@ grep -q "| \*\*Total\*\* | \*\*73\*\* | — | \*\*100% mapped\*\* |" .planning/m
 
 <verification>
 - REQUIREMENTS.md contains CTX-09 entry (body + Traceability table) with the six-step flow text.
-- REQUIREMENTS.md totals updated: CTX category from 8→9; v1 total from 72→73.
+- REQUIREMENTS.md totals updated: CTX category from 8→9; v1 milestone total from 72→73.
 - ROADMAP.md Phase 402 Requirements line includes CTX-09.
 - ROADMAP.md milestone Requirement Coverage table updated: CTX row 8→9; Total 72→73.
 - Both files validate: `for f in REQUIREMENTS.md ROADMAP.md; do grep -q "CTX-09" .planning/milestones/v41/$f || echo "MISSING in $f"; done` produces no output.
+
+**Cross-plan ordering note (wave 1 invariant):** This plan and Plan 02 both run in wave 1 with disjoint `files_modified` (Plan 04 owns REQUIREMENTS.md + ROADMAP.md; Plan 02 owns specs/CONTEXT-PROTOCOL.md). The CTX-09 traceability invariant — "REQUIREMENTS.md contains CTX-09 AND CONTEXT-PROTOCOL.md §12 cites CTX-09" — closes only when BOTH plans land. Either order within wave 1 is acceptable; the verifier asserting the joint invariant must run after wave 1 completes (e.g., `<verify>`-phase or phase-close). Plan 04 alone cannot prove §12 exists; Plan 02 alone cannot prove the REQ-ID is registered. No `depends_on` edge added — serializing wave 1 is unnecessary; the joint check belongs to phase-close, not Plan 04.
 </verification>
 
 <success_criteria>
 - CTX-09 is a first-class requirement in the v41 traceability chain.
-- CONTEXT-PROTOCOL.md §12 (Reactive Overflow Recovery, owned by Plan 02) cites a REQ-ID that exists in REQUIREMENTS.md.
+- CONTEXT-PROTOCOL.md §12 (Reactive Overflow Recovery, owned by Plan 02) cites a REQ-ID that exists in REQUIREMENTS.md. (Cross-plan invariant: closes at end of wave 1 once both Plan 02 and Plan 04 have landed; either order acceptable since their `files_modified` sets are disjoint. Verifier check belongs to phase-close, not to Plan 04 in isolation.)
 - Phase 402's requirements coverage is closed: every REQ-ID listed in ROADMAP.md Phase 402 detail (SLC-01..07 + CTX-01..09) has a corresponding entry in REQUIREMENTS.md.
 - gsd-roadmapper / planner / checker tooling reads consistent counts across both docs.
 </success_criteria>

@@ -136,9 +136,9 @@ No production code lands. No secrets. No network calls. No untrusted input.
            Emits `compaction.snapshot_taken` (trigger=`overflow`).
        - Subsection `### Threshold trigger source — plugin reads + daemon decides`: plugin's `tool.execute.after` reads `usage.input_tokens + usage.cache_read_input_tokens` per gsd-2 §2.2, posts to daemon over HTTP; daemon middleware consults harness state and decides intervention tier (advisory inject / tool-block / clear+reinject / human gate). Plugin shim stays a thin reporter — preserves the ~300 LOC contract from PROJECT.md.
        - Subsection `### Per-Slice threshold override`: Slice frontmatter MAY narrow (move thresholds *earlier* / make stricter) but never widen. Field: `compaction: {emergency_pct: int, warning_pct: int}`. Daemon validates: `emergency_pct ≥ 25` and `warning_pct ≥ 35` (defaults). Mirrors SUB-03 narrow-only pattern.
-       - Subsection `### Manual /compact telemetry`: state observes opencode's native `/compact` via `session.compacting` and emits `compaction.snapshot_taken` with `trigger="manual"`, `from_hook=False`. Sufficient for v1; richer telemetry deferred per CONTEXT.md `<deferred>`.
+       - Subsection `### Manual /compact telemetry`: state observes opencode's native `/compact` via `session.compacting` and emits `compaction.snapshot_taken` with `trigger="manual"`, `from_hook=False`. Sufficient for the **v1 milestone**; richer telemetry deferred per 402-CONTEXT.md `<deferred>` "Manual /compact telemetry". (Note: any reference to `v1` in this doc is a milestone label, never a feature-tier qualifier — the prohibited bare `\bv1\b` token from Plan 01 is allowed here only when it directly precedes the word "milestone" or appears inside the phrase "v1 milestone".)
 
-    Use markdown tables consistently. Cite REQ-IDs inline (e.g., "(CTX-04)", "(CTX-09)") so grep can verify coverage. Do NOT use prohibited language ("v1", "simplified", "placeholder", "TODO", "FIXME", "future"). The phrase "v1" appears in this doc only as a milestone version label inside a quoted parenthetical (e.g., "(sufficient for v1; richer telemetry deferred)") — use `**Sufficient for the v1 implementation**` wording with explicit milestone reference if grep flags this.
+    Use markdown tables consistently. Cite REQ-IDs inline (e.g., "(CTX-04)", "(CTX-09)") so grep can verify coverage. Do NOT use prohibited language ("simplified", "placeholder", "TODO", "FIXME", "future"). The bare token `v1` is also prohibited EXCEPT when used as a milestone version label in the explicit phrase "v1 milestone" (or equivalent: "v1 milestone label", "the v1 milestone"). Any other `\bv1\b` occurrence is a defect. This rule mirrors Plan 01's prohibited-language gate with the milestone-label allowlist exception spelled out.
 
     <quality_scan>
       <code_to_reuse>
@@ -166,6 +166,8 @@ grep -q "^## 200k Absolute Slice Budget" .planning/milestones/v41/phases/402/spe
 grep -q "^## Fresh Session Per Slice" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
 grep -q "^## Intra-Slice Compaction" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
 grep -q "^## Threshold Action Table" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
+grep -q "^## Overview" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
+grep -q "^Phase: 402" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
 grep -q "_overflow_recovery_attempted" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
 grep -q "tool.execute.after" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
 grep -q "tool.execute.before" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && \
@@ -180,6 +182,7 @@ grep -q "session.compacting" .planning/milestones/v41/phases/402/specs/CONTEXT-P
     - REQ-IDs CTX-01 through CTX-04 + CTX-09 referenced inline: `for n in 01 02 03 04 09; do grep -q "CTX-$n" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md || echo "MISSING CTX-$n"; done` produces no output.
     - Mode-isolation note present: `grep -q "Build-mode only" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md`.
     - HRN-04 / SUB-03 cross-references present: `grep -q "HRN-04" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && grep -q "SUB-03" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md`.
+    - Prohibited-language gate (mirrors Plan 01 with milestone-label allowlist): every bare `\bv1\b` occurrence MUST be immediately followed by the word `milestone` (case-insensitive) within the same sentence; `simplified`, `placeholder`, `TODO`, `FIXME`, `future` MUST NOT appear at all. Verify: `! grep -nE "\b(simplified|placeholder|TODO|FIXME|future)\b" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md` AND every line containing `v1` also contains `milestone` (`grep -nE "\bv1\b" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md | grep -v -i "milestone" | wc -l` returns `0`).
   </acceptance_criteria>
 
   <done>
@@ -245,7 +248,7 @@ grep -q "session.compacting" .planning/milestones/v41/phases/402/specs/CONTEXT-P
            - `## Recent run history` — up to 5 most-recent run-slice executions.
          - Use case: cross-session orientation when a fresh agent boots without knowing `session_id` (it knows `process.cwd()`); reads `.state/build/last-snapshot.md` from there before daemon hand-off completes.
          - Written by the daemon's projector on every `compaction.snapshot_taken` event.
-         - **NOT atomic in v1** — byte cap enforced in memory before write, but no temp+rename. Documented as known limitation; atomic-write follow-up deferred to v44 (Rust DB rewrite).
+         - **NOT atomic in the v1 milestone** — byte cap enforced in memory before write, but no temp+rename. Documented as known limitation; atomic-write follow-up deferred to v44 (Rust DB rewrite).
        - Subsection `### Helper-type sketches`: include three helper Pydantic stubs the snapshot references — `ProvidesBlock`, `TaskPointer`, `VerifyResult` — each with `model_config = ConfigDict(extra="forbid")` and 2-3 fields each (`ProvidesBlock`: `from_step_id: str`, `provides: dict[str, str]`; `TaskPointer`: `task_index: int`, `task_name: str`, `started_at: datetime`; `VerifyResult`: `status: Literal["pass", "fail", "skipped"]`, `details: str`, `verified_at: datetime`). Note: full helper-type schemas are owned by Phase 403 / Phase 404; this doc lists the minimum shape needed to validate `CompactionSnapshot`.
 
     9. `## Reinject Payload (CTX-06)` — Hybrid format documentation:
@@ -366,7 +369,7 @@ grep -q "compaction-docs-from-gsd-2" .planning/milestones/v41/phases/402/specs/C
 
   <acceptance_criteria>
     - File length ≥400 lines.
-    - All 14 H1/H2 sections present (verified by `<verify>` greps for the seven new sections + the seven from Task 1).
+    - All 14 H1/H2 sections present (verified by `<verify>` greps in this task for the seven sections 8-14 + the seven from Task 1's `<verify>` block, which after the Warning-4 fix now also greps for `^## Overview` and `^Phase: 402` covering sections 2 and 3).
     - CompactionSnapshot Pydantic class includes every field from CONTEXT.md: `for f in slice_id step_id task_id session_id prior_session_id summary first_kept_entry_id tokens_before trigger from_hook worktree_path provides_blocks active_plan_path current_task_pointer last_verify_result created_at; do grep -q "$f" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md || echo "MISSING $f"; done` produces no output.
     - `extra="forbid"` present at least twice (one each for CompactionSnapshot and CompactionReinjectCompleted): `[ "$(grep -c 'extra=\"forbid\"' .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md)" -ge 2 ]`.
     - orjson round-trip example present: `grep -q "orjson.dumps" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && grep -q "OPT_SORT_KEYS" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md && grep -q "OPT_NAIVE_UTC" .planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md`.

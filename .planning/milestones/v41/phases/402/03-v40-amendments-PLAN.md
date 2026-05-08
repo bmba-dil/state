@@ -224,8 +224,12 @@ grep -q "leaf artifact" .planning/milestones/v40/phases/400/specs/COMPOSITE-CASC
     - All four amendments include the exact link `v41/phases/402/specs/SLICE-CYCLE.md`.
     - EVENT-TAXONOMY.md amendment includes all four `state.slice.{design,research,run,verify}_completed` events AND the two compaction lifecycle events.
     - COMPOSITE-CASCADE.md amendment includes the phrase "leaf artifact" confirming cascade stops at Slice.
-    - Original v40 H1 lines unchanged: `head -1 .planning/milestones/v40/phases/400/specs/TIER-SLICE.md` returns `# Tier Specification: Slice`. Same check for the other three files (TIER-STEP, EVENT-TAXONOMY, COMPOSITE-CASCADE) — H1s unchanged.
-    - File length increased: each file's wc -l is greater than the original wc -l (proves append, not overwrite).
+    - Original v40 H1 lines unchanged (exact strings from pre-edit `head -1`):
+      - `grep -q "^# Tier Specification: Slice$" .planning/milestones/v40/phases/400/specs/TIER-SLICE.md`
+      - `grep -q "^# Tier Specification: Step$" .planning/milestones/v40/phases/400/specs/TIER-STEP.md`
+      - `grep -q "^# Event Taxonomy — All Four Tiers$" .planning/milestones/v40/phases/400/specs/EVENT-TAXONOMY.md`
+      - `grep -q "^# Composite Event Cascade — Step→Slice→Stage→Arc$" .planning/milestones/v40/phases/400/specs/COMPOSITE-CASCADE.md`
+    - Append-only behavior: the `## v41 Amendment` H2 appears exactly once at end-of-file in each target, AND each original H1 above is still the file's first non-empty line. The combination of H1-unchanged + amendment-header-present is sufficient evidence of append-only behavior; no separate line-count-delta check is required.
   </acceptance_criteria>
 
   <done>
@@ -297,14 +301,17 @@ grep -q "leaf artifact" .planning/milestones/v40/phases/400/specs/COMPOSITE-CASC
     <automated>for f in ARTIFACT-CATALOG DIRECTORY-TREE CROSS-REFERENCES; do \
   grep -q "^## v41 Amendment" .planning/milestones/v40/phases/401/specs/$f.md || { echo "MISSING amendment header in 401/$f"; exit 1; }; \
   grep -q "v41/phases/402/specs/SLICE-CYCLE.md" .planning/milestones/v40/phases/401/specs/$f.md || { echo "MISSING canonical-successor link in 401/$f"; exit 1; }; \
-donedone</automated>
+done</automated>
   </verify>
 
   <acceptance_criteria>
     - All three Phase 401 spec files have a `## v41 Amendment` H2.
     - All three amendments include the exact link `v41/phases/402/specs/SLICE-CYCLE.md`.
-    - Original v40 H1 lines unchanged: `head -1 .planning/milestones/v40/phases/401/specs/ARTIFACT-CATALOG.md` returns its original H1; same for DIRECTORY-TREE.md and CROSS-REFERENCES.md.
-    - File length increased: each file's wc -l is greater than the original wc -l (proves append, not overwrite).
+    - Original v40 H1 lines unchanged (exact strings from pre-edit `head -1`):
+      - `grep -q "^# Artifact Catalog: \`.state/build/\` Complete Blueprint$" .planning/milestones/v40/phases/401/specs/ARTIFACT-CATALOG.md`
+      - `grep -q "^# Directory Tree: \`.state/build/\` Filesystem Blueprint$" .planning/milestones/v40/phases/401/specs/DIRECTORY-TREE.md`
+      - `grep -q "^# Cross-Reference System: Format, Resolution, Edge Semantics, Dependency Policy, and Broken Reference Handling$" .planning/milestones/v40/phases/401/specs/CROSS-REFERENCES.md`
+    - Append-only behavior: the `## v41 Amendment` H2 appears exactly once at end-of-file in each target, AND each original H1 above is still the file's first non-empty line. The combination of H1-unchanged + amendment-header-present is sufficient evidence of append-only behavior; no separate line-count-delta check is required.
   </acceptance_criteria>
 
   <done>
