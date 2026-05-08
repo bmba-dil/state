@@ -41,7 +41,7 @@
 ### Phase 402: Slice-Cycle & Context Window Spec
 **Goal**: The Slice cycle is canonically defined as the cycle owner (correcting Phase 400 in-line), and the 200k absolute Slice budget plus session/compaction protocol is fully specified — implementable without further design.
 **Depends on**: Nothing (first v41 phase)
-**Requirements**: SLC-01, SLC-02, SLC-03, SLC-04, SLC-05, SLC-06, SLC-07, CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, CTX-06, CTX-07, CTX-08
+**Requirements**: SLC-01, SLC-02, SLC-03, SLC-04, SLC-05, SLC-06, SLC-07, CTX-01, CTX-02, CTX-03, CTX-04, CTX-05, CTX-06, CTX-07, CTX-08, CTX-09
 **Success Criteria** (what must be TRUE):
   1. A `SLICE-CYCLE.md` spec document exists at `.planning/milestones/v41/phases/402/` defining all four stages (discuss → plan → execute → verify) with stage owner, inputs, outputs, and stage-boundary events; every artifact in the canonical Slice folder layout (SLC-06) is enumerated with its producer stage.
   2. v41 amendment headers are appended to every Phase 400 spec document affected by the Slice-owns-cycle correction (SLC-07), with each amendment block citing the prior model and the v41 canonical model.
@@ -134,7 +134,7 @@
 | Category | Count | REQ-IDs | Phase |
 |----------|-------|---------|-------|
 | SLC — Slice-Cycle Specification (v40 Correction) | 7 | SLC-01..SLC-07 | 402 |
-| CTX — Context Window Management | 8 | CTX-01..CTX-08 | 402 |
+| CTX — Context Window Management | 9 | CTX-01..CTX-09 | 402 |
 | STP — Step / Task Decomposition | 8 | STP-01..STP-08 | 403 |
 | PAP — Plan-as-Prompt | 6 | PAP-01..PAP-06 | 403 |
 | PRF — Boolean Proof Gate | 7 | PRF-01..PRF-07 | 404 |
@@ -143,7 +143,7 @@
 | DEV — Deviation Rules | 7 | DEV-01..DEV-07 | 405 |
 | SUB — Subagent Management | 9 | SUB-01..SUB-09 | 405 |
 | HRN — Harness Architecture | 8 | HRN-01..HRN-08 | 406 |
-| **Total** | **72** | — | **100% mapped** |
+| **Total** | **73** | — | **100% mapped** |
 
 ---
 

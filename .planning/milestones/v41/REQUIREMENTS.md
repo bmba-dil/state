@@ -33,6 +33,7 @@
 - [ ] **CTX-06**: On compaction reinject, harness includes: active `stepNN-PLAN.md`, current task pointer, last task's verify result, all upstream Step `SUMMARY.md` `provides:` blocks for resolved deps, current worktree path.
 - [ ] **CTX-07**: `task_id`, `step_id`, and `slice_id` survive compaction and Slice-boundary session spawn (linked via event store; reinjection events reference prior session_id).
 - [ ] **CTX-08**: Harness reads opencode's context meter via plugin hook on each tool-execute event; daemon mirrors meter state to SSE for TUI consumption.
+- [ ] **CTX-09**: Reactive overflow recovery — when the provider rejects a request with a context-overflow error, the harness mirrors gsd-2's `_overflowRecoveryAttempted` one-shot pattern. Six-step flow: (1) strip the failing assistant turn from context; (2) force-compact (snapshot+reinject), bypassing the percent-threshold check; (3) retry the provider call once; (4) set `_overflow_recovery_attempted` flag on the active session; (5) reset the flag on next user/agent message OR on successful turn; (6) if the flag is already set when a second overflow fires within the same user turn, surface the error to the user (no infinite loop).
 
 ### Step / Task Decomposition (STP)
 
@@ -180,6 +181,7 @@ Populated by gsd-roadmapper on 2026-05-08 during v41 roadmap creation. All 72 v1
 | CTX-06 | 402 | Pending |
 | CTX-07 | 402 | Pending |
 | CTX-08 | 402 | Pending |
+| CTX-09 | 402 | Pending |
 | STP-01 | 403 | Pending |
 | STP-02 | 403 | Pending |
 | STP-03 | 403 | Pending |
@@ -239,12 +241,12 @@ Populated by gsd-roadmapper on 2026-05-08 during v41 roadmap creation. All 72 v1
 | HRN-08 | 406 | Pending |
 
 **Coverage:**
-- v1 requirements: 72 total (SLC: 7, CTX: 8, STP: 8, PAP: 6, PRF: 7, APG: 6, SRP: 6, DEV: 7, SUB: 9, HRN: 8)
-- Mapped to phases: 72 / 72 (100%)
+- v1 requirements: 73 total (SLC: 7, CTX: 9, STP: 8, PAP: 6, PRF: 7, APG: 6, SRP: 6, DEV: 7, SUB: 9, HRN: 8)
+- Mapped to phases: 73 / 73 (100%)
 - Unmapped: 0
 
 **Phase distribution:**
-- Phase 402 (Slice-Cycle & Context Window Spec): 15 reqs (SLC + CTX)
+- Phase 402 (Slice-Cycle & Context Window Spec): 16 reqs (SLC + CTX)
 - Phase 403 (Step/Task Decomposition & Plan-as-Prompt): 14 reqs (STP + PAP)
 - Phase 404 (Boolean Proof Gate & Discipline Guards): 19 reqs (PRF + APG + SRP)
 - Phase 405 (Deviation Rules & Subagent Management): 16 reqs (DEV + SUB)
@@ -253,4 +255,7 @@ Populated by gsd-roadmapper on 2026-05-08 during v41 roadmap creation. All 72 v1
 ---
 
 *Requirements defined: 2026-05-07*
+
+*2026-05-08 — Phase 402 planning added CTX-09 (Reactive overflow recovery) per 402-CONTEXT.md `<decisions>` "Reactive overflow recovery" subsection. v1 requirement total: 72 → 73.*
+
 *Last updated: 2026-05-08 — gsd-roadmapper populated Traceability table; 72 reqs mapped across phases 402–406; 100% coverage*
