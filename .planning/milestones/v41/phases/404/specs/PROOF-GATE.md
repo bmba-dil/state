@@ -278,3 +278,274 @@ Even when all four layers fall through and the write is allowed, the daemon emit
 A failure inside any single layer is fatal for the write under evaluation: the daemon emits the layer-specific rejection event AND returns `decision: "reject"` to the plugin; the proposed Write/Edit never reaches opencode's tool execution. The agent receives the rejection reason as a structured response (not as a bash exit code) and MAY retry with a corrected Write/Edit. A retry re-enters the stack from Layer 1; no layer is skipped on retry. This guarantees the stack is order-stable even under repeated rejection-correction loops.
 
 A daemon-side internal failure (e.g., the immutability-diff parser raises an exception) is NOT a layer rejection — it is a daemon error. The daemon emits `state.daemon.middleware_error` with the exception traceback and returns `decision: "reject", reason: "daemon_internal_error"` to be safe. The Step transitions to `paused` pending operator inspection. v14 implements the safe-default-deny posture in `src/state_daemon/middleware.py`.
+
+## Strike Counter Semantics (PRF-06)
+
+### Counter scope
+
+- **Counter scope: per `(task_id, check_id)` tuple.** Finest analog to gsd-2's per-`runAgentLoop`-invocation `consecutiveAllToolErrorTurns` (`gsd-2/packages/pi-agent-core/src/agent-loop.ts:191`).
+- Each failing `must_haves` check — one truth assertion, one artifact entry, one key_link entry — has its own 6-strike chain.
+- Chains for different checks do not poison each other. Max audit clarity; agent sees per-check escalation.
+- Step-level evaluators (where the failing check is not bound to a specific task) use `task_id=null` in the tuple; the chain key becomes `(null, check_id)`.
+
+### Reset rule
+
+- **Continue counting across the clear+reinject tier.** Literal D-8 reading: "human gate at strike 6 **total**."
+- Strike 3 fires clear+reinject (single shot); strike 4 is the next failed eval after the reinjected agent re-attempts the same `(task_id, check_id)` pair.
+- Diverges from gsd-2's `consecutiveAllToolErrorTurns = 0`-on-success pattern (`agent-loop.ts:191`), but D-8 already diverges from gsd-2 by introducing the reinject tier at all — the divergence is principled, not accidental.
+- **On `(task_id, check_id)` close (pass/flag/omitted verdict):** emit `state.step.gate_resolved` and remove the chain from the in-memory counter; subsequent failures on the SAME tuple start fresh from strike 1 in a new chain.
+
+### Strike trigger (completion-claim boundary)
+
+A strike accrues if-and-only-if:
+
+1. The agent signals "task complete" via either (a) attempting any Write/Edit targeting a file owned by the **next** task (PRF-07 boundary detection, Section 5 Layer 4), OR (b) explicitly calling the `complete_task` MCP tool (analog of gsd-2's `complete_task` at `gsd-2/src/resources/extensions/gsd/tools/complete-task.ts`); AND
+2. The harness runs the task's `<verify><automated>` + `<acceptance_criteria>` + frontmatter `must_haves.*` pure-machine evaluators; AND
+3. At least one evaluator returns `fail`.
+
+**Mid-task incidental gate evaluations** (e.g., harness running checks against WIP artifacts mid-Write) do **not** strike. Mirrors gsd-2's preparation-vs-execution narrowing (`agent-loop.ts:324-329`, issue #3618): execution failures are not strikes; only declared-completion-then-still-failing pattern strikes.
+
+### Escalation ladder (the 6-strike chain)
+
+| Strike # | Tier | Harness action | Event emitted |
+|---------|------|----------------|---------------|
+| 1 | advisory | Inject system advisory naming the failing check_id + remediation hint | `state.step.gate_strike` (tier=advisory, strike_number=1) |
+| 2 | advisory | Same advisory; updated count in the message | `state.step.gate_strike` (tier=advisory, strike_number=2) |
+| 3 | advisory + reinject trigger | Inject advisory; then on agent retry that still fails the same `(task_id, check_id)`, fire compaction snapshot + clear context + reinject the PLAN with the focused failing-check prompt; record `snapshot_event_id` cross-link to the `compaction.snapshot_taken` event | `state.step.gate_strike` (tier=reinject, strike_number=3, snapshot_event_id=<id>) |
+| 4 | advisory (post-reinject) | Inject advisory; counter is at 4 of 6 | `state.step.gate_strike` (tier=advisory, strike_number=4) |
+| 5 | advisory | Inject advisory; warning that next failure fires human gate | `state.step.gate_strike` (tier=advisory, strike_number=5) |
+| 6 | human_gate (force-stop) | Force-stop the session; surface a human gate via opencode `question` tool with the failing check_id, the agent_response_summary, the eval_evidence excerpts, and the 6-strike chain audit | `state.step.gate_strike` (tier=human_gate, strike_number=6) |
+
+**On strike 6 human resolution:** human picks "override" or "reject". Override -> emit `state.step.gate_resolved` with `resolution='human_override'` and force the check to `pass`; reject -> emit `state.step.gate_resolved` with `resolution='human_reject'` and the Slice transitions to `pending_replan` (handled in SCOPE-PROHIBITION.md SRP-05).
+
+### APG-vs-PRF counter independence
+
+- gsd-2's `loop-control.md` §0 Correction 1 explicitly forbids conflating distinct counters — gsd-2 has FOUR separate counters at four scopes.
+- State follows the same principle:
+  - `paralysis_event` chain (APG): 3 advisory -> clear+reinject -> 3 more -> human gate. Per task.
+  - `gate_strike` chain (PRF): 3 advisory -> clear+reinject -> 3 more -> human gate. Per `(task_id, check_id)`.
+  - Each can independently reach force-stop.
+  - The `harness_intervention` event (HRN-05, owned by Phase 406) is the umbrella; both `paralysis_event` and `gate_strike` cite it as `trigger_reason`.
+
+Conflating the two counters would directly violate the gsd-2 framing principle this spec cites. v14 implements the two counters as distinct in-memory state structures backed by distinct event types; replay reconstructs each chain independently.
+
+### Strike-counter durability
+
+The strike counter is in-memory in v14, backed by the event store. On daemon restart, the daemon rehydrates each open chain from the event log: for each `(task_id, check_id)` whose most recent event is a `gate_strike` with no subsequent `gate_resolved`, the chain is reconstructed at its last-known strike number. The rehydrate path is `src/state_daemon/middleware.py` (v14 territory); the spec stipulates the behavior but defers implementation details to v14.
+
+## Pydantic Event Payloads + StepVerifyResult Schema
+
+This section renders the four new Pydantic event payloads + the `StepVerifyResult` schema that the harness writes to `stepN-VERIFY.json`. All ride the v40 EventEnvelope outer shape (the `data: dict[str, Any]` field carries the payload below); all use `model_config = ConfigDict(extra="forbid")`. Event-type strings follow the v40 EVENT-TAXONOMY.md convention `state.{tier}.{action}` — Plan 04 of this phase appends an amendment block to EVENT-TAXONOMY.md registering the four new types.
+
+### state.step.gate_strike (GateStrike — PRF-06)
+
+**Trigger:** Emitted on every strike accrual (per the trigger rules above in §Strike trigger).
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+class GateStrike(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str | None                            # null for Step-level evaluators
+    step_id: str
+    slice_id: str
+    check_id: str                                  # truth_idx | artifact_idx | key_link_idx | verify_automated | acceptance_idx
+    check_type: Literal["truth", "artifact", "key_link", "verify_automated", "acceptance"]
+    strike_number: int                             # 1..6
+    tier: Literal["advisory", "reinject", "human_gate"]
+    agent_response_summary: str                    # <= 2KB excerpt (gsd-2 truncation convention)
+    eval_evidence: str                             # <= 2KB excerpt of the failed pure-machine output
+    triggered_at: datetime                         # UTC, ISO-8601
+    session_id: str
+    snapshot_event_id: str | None                  # set when tier == "reinject" (cross-link to compaction.snapshot_taken)
+```
+
+### state.step.gate_resolved (GateResolved)
+
+**Trigger:** Emitted on `(task_id, check_id)` chain close — verdict transitions to pass/flag/omitted, OR human resolution at strike 6.
+
+```python
+class GateResolved(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str | None
+    step_id: str
+    slice_id: str
+    check_id: str
+    check_type: Literal["truth", "artifact", "key_link", "verify_automated", "acceptance"]
+    final_strike_count: int                        # 0 if passed on first eval; up to 6 if human-resolved
+    resolution: Literal["pass", "flag", "omitted", "human_override", "human_reject"]
+    eval_evidence_final: str                       # <= 2KB excerpt of the resolving eval output
+    resolved_at: datetime
+    session_id: str
+    gate_strike_event_ids: list[str]               # full audit chain (event ids of every GateStrike in the closed chain)
+```
+
+### state.step.step_verify_completed (StepVerifyCompleted)
+
+**Trigger:** Emitted at Step-end after the `stepN-VERIFY.json` file is written. Carries the path + the server-side recomputed overall_verdict.
+
+```python
+class StepVerifyCompleted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    step_id: str
+    slice_id: str
+    verify_json_path: str                          # absolute path to slices/N-name/stepN-VERIFY.json
+    overall_verdict: Literal["pass", "flag", "omitted", "fail"]
+    outcome: Literal["continue", "retry", "pause"]
+    completed_at: datetime
+    session_id: str
+```
+
+### state.slice.slice_verify_completed (SliceVerifyCompleted)
+
+**Trigger:** Emitted at Slice-end after `slice-verification.sh` exits 0 AND `N-VERIFICATION.md` is written by the projector.
+
+```python
+class SliceVerifyCompleted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slice_id: str
+    verification_md_path: str                      # absolute path to slices/N-name/N-VERIFICATION.md
+    slice_verification_sh_exit_code: int           # always 0 (non-zero blocks emission)
+    completed_at: datetime
+    session_id: str
+```
+
+### StepVerifyResult JSON schema (stepN-VERIFY.json)
+
+The on-disk per-Step machine-readable artifact. Pydantic-validated; schema-versioned for migration. The schema mirrors gsd-2's `<task>-VERIFY.json` (`verification-evidence.ts:81-98`) lifted to Step granularity and extended with the four-state verdict vocabulary.
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
+
+class StepVerifyResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal[1]                     # bump literal to migrate; old files surface as parse errors
+    step_id: str
+    slice_id: str
+    timestamp: datetime
+    must_haves: "MustHavesResult"                  # nested
+    acceptance_criteria: list["AcceptanceResult"]  # one entry per bullet, bound by ANNOTATION_RE index
+    verify_automated: "VerifyAutomatedResult"      # bash exit code + stdout/stderr <= 2KB
+    overall_passed: bool                           # server-side recomputed; NEVER trust an LLM-emitted aggregate
+    overall_verdict: Literal["pass", "flag", "omitted", "fail"]   # extends gsd-2's pass|flag|omitted with "fail"
+    outcome: Literal["continue", "retry", "pause"] # mirrors gsd-2 EvidenceJSON outcome discriminator
+
+class MustHavesResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    truths: list["CheckResult"]
+    artifacts: list["CheckResult"]
+    key_links: list["CheckResult"]
+
+class CheckResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    index: int
+    verdict: Literal["pass", "flag", "omitted", "fail"]
+    evidence_excerpt: str                          # <= 2KB (gsd-2 truncation convention)
+    strike_count_at_close: int                     # final strike count when this check was closed
+    gate_strike_event_ids: list[str]               # full audit chain
+
+class AcceptanceResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    bullet_index: int                              # 0-indexed position in <acceptance_criteria>
+    annotation: str                                # the literal [check: ...] annotation string
+    bound_evaluator: str                           # e.g., "must_haves.truths[0]" or "verify_automated"
+    verdict: Literal["pass", "flag", "omitted", "fail"]
+    evidence_excerpt: str
+
+class VerifyAutomatedResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    command: str                                   # the bash one-liner from <verify><automated>
+    exit_code: int
+    stdout_excerpt: str                            # <= 2KB
+    stderr_excerpt: str                            # <= 2KB
+    duration_ms: int
+    timed_out: bool
+```
+
+### Server-side recomputation of overall_passed
+
+- **Server-side recomputation is NON-NEGOTIABLE.** Mirrors gsd-2's defensive pattern (`verification-evidence.ts` + `eval-review-schema.ts:210-227`): the harness recomputes `overall_passed` from sub-fields after writing the file.
+- **Negative example (REJECTED at parse time):**
+  - An agent-emitted `overall_passed: true` with `must_haves.truths[0].verdict: fail` is rejected by the StepVerifyResult parser. v14 raises `ValidationError` and emits `state.daemon.aggregate_mismatch`.
+- **Positive example (ACCEPTED):**
+  - All `must_haves.*.verdict in {pass, flag, omitted}` AND all `acceptance_criteria.*.verdict in {pass, flag, omitted}` AND `verify_automated.exit_code == 0` -> recomputed `overall_passed = True`.
+
+The recomputation rule prevents an LLM that emits a self-contradictory verdict from corrupting the audit log. v14's parser validates the aggregate-versus-children invariant at deserialization time; any contradiction surfaces as a parse error, not as a runtime gate-fire surprise.
+
+### Bounded truncation
+
+- **2KB per check, 10KB total** per `stepN-VERIFY.json`. Mirrors gsd-2's `formatFailureContext` (`verification-gate.ts:115-142`).
+- Truncation marker: `[... truncated <N> bytes ...]` where N is the byte count omitted.
+- Same truncation discipline applies to `formatEvidenceTable` markdown rendering in N-VERIFICATION.md.
+- The truncation utility is harness-owned (not agent-controllable); the marker is added by the utility.
+
+### omitted-if-empty four-state vocabulary
+
+- **pass | flag | omitted | fail** — the four-state vocabulary.
+- Mirrors gsd-2 (`tools/complete-slice.ts:65, 387-424`): a check with no specified evaluator (e.g., a Step whose `must_haves.key_links` is empty) closes with `omitted`, NOT `pass`.
+- The omitted state preserves audit clarity ("we checked and the criterion doesn't apply") and is distinct from `pass` ("we checked and confirmed").
+- **`fail` is added** for the agent-loop's machine verdict; `pass | flag | omitted` are the closure verdicts (gsd-2's three) carried into `N-VERIFICATION.md`.
+
+## N-VERIFICATION.md Rolled-Up Truth-Table Column Schema (PRF-03)
+
+At Slice-end, after every Step's `stepN-VERIFY.json` is written, the harness invokes a deterministic projector that renders the rolled-up `N-VERIFICATION.md` markdown table. The projector subscribes to `state.step.step_verify_completed` and `state.step.gate_strike` events; aggregates all Step results in the Slice; renders the table. The table is the WIDE audit-traceable view; the per-Step JSON files are the authoritative machine-readable evidence.
+
+### Column schema (10 columns)
+
+| Column | Source field | Notes |
+|--------|--------------|-------|
+| `step_id` | `StepVerifyResult.step_id` | One row per check, grouped by step |
+| `task_id` | gate_strike chain (or `null` for Step-level) | When the strike chain references a specific task |
+| `check_id` | `CheckResult.index` formatted as `truths[0]` etc. | Stable across runs |
+| `scope` | `truth \| artifact \| key_link \| verify_automated \| acceptance` | The PRF-01 / PRF-02 check type |
+| `source_expr` | Pydantic dump of the must_haves entry | The actual expression being evaluated |
+| `verdict` | `CheckResult.verdict` (`pass \| flag \| omitted \| fail`) | Extends gsd-2's three-state with `fail` |
+| `strike_count_at_close` | `CheckResult.strike_count_at_close` | 0 if the check passed on first eval |
+| `gate_strike_event_ids` | `CheckResult.gate_strike_event_ids` | Full audit chain (newline-joined event ids) |
+| `evidence_excerpt` | `CheckResult.evidence_excerpt` (<= 2KB) | gsd-2-style bounded |
+| `timestamp` | `StepVerifyResult.timestamp` | ISO-8601 UTC |
+
+### Projector behavior
+
+- Generated by a deterministic projector at Slice-verify-stage entry.
+- Handler subscribes to `state.step.step_verify_completed` events; aggregates all step results in the Slice; renders the markdown.
+- Ordering: rows sorted by Step DAG topology (depends_on traversal), then by check_id index ascending within each Step.
+- Truncation: per-row `evidence_excerpt` <= 2KB; whole-file size unbounded (the per-Step JSON files cap evidence; the markdown rolls up).
+- Idempotence: the projector is a pure function of the event log + worktree state. Re-running it after any new `state.step.step_verify_completed` or `state.step.gate_strike` event produces the same `N-VERIFICATION.md` byte-for-byte.
+
+### omitted rows
+
+Checks with `verdict='omitted'` ARE included in the table (audit clarity); they show `strike_count_at_close=0` and `gate_strike_event_ids=[]`. The projector MUST NOT skip them. Conversely, checks that were never evaluated (e.g., the Step closed via human override before evaluation completed) produce a row with `verdict='omitted'` and `evidence_excerpt='not evaluated — Step closed via human override on strike 6'`.
+
+### Slice-level `<verification>` artifact paths
+
+- **Per-Step `<verification>` bash block** lives inside `stepNPLAN.md` (Phase 403 STEP-PLAN-FORMAT.md §XML Body Section Catalog -> `<verification>`). Runs at Step end (before commit). Block content is bash only (no Python; if a Python check is needed, the Step author writes a `.py` file in `files_modified` and the bash block invokes `python3 path.py`). Block is **immutable** under PAP-03 / Phase 403's mutability matrix.
+- **Slice-level `slice-verification.sh`** is co-located with `N-VERIFICATION.md` at `slices/N-name/slice-verification.sh`. Runs at Slice end (the verify-slice stage). Aggregates Step-level evidence + runs cross-Step integration checks. Single bash script; pure-machine.
+
+## Artifact Catalog Additions
+
+This section enumerates the new on-disk artifacts Phase 404 adds to the canonical Slice folder layout (per v40 ARTIFACT-CATALOG.md). Phase 406's harness rollup cross-references this list.
+
+- **`slices/N-name/stepN-VERIFY.json`** (one per Step, machine-readable). Pydantic-validated against StepVerifyResult schema v1. Authoritative per-Step evidence.
+- **`slices/N-name/slice-verification.sh`** (one per Slice, executable bash). Pure-machine cross-Step integration checks. Authored at plan-slice end; immutable post-execute-slice start.
+- **`slices/N-name/N-VERIFICATION.md`** (one per Slice, deterministic projector output). Wide audit-traceable rolled-up truth table. Re-renderable from event store at any time (projector is idempotent).
+
+Forward-pointer: v40 ARTIFACT-CATALOG.md will receive a `## v41 Amendment` block in Plan 04 (this phase) registering these three artifact types.
+
+## Cross-references
+
+- **Sibling spec — analysis paralysis:** `ANALYSIS-PARALYSIS-GUARD.md` (Plan 02) defines the APG counter — independent from PRF per Section 6 §APG-vs-PRF; both feed `harness_intervention` (Phase 406 HRN-05).
+- **Sibling spec — scope:** `SCOPE-PROHIBITION.md` (Plan 03) defines layers 1 + 3 of the tool.execute.before stack (files_modified allowlist + prohibited-language scan); Layer 4 (gate-failing next-task block) is owned by this spec.
+- **Phase 403 carry-forward — format:** `STEP-PLAN-FORMAT.md` §Frontmatter Schema (STP-02) provides the `MustHaves` / `ArtifactCheck` / `KeyLink` Pydantic classes this spec evaluates against.
+- **Phase 403 carry-forward — mutability:** `PLAN-AS-PROMPT.md` §Mutability Matrix (PAP-03) locks every `<verify>` block; §6 (PAP-05) is Layer 2 of the tool.execute.before stack.
+- **Phase 402 carry-forward — compaction:** `CONTEXT-PROTOCOL.md` §Compaction (CTX-05/06) is the source of the `compaction.snapshot_taken` event that GateStrike.snapshot_event_id cross-links when tier='reinject'.
+- **v40 baseline:** `EVENT-TAXONOMY.md` naming convention `state.{tier}.{action}`; this spec adds `state.step.gate_strike`, `state.step.gate_resolved`, `state.step.step_verify_completed`, `state.slice.slice_verify_completed`. Plan 04 (this phase) appends a `## v41 Amendment` block to v40 EVENT-TAXONOMY.md registering these.
+- **v40 baseline — artifacts:** `ARTIFACT-CATALOG.md` will receive Plan 04 amendment registering `stepN-VERIFY.json`, `slice-verification.sh`, and confirming `N-VERIFICATION.md` column schema is owned by this spec.
+- **Phase 406 forward:** `harness_intervention` (HRN-05) umbrella event aggregates `gate_strike` + `paralysis_event` + `scope_check` + `scope_deviation_request` + `split_recommendation`; the 4-tier intervention ladder (HRN-04) cites this spec for tier-3 (force clear+reinject) and tier-4 (force-stop+human gate).
+- **gsd-2 lineage:** quality-enforcement.md §7.1 (EvidenceJSON schema), §3.2 (truncation), §0 Correction 2 Vocabulary 2 (pass|flag|omitted); loop-control.md §0 Correction 1 (counter independence), §4 (preparation-vs-execution narrowing); complete-task.ts:73-77, 339-355 (field binding); complete-slice.ts:65, 387-424 (omitted-if-empty); verification-evidence.ts (server-side recomputation).
+
+v14 Build Kernel implements the strike counter (per-(task_id, check_id) tuple, in-memory cache backed by event store), the bash classifier dispatcher, the prohibited-language scanner, the files_modified allowlist checker, the deterministic N-VERIFICATION.md projector, the bounded-truncation utility, and the four event handlers. v15 Build Core Commands implements the research-slice planner-validation stage that checks `<acceptance_criteria>` bullet annotations against ANNOTATION_RE; the verify-slice stage that runs `slice-verification.sh` and writes `N-VERIFICATION.md`. Phase 405's deviation framework consumes strike-counter `tier=human_gate` events. Phase 406's harness rollup cites this spec for the layered diagram's tier-3 and tier-4 intervention behaviors.
