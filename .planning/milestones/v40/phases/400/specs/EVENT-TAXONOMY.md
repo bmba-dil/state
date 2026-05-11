@@ -233,3 +233,49 @@ Event count rises from 33 to 39 (+4 stage-boundary, +2 compaction lifecycle). Th
 All v41-introduced events remain build-mode only (`state.slice.*`, `compaction.*` prefixes). Teach-mode harness is v47 scope.
 
 *Original v40 spec text above this amendment block is untouched. This amendment is a published correction, appended per Phase 402 convention (no in-line strikethroughs).*
+
+---
+
+## v41 Amendment — Step-Tier Event Family Extension
+
+> **Source phase:** v41 Phase 403 (Step/Task Decomposition & Plan-as-Prompt)
+> **Amendment date:** 2026-05-11
+> **Amendment type:** Additive — new event types added to the step tier; v40 baseline events unchanged.
+> **Forward-pointer:** Full Pydantic schemas + replay rules in `.planning/milestones/v41/phases/403/specs/STEP-EVENTS.md`.
+
+### v40 baseline scope
+
+The original v40 EVENT-TAXONOMY.md covered Arc, Stage, Slice, and Step events at the FSM-transition layer (e.g., `state.step.created`, `state.step.completed`). The Phase 402 amendment added four Slice stage-boundary events and two compaction-lifecycle events. v41 Phase 403 extends the step tier with NINE new events for plan-authoring, plan-mutation, autonomy-tiered checkpoint resolution, and replan diff-replay continuity. None of these v41 additions change v40 baseline event semantics or names.
+
+### v41 extension scope (9 new state.step.* events)
+
+| Event Type | Trigger | State Transition | Owning REQ |
+|-----------|---------|------------------|------------|
+| `state.step.plan_authored` | research-slice end (planner-validation passes) | (none — append-only audit record) | PAP-06 |
+| `state.step.plan_edit` | every successful edit to `stepNPLAN.md` | (none — append-only audit record) | PAP-04 |
+| `state.step.plan_edit_blocked` | `tool.execute.before` rejects an edit to a locked section | (none — append-only audit record; edit did NOT land on disk) | PAP-05 |
+| `state.step.checkpoint_auto_resolved` | autonomy-tiered auto-approval of `checkpoint:human-verify` or auto-pick of `checkpoint:decision` first option | task: `pending` → `resolved` | STP-05 |
+| `state.step.checkpoint_human_action_pending` | `checkpoint:human-action` task entered (all tiers stop) | task: `running` → `pending_human` | STP-05 |
+| `state.step.checkpoint_human_action_resolved` | human confirms completion via opencode `question` tool | task: `pending_human` → `resolved` | STP-05 |
+| `state.step.renamed` | replan determines step_id changed (input change forced rename per stable-hash rule) | step: identity-rebound | STP-06 |
+| `state.step.added` | replan creates a new Step | (new aggregate) | STP-06 |
+| `state.step.removed` | replan eliminates an authored Step (merged or scope-reduction) | step: `*` → `removed_by_replan` | STP-06 |
+
+All v41 additions follow v40 conventions:
+- Naming: `state.{tier}.{action}` form preserved.
+- Envelope: ride `EventEnvelope` outer shape.
+- Validation: `model_config = ConfigDict(extra="forbid")` on every payload.
+- Append-only: event store rows never UPDATED/DELETED; corrections are NEW events.
+- Mode prefix: `BUILD_ONLY_EVENT_PREFIXES` (Build-only).
+
+### v14 implementation pointer
+
+v14 Build Kernel implements:
+- Pydantic payload models (per STEP-EVENTS.md schemas).
+- Daemon emitters (one row per harness action).
+- Projector replay-verifier (PlanEdit hash chain integrity check; see STEP-EVENTS.md §Field-Level Constraints — Replay-time integrity check).
+- Projection-state reducers (per-Step in-memory state updated from event stream).
+
+See `.planning/milestones/v41/phases/403/specs/STEP-EVENTS.md` for full schemas and replay rules.
+
+*Original v40 spec text and Phase 402 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
