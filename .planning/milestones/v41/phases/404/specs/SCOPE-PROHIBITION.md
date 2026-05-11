@@ -251,3 +251,316 @@ This is the philosophical distinction between SCOPE-PROHIBITION's regime and PRO
 A `scope_check` event does NOT increment the PROOF-GATE strike counter (PRF-06). The strike counter accrues per `(task_id, check_id)` tuple at the **completion-claim boundary** (per `404-CONTEXT.md` `<decisions>` Strike-counter semantics: "A strike accrues if-and-only-if the agent signals 'task complete'... AND at least one evaluator returns `fail`"). A `scope_check` is a mid-task discipline event: it rejects the write inline, surfaces an advisory, and the agent retries. No completion claim is made; no strike accrues.
 
 The independence mirrors `404-CONTEXT.md` `<decisions>` "APG vs PRF: independent counters" — counter independence is load-bearing across all three sibling specs. ANALYSIS-PARALYSIS-GUARD's paralysis counter, PROOF-GATE's strike counter, and SCOPE-PROHIBITION's per-event advisory chain are three distinct surfaces; they can each independently surface a `harness_intervention` (Phase 406 HRN-05), but they never share state. This is a literal application of gsd-2 `loop-control.md` §0 Correction 1 ("four distinct counters at four scopes... refuses to conflate distinct failure modes").
+
+## files_modified Allowlist Enforcement (SRP-04)
+
+SRP-04 is the spatial scope guard: it confines every Write/Edit to the set of paths the planner declared at plan-slice end. The list is locked at plan-slice end (Phase 403 PAP-03 mutability matrix), and the harness enforces against it via `tool.execute.before` Layer 1 — the first layer of the four-layer stack. Layer 1 runs before any other check; if a write target is not in the allowlist, the write is rejected immediately and no subsequent layer fires.
+
+### tool.execute.before write-block enforcement
+
+From `404-CONTEXT.md` `<decisions>` SRP-04 subsection (verbatim):
+
+- **`tool.execute.before` write-block enforces the allowlist.** Inherits the diff-the-proposed-write mechanism from Phase 403 PAP-05; reuses the same hook handler.
+- Behavior:
+  - Compute the prospective target path (Edit operation in-memory; Write target directly).
+  - If target NOT in `files_modified` (exact match OR glob match — Phase 403 allowed both) → reject the write with `scope_deviation` event.
+  - If target IS in `files_modified` → fall through to PAP-05 immutability check, then to the prohibited-language scan, then allow.
+- Cross-reference: PROOF-GATE.md Section 5 §Layer order — this is Layer 1 of the four-layer stack.
+
+The Layer 1 rejection short-circuits the entire downstream pipeline: Layers 2 (immutability), 3 (prohibited-language), and 4 (next-task block from a failing gate) never run when Layer 1 rejects. This ordering is deliberate — `files_modified` is the coarsest, fastest check; running it first minimizes wasted work on out-of-scope writes.
+
+### Glob-match implementation
+
+- **Glob syntax**: same as the path-allowlist (Section "Path-Allowlist Scan Exemption"): Python `fnmatch.fnmatch` with `**` support; v14 may pick `pathlib.PurePath.match`.
+- **Multi-entry semantics**: `files_modified` is a list; a target matches if ANY list entry matches (exact or glob).
+- **Pre-resolution**: all entries are realpath-resolved at plan-slice validation stage; resolution happens once, cached for the Step's lifetime.
+- **Exact-vs-glob detection**: an entry is treated as a glob if it contains any of `*`, `?`, `[`; otherwise it is an exact-path match (string-equal after realpath normalization). The detection is pre-computed at module load (per-entry tag) so per-write checks are O(1) per entry.
+
+### files_modified immutability
+
+From `404-CONTEXT.md` `<decisions>` SRP-04 subsection (verbatim):
+
+- **`files_modified` is locked at end of plan-slice** (Phase 403 PAP-03 mutability matrix; cross-reference: `PLAN-AS-PROMPT.md` §Mutability Matrix).
+- **The `scope_deviation_request` flow does NOT mutate the field** — overrides are event-scoped one-shot allowlists (Section "scope_deviation_request MCP Tool Flow" below). The on-disk `stepNPLAN.md` `files_modified` list is read-only at runtime.
+- Replan re-entry from `split_recommendation` (Section "request_step_split MCP Tool (SRP-05)") re-authors `files_modified` for the new Steps; the old Step's `files_modified` is preserved in the audit log (`state.step.plan_authored` event per Phase 403 STEP-EVENTS.md).
+
+The "never-mutate-at-runtime" rule is load-bearing: replay correctness depends on `files_modified` being an immutable contract for each Step. If runtime mutation were allowed, a replay would have to reconstruct the mutation history before evaluating any later write decision — which would break event-replay determinism (the cardinal rule in PROJECT.md). Event-scoped one-shot allowlists keep the contract intact: the underlying file never changes; the override is a transient permit that lives only in event history.
+
+### Pydantic scope_deviation event payload
+
+Every Layer 1 rejection emits `state.step.scope_deviation`:
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+
+class ScopeDeviation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    step_id: str
+    slice_id: str
+    attempted_path: str
+    files_modified_at_time: list[str]               # snapshot of the Step's allowlist at the moment of rejection
+    triggered_at: datetime
+    session_id: str
+    reject_reason: str                              # human-readable, e.g., "path not in files_modified allowlist"
+```
+
+Emitted on every Layer 1 rejection; the agent receives the `reject_reason` as the `tool.execute.before` hook's response. The agent's next action is typically a `scope_deviation_request` MCP call (next section) OR a `request_step_split` MCP call (Section "request_step_split MCP Tool (SRP-05)") OR a different write within the allowlist.
+
+The `files_modified_at_time` snapshot captures the allowlist state at the rejection instant for forensic clarity — if a one-shot allowlist entry was active but didn't apply (wrong path), the snapshot shows what WAS active versus what the write attempted. This is the audit-trail analog of gsd-2's `EvidenceJSON` evidence-with-context discipline (`quality-enforcement.md` §7.1).
+
+## scope_deviation_request MCP Tool Flow
+
+The `scope_deviation_request` MCP tool is the agent's sanctioned channel for requesting a write outside the current `files_modified` allowlist. It is a request, not a directive — the harness routes it through a `checkpoint:decision` (per Phase 403 task-type behavior + Phase 405 DEV-03 territory) and writes either an approve or reject `ScopeDeviationResolved` event in response. Approved deviations are scoped to one tool invocation; the underlying `files_modified` list is never mutated.
+
+### Use case
+
+When the agent legitimately needs to edit a file outside `files_modified` (e.g., discovers a missing import in a sibling file during execution), the agent emits a `scope_deviation_request` MCP tool call. Typical scenarios:
+
+- A bug fix requires a touch in a sibling module that the planner didn't anticipate.
+- A test file's location was guessed wrong during planning; the agent needs to update one extra path.
+- An import-cycle break requires moving a small declaration to a neutral location.
+
+Scenarios that should NOT use `scope_deviation_request`:
+
+- The work is genuinely larger than one Step → use `request_step_split` (Section "request_step_split MCP Tool (SRP-05)").
+- The write is a stub or simplification → that's exactly what SRP-02/SRP-03 are guarding against; fix the underlying scope decision instead.
+
+### Pydantic MCP tool signature + payload
+
+From `404-CONTEXT.md` `<decisions>` SRP-04 subsection (verbatim):
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+
+class ScopeDeviationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    step_id: str
+    slice_id: str
+    requested_path: str
+    justification: str                              # agent-supplied rationale <= 1KB
+    requested_at: datetime
+    session_id: str
+
+# MCP tool signature
+def scope_deviation_request(
+    requested_path: str,
+    justification: str,                             # agent-supplied; daemon truncates to 1KB if longer
+) -> ScopeDeviationResolved: ...
+```
+
+The MCP tool synchronously returns the resolution payload to the calling agent's session. Synchronous return matches the `complete_task` / `complete_slice` / `validate_milestone` pattern from gsd-2's `tools/complete-*.ts` family — agent intent is signaled by tool call, agent receives the harness verdict in-band, no out-of-band SSE listening required.
+
+### Resolution event + checkpoint:decision flow
+
+From `404-CONTEXT.md`:
+
+- The request surfaces as a `checkpoint:decision` under `--tiered` (per Phase 403 task-type behavior + Phase 405 DEV-03 territory).
+- Resolution emits `scope_deviation_resolved` with `resolution: approve | reject`.
+
+Pydantic class:
+
+```python
+from typing import Literal
+
+class ScopeDeviationResolved(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    step_id: str
+    slice_id: str
+    requested_path: str
+    resolution: Literal["approve", "reject"]
+    resolver: Literal["human", "harness_auto"]      # harness_auto under --full-yolo per Phase 405 DEV-05 (autonomy-tier policy owned there)
+    resolution_justification: str                   # if reject: human-supplied reason; if approve: optional context
+    resolved_at: datetime
+    session_id: str
+    request_event_id: str                           # cross-link to ScopeDeviationRequest event
+```
+
+The `request_event_id` cross-link enables replay to walk forward from each request to its resolution deterministically. The `resolver` field distinguishes human vs harness-auto decisions for the post-hoc audit ("which deviations did humans actually look at?").
+
+### One-shot allowlist semantic
+
+From `404-CONTEXT.md`:
+
+- **Approved deviations write a temporary one-shot allowlist entry.**
+- Semantics:
+  - The allowlist entry is keyed by `(session_id, task_id, requested_path)`.
+  - The entry is consumed by the NEXT `tool.execute.before` invocation targeting the path.
+  - The entry is one-shot: after consumption, subsequent writes to the same path require a fresh request.
+- **The request and resolution events are part of the audit chain.**
+- **`files_modified` itself is NEVER mutated at runtime** — the override is event-scoped.
+
+The one-shot semantic mirrors gsd-2's transient permission grants (`tool-system.md` §5 advisory-not-security framing) — each deviation is a discrete event, not a permanent capability widening. If the agent needs to write to the same out-of-scope path twice, it must request twice; each request is independently audited.
+
+### Path-confinement at request boundary
+
+- The MCP tool handler MUST realpath-resolve `requested_path` within repo root + slice subdir BEFORE surfacing the `checkpoint:decision`.
+- Path-traversal-resolved targets outside repo root are rejected at MCP-tool-handler boundary; an automatic `ScopeDeviationResolved` event is emitted with `resolution='reject'`, `resolver='harness_auto'`, `resolution_justification='path traversal outside repo root'`.
+- No human decision is surfaced for traversal-rejected requests.
+
+The auto-reject path means an agent attempting `requested_path='../../../etc/passwd'` never reaches a human gate — the MCP handler resolves the path, detects it falls outside the repo, and emits the rejection event in-band. This is defense-in-depth alongside the EXCEPTION_RE regex's own slash/dot rejection (Section "Path-Allowlist Scan Exemption + Tracking-Issue Exception (SRP-03)" §Path-confinement) — even if one layer were misconfigured, the other still catches.
+
+### Audit chain
+
+- Audit chain for one approve cycle: `ScopeDeviationRequest` event → `checkpoint:decision` surfaces via opencode `question` tool → human approves → `ScopeDeviationResolved(resolution='approve')` event → one-shot allowlist entry written → next Write/Edit consumes the entry → `tool.execute.before` Layer 1 falls through → Layers 2-4 still run normally → write allowed.
+- Audit chain for one reject cycle: `ScopeDeviationRequest` event → `checkpoint:decision` surfaces → human rejects → `ScopeDeviationResolved(resolution='reject', resolution_justification=<reason>)` event → agent receives rejection as the MCP tool's return value → agent typically replans OR calls `request_step_split`.
+
+Replay walks the chain by following `request_event_id` cross-links. Forensics queries can answer "show me all approved deviations in this Slice" by joining `ScopeDeviationRequest` events to their `ScopeDeviationResolved` peers and filtering on `resolution='approve'`.
+
+## request_step_split MCP Tool (SRP-05)
+
+`request_step_split` is the canonical channel for the agent to signal that the current Step is too large to complete within its `must_haves` contract. The harness responds by recording the recommendation as an event, taking a worktree snapshot, transitioning the Slice to `pending_replan`, and exiting `run-slice` cleanly. The replan re-enters the research-slice planning stage to break the oversized Step into smaller Steps. No `must_haves` are reauthored on the original Step — they remain in the audit log; the new Steps get fresh `must_haves` blocks.
+
+### Canonical trigger
+
+From `404-CONTEXT.md` `<decisions>` SRP-05 subsection (verbatim):
+
+- **Explicit MCP tool `request_step_split` is the canonical trigger.**
+- **No NL keyword detection; no heuristic auto-split.** The agent must call the MCP tool explicitly.
+- Mirrors gsd-2's explicit `complete_task` / `complete_slice` / `validate_milestone` MCP tool-call boundary pattern (`tools/complete-task.ts`, `tools/complete-slice.ts`, `tools/validate-milestone.ts`) — agent intent is signaled by tool call, not by NL output scan.
+
+The tool-call-boundary discipline is non-negotiable: any NL-keyword heuristic that auto-detects "this is too much for one Step" pattern would either false-positive (legitimately hard checks look the same as oversized scopes from the harness's view) or false-negative (an agent that doesn't say the right words gets stuck). Explicit tool call eliminates both failure modes.
+
+### Pydantic MCP tool signature + payload
+
+From `404-CONTEXT.md` `<decisions>` SRP-05 subsection (verbatim):
+
+```python
+from datetime import datetime
+from pydantic import BaseModel, ConfigDict
+
+class SplitRecommendation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    step_id: str
+    slice_id: str
+    reason: str
+    partial_artifacts: list[str]
+    requested_at: datetime
+    session_id: str
+
+# MCP tool signature
+def request_step_split(
+    reason: str,                                    # <= 2KB; why the current Step exceeds one Step's scope
+    partial_artifacts: list[str],                   # paths in the worktree that should be preserved for the replan
+) -> SplitRecommendation: ...
+```
+
+Seven fields total. `reason` is bounded at 2KB (matches the `agent_response_summary` truncation in `GateStrike` and `ParalysisEvent` — gsd-2 convention). `partial_artifacts` is an open list of paths; the planner is expected to keep this realistic (a Step that produced 50 partial artifacts is itself an audit signal that the original sizing was severely off).
+
+### Harness behavior (4-step sequence)
+
+From `404-CONTEXT.md` `<decisions>` SRP-05 subsection (verbatim):
+
+1. **Emit `split_recommendation` event** with the payload above (rides `state.slice.split_recommendation` event-type per the v40 EventEnvelope convention; `aggregate_id` is the `slice_id`).
+2. **Take a worktree snapshot** (mirrors Phase 402 `compaction.snapshot_taken` plumbing): records `slice_id`, `step_id`, `task_id`, worktree commit SHA, partial artifact paths.
+3. **Transition the Slice state to `pending_replan`** (run-slice terminal state — see SLICE-CYCLE.md).
+4. **Exit run-slice cleanly.** Partial commits stay on the worktree branch; the replan inherits them.
+
+The aggregate-type for the event is `slice` (not `step`) because the Slice is the entity whose state is transitioning. The replan re-enters the Slice's research/planning stage; the original Step ceases to be the active execution unit.
+
+### Replan re-entry
+
+From `404-CONTEXT.md`:
+
+- The replan re-enters research-slice / planning stage, which reads the `split_recommendation` event + the worktree snapshot and produces NEW `stepNPLAN.md` files breaking the over-scoped Step into smaller Steps.
+- **PAP-03 locks survive replan when `step_id` is unchanged** (Phase 403).
+- **A split necessarily changes `step_id`s**, so `must_haves` for the new Steps are re-authored fresh.
+
+The replan path consumes both the event payload (the agent's stated reason) AND the worktree snapshot (the actual partial-state on disk). The planner uses both: the reason informs the breakdown rationale; the snapshot informs which artifacts already exist and can be referenced by the new Steps' `must_haves.artifacts` lists.
+
+### Returned value
+
+- The MCP tool returns the populated `SplitRecommendation` Pydantic model to the agent's session so the agent's last log statement is auditable (per `404-CONTEXT.md` Claude's Discretion — recommended over fire-and-exit).
+- After the return, the harness exits run-slice cleanly; the agent's session continues only until the run-slice exit signal propagates.
+
+The synchronous return shape mirrors `scope_deviation_request` — agent calls, agent receives. The harness then begins shutdown asynchronously, but the agent's last visible action is the structured tool-return.
+
+### Abuse vector mitigation
+
+- Over-frequent splits in the milestone trigger a Rule 4 (architectural) human gate (Phase 405 DEV-04).
+- v14 emits `split_recommendation_telemetry` rolled up at Slice close for human review (frequency, reasons, partial_artifact patterns).
+
+The telemetry is the long-tail mitigation for the abuse pattern. A single `request_step_split` is legitimate; ten splits in a milestone signals something systematic (the planner is consistently under-sizing Steps, or the agent is using splits as a way to avoid debugging). Phase 405 DEV-04 is the architectural escalation surface for that signal.
+
+### NL keyword detection rejected
+
+- NL keyword detection for split-trigger was offered and rejected. Removes agent intent; risks false positives on legitimately hard checks.
+- Implicit `split_recommendation` from N-paralysis+N-strike pattern ALSO rejected (mirrors `404-CONTEXT.md` `<deferred>`). The agent calling `request_step_split` is the canonical signal.
+
+Both rejections share the same underlying principle: the harness should not infer agent intent from indirect signals. Counter-correlation (N paralyses + M strikes = split) was tempting because it would auto-rescue stuck agents, but it confuses two distinct failure modes (paralysis is "agent doesn't know what to do" vs split is "scope is too large"). Conflating them would risk auto-triggering splits when a small refocus would suffice.
+
+## deferred-items.md Artifact (SRP-06)
+
+The `deferred-items.md` artifact is the per-Slice register of out-of-scope findings. Items raised during a Slice's execution that fall outside the Slice's scope are logged here, not silently dropped and not retroactively scoped in. The file is the structural memory of "we noticed this; we tracked it; we will route it correctly later."
+
+### Artifact location and shape
+
+- **File path:** `slices/N-name/deferred-items.md` (per-Slice; rooted in the slice folder).
+- **Format:** GFM-flavored markdown with a single H1 + a table + appended bullet rows.
+
+### Canonical template
+
+```markdown
+# Deferred Items — Slice {N} ({slice-name})
+
+Out-of-scope findings raised during the Slice's lifecycle. Each row is referenced by tracking ID
+(per EXCEPTION_RE convention). Items in this file MUST satisfy EXCEPTION_RE cross-check in any
+later commit that uses `# TODO({ID})` or `# FIXME({ID})` referencing them.
+
+| ID | source_task | description | raised_at | status |
+|----|-------------|-------------|-----------|--------|
+| DEF-01 | step-1/task-2 | Missing error handling in CompactionSnapshot orjson loader | 2026-05-11T14:32:01Z | open |
+| DEF-02 | step-2/task-1 | TODO: pluggy plugin registration for state-build MCP server | 2026-05-11T15:01:44Z | scheduled-next-slice |
+```
+
+### Row append rule
+
+- **Auto-append on `scope_check` events with `exception_matched=False`**: when the prohibited-language scanner emits a ScopeCheck with no resolved exception, the harness's deferred-items writer projector subscribes and appends a row with auto-generated ID (`DEF-<NN>` sequential within the Slice).
+- **Auto-append on `scope_deviation_request` events with `resolution='reject'`**: a rejected deviation that the human flagged as "real but out-of-scope" (`resolution_justification` contains the tag `[defer]`) also triggers row append.
+- **Manual append**: humans MAY append rows directly (e.g., during `checkpoint:decision` resolution); the file is mutable post-execute-slice start (NOT immutable like `stepNPLAN.md`).
+
+The projector subscribes to both event types and applies dedup keyed by `(source_task, description-prefix-32-chars)` so retries don't produce duplicate rows. ID assignment is monotonically increasing per Slice; gaps are not reused (a deleted-by-human row keeps its ID slot empty).
+
+### Status vocabulary
+
+- `open` — newly raised; not yet routed.
+- `scheduled-next-slice` — promoted to the next Slice's CONTEXT.md `<deferred>` block.
+- `scheduled-future-milestone` — promoted to the milestone-level v2 REQUIREMENTS section.
+- `rejected` — reviewed and determined out-of-product-scope (not v1, not v2).
+- `resolved-in-slice` — addressed within the current Slice (e.g., a TODO turned into actual code with EXCEPTION_RE-satisfied tracking).
+
+The five statuses cover the full lifecycle: open → triaged → routed (one of three terminal destinations) OR rejected OR resolved-in-place. Transitions are recorded by the human or the harness's auto-promotion logic (v14 implementation).
+
+### Surface in Slice SUMMARY.md
+
+- The Slice SUMMARY.md (Phase 402 SLICE-CYCLE.md verify-slice stage output) MUST include a `## Deferred Items` section with a copy of the deferred-items.md table (or a `## Deferred Items` section stating "No deferred items raised during this Slice." if the table is empty).
+- v15 Build Core Commands implements the SUMMARY-generation step that pulls from `deferred-items.md`.
+
+The SUMMARY-surface ensures deferred items are visible at Slice close, not hidden in a per-Slice file that closes-then-orphans. Promotion decisions (which deferred items become next-Slice context, which become next-milestone requirements) happen at the SUMMARY review boundary.
+
+### ARTIFACT-CATALOG.md amendment
+
+- **v40 ARTIFACT-CATALOG.md WILL receive a `## v41 Amendment` block** (Plan 04 of this phase) registering `deferred-items.md` as a per-Slice artifact in the canonical Slice folder layout.
+
+The amendment is the structural counterpart to the spec text here: ARTIFACT-CATALOG.md gives v14 implementers a canonical "this file goes here in the Slice folder" reference; this spec defines its content shape and append-rules.
+
+## Cross-references
+
+- **Sibling spec — proof gate:** `PROOF-GATE.md` Section 5 four-layer `tool.execute.before` stack: Layer 1 (`files_modified` — owned by this spec SRP-04), Layer 2 (Phase 403 PAP-05 immutability), Layer 3 (prohibited-language — owned by this spec SRP-02), Layer 4 (gate-failing next-task block — owned by PROOF-GATE.md PRF-07). The composition is the canonical enforcement pipeline; this spec owns 50% of it.
+- **Sibling spec — paralysis:** `ANALYSIS-PARALYSIS-GUARD.md` Section 7 §APG-vs-PRF — paralysis counter independent from scope events; both feed `harness_intervention` via Phase 406 HRN-05.
+- **Phase 403 carry-forward — format:** `STEP-PLAN-FORMAT.md` §Frontmatter Schema (STP-02) provides the `files_modified` field this spec enforces against; §`<task>` Sub-tag Specification (STP-04) provides the `<done>` field this spec cross-checks; §Mutability Matrix forward-pointer to `PLAN-AS-PROMPT.md` confirms `files_modified` is locked.
+- **Phase 403 carry-forward — mutability:** `PLAN-AS-PROMPT.md` §Mutability Matrix (PAP-03) locks `files_modified`; §6 (PAP-05) is Layer 2 below SRP-04 Layer 1 in the `tool.execute.before` stack.
+- **Phase 402 carry-forward — compaction snapshot:** `CONTEXT-PROTOCOL.md` §Compaction (CTX-05/06) is the source of the worktree-snapshot plumbing that `request_step_split` reuses; the `SplitRecommendation` does NOT cross-link `snapshot_event_id` by default (the snapshot is a side effect of run-slice exit, not a strike-replay analog), but v14 implementation MAY add the cross-link if EXEMPLAR observation warrants.
+- **Phase 402 carry-forward — Slice cycle:** `SLICE-CYCLE.md` defines the `pending_replan` run-slice terminal state that SRP-05 transitions to; the replan re-entry path is part of the plan-slice multi-stage internal pipeline (SLC-03).
+- **v40 baseline — events:** `EVENT-TAXONOMY.md` naming convention `state.{tier}.{action}`; this spec adds `state.step.scope_check`, `state.step.scope_deviation`, `state.step.scope_deviation_request`, `state.step.scope_deviation_resolved`, `state.slice.split_recommendation`. Plan 04 of this phase appends the `## v41 Amendment` block registering these.
+- **v40 baseline — artifacts:** `ARTIFACT-CATALOG.md` will receive Plan 04 amendment registering `deferred-items.md` as a per-Slice artifact.
+- **gsd-2 lineage:** `quality-enforcement.md` — explicit MCP tool-call boundary pattern (`complete_task`/`complete_slice`/`validate_milestone`) informs `request_step_split` shape; `file-tracking.md:445` — word-boundary regex pattern informs `PROHIBITED_RE` shape; `file-tracking.md §branch-patterns` — single-module pattern informs `state_build/harness/scope/`; `tool-system.md:851` — no-allowlist/denylist framing informs the advisory-not-security note in SCOPE-PROHIBITION (lighter than PROOF-GATE strikes, but stronger than ANALYSIS-PARALYSIS advisories — scope is a security-AND-quality boundary, not just advisory).
+- **Phase 405 forward:** `DEV-03` (auto-fix blocking issues with `checkpoint:decision` escalation) is the resolution path for `scope_deviation_request` under `--tiered`; `DEV-04` (architectural always-human-gate) is the resolution path for `split_recommendation` when frequency exceeds milestone threshold; `DEV-05` tiered autonomy table specifies the `--full-yolo` auto-approval policy (NOT owned by this spec).
+- **Phase 406 forward:** `harness_intervention` (HRN-05) umbrella event aggregates `scope_check` + `scope_deviation_request` + `split_recommendation`; the 4-tier intervention ladder (HRN-04) cites this spec for tier-1 (advisory inject from ScopeCheck tier=advisory) + tier-2 (tool-block from Layer 1 + Layer 3 of the stack) + tier-4 forward-reference for `pending_replan` transition triggered by `request_step_split`.
+
+v14 Build Kernel implements `state_build/harness/scope/patterns.py` (single module with `PROHIBITED_RE` + `EXCEPTION_RE` + `PATH_ALLOWLIST_GLOB`) + the `files_modified` allowlist checker + the `EXCEPTION_RE` cross-check resolver + the `scope_deviation_request` MCP handler + the `request_step_split` MCP handler + the worktree-snapshot reuse + the `deferred-items.md` writer projector. v15 Build Core Commands implements the planner-validation `<acceptance_criteria>` annotation check that ties to SRP-01 + the SUMMARY-generation step that pulls from `deferred-items.md` + the replan re-entry path that consumes `split_recommendation` events + the worktree snapshot. Phase 405 owns the auto-approval policy for `scope_deviation_request` under `--full-yolo` (DEV-05). Phase 406 cites this spec for tier-1 (advisory) + tier-2 (tool-block) of the 4-tier intervention ladder.
