@@ -3,7 +3,7 @@
 > **Phase:** 403
 > **Status:** Canonical (v41)
 > **Requirements covered:** PAP-01..PAP-06
-> **Build-mode only.** `state.build.*` MUST NOT import `state.teach.*` (cardinal rule, PROJECT.md).
+> **Build-mode only.** Build-mode modules must not import teach-mode modules (cardinal rule, PROJECT.md — mode isolation enforced by CI import-graph lint).
 > **Sibling specs:** STEP-PLAN-FORMAT.md (frontmatter + body sections); EXEMPLAR-stepNPLAN.md (canonical worked example).
 
 At execute-slice start, the on-disk `stepNPLAN.md` IS the executor's primary system prompt. The harness reads it, strips upstream-only sections (plan-slice reasoning meta and already-completed upstream `<interfaces>` excerpts), resolves `@`-references to inlined content (one level only, subject to a per-injection token cap), augments with runtime state (worktree path, prior task results, resolved upstream provides blocks, and the current task pointer), and injects via the `chat.params` plugin hook. Plans are mutable with audit log: immutable sections (frontmatter fields, `<verify>` blocks, `must_haves.*`, and most body tags enumerated in the Mutability Matrix) are enforced via the `tool.execute.before` diff-the-proposed-write mechanism, which emits `state.step.plan_edit_blocked` on violations; mutable sections (`<action>`, `<read_first>`, prose `<context>`) are edited freely by executors, each change logged as a `state.step.plan_edit` event.
