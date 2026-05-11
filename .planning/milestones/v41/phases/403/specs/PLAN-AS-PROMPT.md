@@ -38,6 +38,38 @@ The on-disk `stepNPLAN.md` is the LIVE version executors edit. The audit-logged 
 
 The executor sees the (potentially stripped + @-resolved + augmented) injected version during execution, NOT the on-disk file directly. To re-read the plan, the executor invokes `Read` on the on-disk path; the resulting content has NO @-resolution applied — the executor reads the same on-disk file the harness saw at injection time. (Re-injection on context overflow per CTX-09 re-runs the full injection flow.)
 
+### Injection timing diagram
+
+The following sequence illustrates injection timing across Slice boundary and context overflow:
+
+```
+Slice boundary spawn:
+  daemon       plugin        executor
+     |--spawn session-------->|
+     |<--chat.params fires----|
+     |--read on-disk plan---->|
+     |--strip content-------->|
+     |--resolve @-refs------->|
+     |--build augmentation--->|
+     |--inject as system msg->|
+                              |<--executor starts work--|
+
+Context overflow (CTX-09):
+  daemon       plugin        executor
+     |<--CTX-09 trigger-------|
+     |--re-read on-disk------>|
+     |--strip (updated LRU)-->|
+     |--resolve @-refs (cache)|
+     |--rebuild augmentation->|
+     |--reinject as sys msg-->|
+                              |<--executor resumes work--|
+```
+
+Notes:
+- Cache hit rate is high on re-injection (same `session_id`, refs unchanged in most cases).
+- Mutable edits the executor made before overflow ARE present in on-disk file at re-injection time (carried forward).
+- `<runtime_augmentation>` is always rebuilt fresh (current task pointer, latest prior task results).
+
 ---
 
 ## Runtime Augmentation Block
@@ -119,6 +151,61 @@ REJECTED (resolver raises + emits state.step.plan_edit_blocked):
 
 The @-reference cache is scoped to the current Slice session, keyed by `(snapshot_event_id, ref_path)`. A Slice-boundary spawn (fresh session) invalidates the cache entirely (new `snapshot_event_id`). Compaction within a Slice (CTX-03) preserves the cache because the `session_id` is retained across intra-Slice compaction; only the `snapshot_event_id` advances, which causes a targeted cache invalidation for any ref whose content may have changed since the prior snapshot.
 
+### @-reference resolution pseudocode (v14 implementation note)
+
+```python
+ALLOWED_SUBTREES = [
+    repo_root / ".planning",
+    repo_root / "src",
+    repo_root / "tests",
+    repo_root / "packages",
+    repo_root / "CLAUDE.md",
+    repo_root / "PROJECT.md",
+    # ... extended from milestone repo-root manifest
+]
+
+def resolve_at_ref(ref_path: str, session_id: str, snapshot_event_id: str) -> str:
+    """Resolves one @-reference. Returns inlined content or raises."""
+    cache_key = (snapshot_event_id, ref_path)
+    if cache_key in _at_ref_cache:
+        return _at_ref_cache[cache_key]
+
+    # Confinement check
+    resolved = (repo_root / ref_path.lstrip("@")).resolve()
+    if not any(resolved.is_relative_to(subtree) for subtree in ALLOWED_SUBTREES):
+        raise AtRefConfinementError(ref_path, resolved)
+
+    content = resolved.read_text()
+    _at_ref_cache[cache_key] = content
+    return content
+
+def inline_at_refs(plan_text: str, session_id: str, snapshot_event_id: str,
+                   token_cap: int = 30_000) -> str:
+    """
+    Inline all @-refs in plan_text, one level only.
+    Excess content beyond token_cap replaced with <truncated ...> markers.
+    """
+    tokens_used = 0
+    result_parts = []
+    for chunk in split_on_at_refs(plan_text):
+        if is_at_ref(chunk):
+            inlined = resolve_at_ref(chunk, session_id, snapshot_event_id)
+            inlined_tokens = count_tokens(inlined)
+            if tokens_used + inlined_tokens > token_cap:
+                bytes_omitted = len(inlined.encode())
+                result_parts.append(
+                    f'<truncated path="{chunk}" bytes_omitted="{bytes_omitted}"/>'
+                )
+            else:
+                result_parts.append(inlined)
+                tokens_used += inlined_tokens
+        else:
+            result_parts.append(chunk)
+    return "".join(result_parts)
+```
+
+This pseudocode is non-normative; v14 may use a different splitting strategy. The normative requirement is: one-level resolution, token cap 30_000, fail-closed on confinement violation, cache by `(snapshot_event_id, ref_path)`.
+
 ---
 
 ## Mutability Matrix (PAP-03)
@@ -156,11 +243,45 @@ PAP-03 originally required only `must_haves.*` and `<verify>` blocks to be immut
 
 Mutable sections (executor edits freely): `<context>`, `<read_first>`, `<action>`, `<discovered_threats>` (append-only). Everything else is locked; attempted edits emit `state.step.plan_edit_blocked` (Section 7).
 
+### Mutability matrix enforcement phases
+
+The matrix is consumed at three points in the lifecycle:
+
+1. **Plan authoring (research-slice validation stage)** — the plan-slice planner validates that all frontmatter fields are populated and that the `must_haves.*` + `<verify>` blocks are complete. If any locked section is missing or malformed, the validation stage fails and the Step plan is not committed to the event store as `plan_authored`.
+
+2. **Execute-slice runtime (tool.execute.before enforcement)** — on every Write/Edit to `*/stepNPLAN.md`, the diff-the-proposed-write enforcer (Section 7) consults the matrix to determine if any locked section is modified. Rejected edits emit `state.step.plan_edit_blocked`.
+
+3. **Replay / milestone close** — the projector replays all `plan_edit` events for a Step. If any event's diff touches a locked section (which should be impossible after runtime enforcement, but checked defensively), the projector logs a `PlanIntegrityError` with the event id and section name.
+
+### Rationale for locking all frontmatter (extension of PAP-03)
+
+PAP-03 (REQUIREMENTS.md) originally stated: "`must_haves.*` and every `<verify>` block are immutable." This matrix extends the lock to ALL frontmatter fields for the following reasons:
+
+- **`step_id`** — event store uses `step_id` as the correlation key for all `plan_edit` events for a Step. Changing it mid-execution would orphan the prior events.
+- **`depends_on`** — the DAG scheduler reads this field at execute-slice start. Changing it mid-Slice would race with the scheduler.
+- **`files_modified`** — SRP-04 reads this as the allowlist for Write/Edit. Changing it would bypass the scope guard.
+- **`wave`** — the wave-executor uses this to determine parallelism. Changing it mid-run would violate the parallelism contract.
+
+The extension is absorbed inline per the REQUIREMENTS amendments survey (Section 9): it is a STRENGTHENING, not a contradiction.
+
 ---
 
 ## plan_edit Event Schema (PAP-04)
 
 Every plan edit emits a `state.step.plan_edit` event carrying a unified diff plus before/after content hashes. Replay reconstructs full content by walking the diff chain from the original `state.step.plan_authored` event. Compact, auditable, replay-deterministic. Aligned with `workflow-docs-from-gsd-2/file-tracking.md` Correction 1 (best-effort commit, not transactional).
+
+The event naming convention follows v40 EVENT-TAXONOMY.md: `state.{tier}.{action}` where tier is the owning aggregate/subsystem. All step-plan events use `state.step.*`:
+
+| Event type | When emitted |
+|-----------|-------------|
+| `state.step.plan_authored` | At research-slice end, once per Step, carries full original content |
+| `state.step.plan_edit` | On every mutable-section Write/Edit to `stepNPLAN.md` |
+| `state.step.plan_edit_blocked` | When `tool.execute.before` rejects a locked-section write |
+| `state.step.checkpoint_resolved` | When a checkpoint task is resolved (auto or human) |
+| `state.step.checkpoint_human_action_pending` | When `checkpoint:human-action` task is waiting |
+| `state.step.checkpoint_human_action_resolved` | When human confirms the human-action checkpoint |
+
+(Full event family — 9 events — is specified in STEP-EVENTS.md, Plan 04. This spec defines only the 3 plan-edit events inline; the checkpoint + replan family lives in Plan 04.)
 
 ```python
 from datetime import datetime
@@ -193,6 +314,20 @@ Forward-pointer: v14 Build Kernel implements the projector + replay verifier. Re
 ### Event store row append-only guarantee
 
 Per v40 EVENT-TAXONOMY.md, all event rows are append-only (immutable). The `state.step.plan_edit` row inherits this guarantee — no UPDATE/DELETE on the event row; corrections are NEW events with editor-history transparency. The `state.step.plan_authored` row (Section 8) is similarly append-only: "the `state.step.plan_authored` row is append-only; replay rebuilds the original from this row alone."
+
+### Replay reconstruction algorithm
+
+Given the `state.step.plan_authored` row (original content + hash) and the ordered sequence of `state.step.plan_edit` events for a given `step_id`, the projector reconstructs the content at any edit `N` as:
+
+```
+content_at_N = plan_authored.original_content
+for event in plan_edit_events[0..N]:
+    assert sha256(content_at_N) == event.before_sha256      # integrity check
+    content_at_N = apply_unified_diff(content_at_N, event.diff)
+    assert sha256(content_at_N) == event.after_sha256        # post-apply check
+```
+
+Failure at any assertion: the projector raises `PlanEditReplayError` with the event id and hash mismatch detail. The daemon surfaces this via the `GET /health` endpoint as `plan_edit_replay: degraded`.
 
 ---
 
@@ -262,6 +397,14 @@ On block, harness injects an advisory into the executor's context (system messag
 
 > "Cannot edit immutable `<{locked_section}>` — re-run plan-slice if scope changed. The proposed diff was rejected by the diff-the-proposed-write enforcer (PAP-05). Run `/state-replan` to author a new Step plan, or revise your edit to touch only mutable sections."
 
+### Integration with v9 TUI toast notifications
+
+The daemon's SSE bus emits `plan_edit_blocked` events. The v9 statusline + sidebar plugin (Phase 9 milestone) subscribes to this stream and surfaces the block reason as a one-shot toast notification so the executor sees the rejection inline without needing to inspect the daemon logs. The toast wording mirrors the advisory message above, truncated to 120 chars. This is a v14 implementation note, not a spec requirement.
+
+### `plan_edit_blocked` and `plan_edit` relationship
+
+When `tool.execute.before` detects a locked-section diff, it emits ONLY `state.step.plan_edit_blocked` — NOT `state.step.plan_edit`. The proposed write is rejected; the on-disk file is unchanged; the event log records what was attempted and blocked. A human or re-plan is required to proceed. This is intentional: the event log has no half-applied state, only clean before/after pairs (for allowed edits) or blocked attempts (for rejected edits).
+
 ---
 
 ## Content Stripping + Audit-Log Original (PAP-06)
@@ -298,6 +441,26 @@ Per 403-CONTEXT.md `<deferred>`: a two-file scheme (`stepNPLAN.original.md` + `s
 
 Per 403-CONTEXT.md `<deferred>`: per-section conditional stripping via plan-author-driven `inject:` frontmatter flag is DEFERRED to v14 if EXEMPLAR sizing reveals default rules are insufficient.
 
+### Re-injection on context overflow (CTX-09)
+
+When context overflow triggers re-injection (CTX-09 carry-forward), the harness repeats steps 3–6 of the injection flow (Section 2) but uses the CURRENT on-disk file (not the `plan_authored` original) as the read source. This is intentional: the executor may have made valid mutable edits during the session; re-injection should carry those forward. The `<runtime_augmentation>` block is rebuilt fresh at re-injection time (worktree path, prior task results, upstream provides are current-session state).
+
+Re-injection does NOT reset the diff chain. `state.step.plan_edit` events already committed before the overflow remain in the event store; replay reconstructs the on-disk state from them.
+
+### Token budget accounting at injection time
+
+The harness computes the injection budget before assembling the final prompt:
+
+```
+budget_used  = len(tokenize(on_disk_plan_content_after_stripping))
+             + len(tokenize(all_inlined_at_refs_content))
+             + len(tokenize(runtime_augmentation_block))
+
+budget_limit = CTX-01_absolute_200k_tokens - CTX-01_executor_reserve
+```
+
+If `budget_used > budget_limit`, the harness applies additional stripping before injecting (removes the largest `<interfaces>` excerpt not already replaced with a pointer, then re-measures). The token counter uses the CTX-08 fallback: Anthropic `usage` field if present in the prior session's final response; otherwise chars/4 heuristic. The 30_000 token cap for @-reference inlining is a sub-budget within the larger CTX-01 200k absolute.
+
 ---
 
 ## Cross-references + REQUIREMENTS Survey
@@ -328,6 +491,27 @@ Per 403-CONTEXT.md `<deferred>`: per-section conditional stripping via plan-auth
 | `auto+tdd` GSD-Test-Result trailer convention | STP-05 says "auto+tdd — autonomous with TDD cycle (RED→GREEN→REFACTOR commits required)". Trailer convention is implementation detail. | **No** — the trailer is the v41 mechanism; STP-05 wording covered. |
 
 **Conclusion:** No standalone REQUIREMENTS amendment plan is needed for Phase 403. All decisions either satisfy v1 REQ wording or are absorbed inline as additive specifications.
+
+### Security threat model for this spec
+
+This spec introduces the injection flow, mutability enforcement, and audit-log mechanism. Threats considered:
+
+**Path traversal via @-reference (PAP-02 security):**
+Mitigation: realpath-based confinement. Resolver calls `pathlib.Path.resolve()` on each `@`-ref before checking the ancestor constraint. Symlinks are followed; the resolved path (after symlink expansion) must still be within the allowed subtrees. Fail-closed: injection aborted on violation.
+
+**Diff-payload tampering in plan_edit event (PAP-04 security):**
+Mitigation: `before_sha256` + `after_sha256` verified at replay time. The projector cannot apply a diff that doesn't match the pre-apply content hash. Mismatched hashes surface as a daemon-startup error. Even if an attacker injects a malformed `plan_edit` row into the SQLite event store, the replay verifier catches it at next daemon start.
+
+**Immutability enforcement bypass via subprocess write (PAP-05 security):**
+Mitigation: No-direct-write contract (Section 7). `tool.execute.before` is the canonical block hook; all Write/Edit calls to `*/stepNPLAN.md` must route through it. Subprocess shell calls that bypass the hook are out-of-policy. v14 MAY add a filesystem watcher as defense-in-depth. The contract is the routing, not the watcher.
+
+**Audit-log original tampering (PAP-06 security):**
+Mitigation: `state.step.plan_authored` row is append-only per v40 EVENT-TAXONOMY.md (SQLite rows are never updated or deleted). The `original_sha256` field provides a content integrity check. Replay verifier checks the hash on first use.
+
+**`<discovered_threats>` carve-out masquerade (PAP-05 security):**
+Mitigation: exact diff shape enforcement (Section 7). The enforcer checks that the diff ONLY adds `<threat>...</threat>` sub-elements at the end of `<discovered_threats>` — no removal, no text edit of existing children. The diff shape is normalized (whitespace-insensitive, tag-aware) before the check.
+
+Forward-pointer: v14 security audit MUST verify each of these mitigations in the implementation. The above are spec-level contract statements; the implementation is the load-bearing artifact.
 
 ### Closing
 
