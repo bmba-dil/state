@@ -34,7 +34,7 @@ Note: Replan-continuity events use `slice_id` as `aggregate_id` because the Slic
 ## Conventions
 
 - All events have type string `state.step.{action}` per v40 EVENT-TAXONOMY.md.
-- All events ride the `EventEnvelope` outer shape (event_id, event_type, aggregate_id=step_id or slice_id, emitted_at, payload).
+- All events ride the `EventEnvelope` outer shape (runtime fields: `id`, `type`, `aggregate_id`, `data`; see §Conventions/EventEnvelope reference for the logical↔runtime field mapping).
 - All payload Pydantic models have `model_config = ConfigDict(extra="forbid")`.
 - All event store rows are **append-only** — no UPDATE/DELETE; corrections are NEW events.
 - All `datetime` fields are UTC ISO-8601.
@@ -45,16 +45,25 @@ Note: Replan-continuity events use `slice_id` as `aggregate_id` because the Slic
 
 The EventEnvelope is the outer shape that wraps every domain event. All nine events defined in this spec ride this envelope.
 
+> **Schema authority note:** Two representations of `EventEnvelope` exist in the spec suite:
+>
+> 1. **Runtime shape (authoritative for v14 implementation):** `src/state_core/schema.py` (lines 239-265), pasted verbatim in EXEMPLAR-stepNPLAN.md `<interfaces>` Excerpt A. Fields: `id`, `seq`, `aggregate_type`, `aggregate_id`, `type`, `data`.
+>
+> 2. **Logical/conceptual shape (this section, below):** a simplified view using descriptive field names for readability in this spec doc. Field mapping: `id` → `event_id`, `type` → `event_type`, `data` → `payload`; `seq` and `aggregate_type` are omitted from the logical view for brevity.
+>
+> v14 implementers MUST use the runtime shape from `src/state_core/schema.py`. The logical shape below is for spec-doc readability only. If the two shapes ever diverge further, `src/state_core/schema.py` wins.
+
 ```python
+# Logical view only — see src/state_core/schema.py for the authoritative runtime shape.
 from pydantic import BaseModel, ConfigDict
 
 class EventEnvelope(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    event_id: str
-    event_type: str            # "state.step.{action}"
+    event_id: str              # maps to runtime field: id (ULID)
+    event_type: str            # maps to runtime field: type; "state.step.{action}"
     aggregate_id: str          # step_id (per-step events) or slice_id (replan events)
-    emitted_at: str            # ISO-8601 UTC
-    payload: dict              # validated per event_type using one of the schemas below
+    emitted_at: str            # ISO-8601 UTC (set by daemon, not payload)
+    payload: dict              # maps to runtime field: data; validated per event_type using one of the schemas below
 ```
 
 Forward-pointer: full envelope contract lives in `.planning/milestones/v40/phases/400/specs/EVENT-TAXONOMY.md`.
@@ -106,7 +115,6 @@ class PlanEdit(BaseModel):
     editor: Literal["executor", "harness", "human"]
     edited_at: datetime                # UTC, ISO-8601
     session_id: str
-    immutable_section_touched: bool    # set by tool.execute.before; True triggers plan_edit_blocked instead
 ```
 
 ### state.step.plan_edit_blocked (PlanEditBlocked — PAP-05)
@@ -313,7 +321,8 @@ This section specifies field-level constraints for every Pydantic model in this 
 | `editor` | `Literal[...]` | One of: `"executor"`, `"harness"`, `"human"` |
 | `edited_at` | `datetime` | UTC; timezone-aware; no future timestamps |
 | `session_id` | `str` | Non-empty |
-| `immutable_section_touched` | `bool` | Set by `tool.execute.before`; `True` triggers `plan_edit_blocked` instead of `plan_edit` (mutually exclusive — a single proposed write produces EITHER `plan_edit` OR `plan_edit_blocked`, never both) |
+
+**Mutual-exclusion invariant:** A single proposed write produces EITHER a `plan_edit` event (allowed edit) OR a `plan_edit_blocked` event (locked-section rejection), never both. The `tool.execute.before` enforcer determines which path is taken before any event is emitted; `plan_edit` is only emitted for writes that pass the mutability check.
 
 **Ordering invariant:** for a given `step_id`, `plan_edit` events are ordered by `edited_at`. The projector replays them in strictly ascending order. A `plan_edit` with `edited_at` earlier than a prior event's `edited_at` raises `PlanEditOrderingError`.
 
