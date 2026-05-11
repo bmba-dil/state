@@ -26,7 +26,7 @@ must_haves:
   truths:
     - "python3 -c 'from state_build.snapshot.compaction import CompactionSnapshot; print(CompactionSnapshot.model_config[\"extra\"])' prints 'forbid'."
     - "orjson round-trip: dumps→loads of a populated CompactionSnapshot is bit-identical to the original."
-    - "All seven snapshot fields from CONTEXT-PROTOCOL.md are present (slice_id, step_id, task_id, session_id, active_plan_path, current_task_pointer, upstream_provides)."
+    - "All seven snapshot fields from CONTEXT-PROTOCOL.md are present (slice_id, step_id, task_id, session_id, active_plan_path, current_task_pointer, provides_blocks)."
   artifacts:
     - path: "src/state_build/snapshot/compaction.py"
       provides: "CompactionSnapshot Pydantic model + orjson serializer helpers"
@@ -279,7 +279,7 @@ transaction), then materializes the Layer-B markdown digest as a projection side
 authoritative per PROJECT.md cardinal rule; the projection may lag but the event row is atomic.
 Missing event rows are detectable via replay gap analysis.
 
-**DoS — oversized `upstream_provides` dict causes snapshot row to exceed event-store row size budget.**
+**DoS — oversized `provides_blocks` list causes snapshot row to exceed event-store row size budget.**
 Mitigation: per-injection token cap (PAP-02); `provides_blocks` list is truncated by the
 snapshot assembler when the combined serialized size of all `ProvidesBlock` entries exceeds the
 per-injection cap. A `<truncated />` sentinel is appended so replay consumers detect the gap.
@@ -314,7 +314,7 @@ test "$(grep -c 'state_teach' src/state_build/snapshot/compaction.py)" -eq 0
 <success_criteria>
 - `CompactionSnapshot` is importable from `state_build.snapshot.compaction` and `model_config["extra"] == "forbid"`.
 - orjson round-trip (dumps with `OPT_SORT_KEYS | OPT_NAIVE_UTC`, then `model_validate_json`) produces a value that equals the original snapshot instance.
-- All seven required fields from CONTEXT-PROTOCOL.md §5 (CTX-05) are present in the model: `slice_id`, `step_id`, `task_id`, `session_id`, `active_plan_path`, `current_task_pointer` (via `current_task_pointer`), and `upstream_provides` (via `provides_blocks`).
+- All seven required fields from CONTEXT-PROTOCOL.md §5 (CTX-05) are present in the model: `slice_id`, `step_id`, `task_id`, `session_id`, `active_plan_path`, `current_task_pointer`, and `provides_blocks`.
 - Passing 5 / 5 tests; no teach-mode (`state_teach`) imports in any implementation file touched by this Step.
 </success_criteria>
 

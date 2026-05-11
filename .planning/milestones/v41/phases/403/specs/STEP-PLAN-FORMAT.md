@@ -115,7 +115,7 @@ must_haves:
   truths:
     - "python3 -c 'from state_build.snapshot.compaction import CompactionSnapshot; print(CompactionSnapshot.model_config[\"extra\"])' prints 'forbid'."
     - "orjson round-trip: dumps→loads of a populated CompactionSnapshot is bit-identical to the original."
-    - "All seven snapshot fields from CONTEXT-PROTOCOL.md are present (slice_id, step_id, task_id, session_id, active_plan_path, current_task_pointer, upstream_provides)."
+    - "All seven snapshot fields from CONTEXT-PROTOCOL.md are present (slice_id, step_id, task_id, session_id, active_plan_path, current_task_pointer, provides_blocks)."
   artifacts:
     - path: "src/state_build/snapshot/compaction.py"
       provides: "CompactionSnapshot Pydantic model + orjson serializer helpers"
