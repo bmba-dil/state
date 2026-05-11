@@ -804,3 +804,46 @@ Mapping specification-level threats to mitigations in this document:
 Artifact catalog (ART-01) entries for the Slice tier remain authoritative for filename, schema owner, and immutability. SLICE-CYCLE.md adds the producer-stage mapping (which of design-slice / research-slice / run-slice / verify-slice writes each artifact) and the v41 vocabulary reconciliation. Readers consulting this catalog for v41+ scheduling should cross-reference SLICE-CYCLE.md §"Canonical Slice Folder Layout".
 
 *Original v40 spec text above this amendment block is untouched.*
+
+---
+
+## v41 Amendment — Phase 404 Verification + Discipline Artifacts
+
+**Amended:** Phase 404 (v41 milestone — Boolean Proof Gate & Discipline Guards)
+**Amendment date:** 2026-05-11
+**Amendment type:** Additive — three new per-Step/per-Slice artifacts registered; v40 baseline + Phase 402 amendment unchanged.
+**Forward-pointers:**
+  - `stepN-VERIFY.json` + `slice-verification.sh` + `N-VERIFICATION.md` column schema: `.planning/milestones/v41/phases/404/specs/PROOF-GATE.md`
+  - `deferred-items.md`: `.planning/milestones/v41/phases/404/specs/SCOPE-PROHIBITION.md`
+
+### v40 baseline + Phase 402 amendment scope
+
+The v40 ARTIFACT-CATALOG.md catalogued the canonical Slice folder layout including `N-CONTEXT.md`, `N-DISCUSSION-LOG.md`, `N-RESEARCH.md`, `N-PATTERNS.md`, `N-VALIDATION.md`, `stepNPLAN.md`, `stepNSUMMARY.md`, `N-VERIFICATION.md`, and `RESUME.txt`. The Phase 402 amendment confirmed Slice-owns-cycle producer mapping. Phase 404 introduces three new artifacts (one per-Step JSON, one per-Slice executable script, one per-Slice markdown out-of-scope log) and pins `N-VERIFICATION.md`'s previously-implicit column schema to PROOF-GATE.md Section 8.
+
+### v41 extension scope (3 new artifacts + 1 column-schema pin)
+
+| Filename | Producer Stage | Schema Owner | Immutability | Description |
+|---------|----------------|--------------|--------------|-------------|
+| `stepN-VERIFY.json` | execute-slice (Step-end gate) | PROOF-GATE.md §7 (StepVerifyResult schema_version: Literal[1]) | Immutable post-write (append-only event store row; rewrites of stepN-VERIFY.json on replay are projector-driven from events) | Per-Step machine-readable verification artifact. Pydantic StepVerifyResult v1 (server-side recomputed `overall_passed`; nested `must_haves` + `acceptance_criteria` + `verify_automated` results with bounded-truncation 2KB per check, 10KB total). Authoritative per-Step evidence. |
+| `slice-verification.sh` | plan-slice (authored at planning end); immutable post-execute-slice start | PROOF-GATE.md §4 + §8 (bash script; pure-machine; 600s timeout default; Slice-frontmatter override `verify: {slice_timeout_s: int}`) | Immutable post-execute-slice start (locked per PAP-03 mutability matrix on the parent Slice) | Per-Slice executable bash script. Runs at verify-slice stage. Aggregates Step-level evidence (reads each `stepN-VERIFY.json`) + runs cross-Step integration checks. Pure-machine; exit 0 = pass (gates `N-VERIFICATION.md` projector emission); non-zero = fail. |
+| `deferred-items.md` | execute-slice (auto-appended by `state.step.scope_check` projector on `exception_matched=False` events) + verify-slice (Slice SUMMARY.md surface step) | SCOPE-PROHIBITION.md §9 (5-column table: ID, source_task, description, raised_at, status) | Mutable (humans + harness append rows; status updates allowed) | Per-Slice out-of-scope log. Auto-append rule: `scope_check` events with unresolved EXCEPTION_RE produce new rows. Status vocabulary: `open`, `scheduled-next-slice`, `scheduled-future-milestone`, `rejected`, `resolved-in-slice`. Surfaces in Slice SUMMARY.md `## Deferred Items` section. |
+| `N-VERIFICATION.md` (column-schema pin) | verify-slice (deterministic projector — re-renderable from event store at any time) | PROOF-GATE.md §8 (10-column truth-table schema: step_id, task_id, check_id, scope, source_expr, verdict, strike_count_at_close, gate_strike_event_ids, evidence_excerpt, timestamp) | Mutable (re-renderable; the underlying event-store source rows are append-only) | Existing v40 artifact; column schema previously implicit. Phase 404 PINS the schema to PROOF-GATE.md §8 (rolled-up wide audit-traceable view). Per-row `evidence_excerpt` <= 2KB; whole-file size unbounded (per-Step JSON files cap evidence). Ordering: Step DAG topology, then check_id index ascending within each Step. omitted rows ARE included (audit clarity). |
+
+### Conventions inherited
+
+All v41 Phase 404 artifact additions follow v40 conventions:
+- **Filename form**: `stepN` prefix has no dash and no leading zeros (per Phase 402 carry-forward + v40 ARTIFACT-CATALOG.md confirmation).
+- **Per-Slice folder**: artifacts live in `slices/N-name/` per the canonical Slice folder layout (SLC-06).
+- **Schema-version migration**: `stepN-VERIFY.json` carries `schema_version: Literal[1]` per PROOF-GATE.md §7; bump literal to migrate; old files surface as parse errors.
+- **Build-mode only**: all three artifacts (and the column-schema pin) live under Build-mode subtree; teach-mode equivalents are v47 scope.
+- **Mutability classification**: stepN-VERIFY.json immutable post-write; slice-verification.sh immutable post-execute-slice start; deferred-items.md mutable (rows appended over Slice lifecycle); N-VERIFICATION.md mutable-but-re-renderable (projector idempotent from event store).
+
+### Authoritative ordering
+
+Pydantic class definitions in the owning specs (PROOF-GATE.md / SCOPE-PROHIBITION.md) are authoritative; this catalog amendment is a registry index — full schemas live in the owning specs. If the registry row description and the owning spec drift, the owning spec wins; readers should treat the registry as a forward-pointer index, not a substitute for the spec.
+
+### Effect on this document
+
+Canonical Slice folder layout (ART-01 entries for `slices/N-name/`) gains three new files: `stepN-VERIFY.json` (one per Step), `slice-verification.sh` (one per Slice), and `deferred-items.md` (one per Slice; may be empty). Plus a column-schema pin for the existing `N-VERIFICATION.md`. Readers consulting this catalog for v41+ scheduling should cross-reference PROOF-GATE.md §8 (column schema) + §9 (artifact list) and SCOPE-PROHIBITION.md §9 (deferred-items.md). v14 Build Kernel implements the StepVerifyResult parser, the slice-verification.sh runner with timeout, the N-VERIFICATION.md projector, and the deferred-items.md auto-append projector.
+
+*Original v40 spec text + Phase 402 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
