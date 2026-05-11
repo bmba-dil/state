@@ -277,7 +277,7 @@ The event naming convention follows v40 EVENT-TAXONOMY.md: `state.{tier}.{action
 | `state.step.plan_authored` | At research-slice end, once per Step, carries full original content |
 | `state.step.plan_edit` | On every mutable-section Write/Edit to `stepNPLAN.md` |
 | `state.step.plan_edit_blocked` | When `tool.execute.before` rejects a locked-section write |
-| `state.step.checkpoint_resolved` | When a checkpoint task is resolved (auto or human) |
+| `state.step.checkpoint_auto_resolved` | When a checkpoint task is auto-resolved by the harness (tiered or full-yolo) |
 | `state.step.checkpoint_human_action_pending` | When `checkpoint:human-action` task is waiting |
 | `state.step.checkpoint_human_action_resolved` | When human confirms the human-action checkpoint |
 
