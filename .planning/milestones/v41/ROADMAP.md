@@ -30,7 +30,7 @@
 
 - [x] **Phase 402: Slice-Cycle & Context Window Spec** — Slice-owns-cycle correction + 200k absolute budget, fresh-session-per-Slice, compaction snapshot, threshold actions (completed 2026-05-08)
 - [x] **Phase 403: Step/Task Decomposition & Plan-as-Prompt** — `stepNN-PLAN.md` GSD-shape format + plan-as-prompt injection, mutability/audit, content stripping (completed 2026-05-11)
-- [ ] **Phase 404: Boolean Proof Gate & Discipline Guards** — `must_haves` proof block + per-task `<verify>`, analysis paralysis guard, scope reduction prohibition
+- [x] **Phase 404: Boolean Proof Gate & Discipline Guards** — `must_haves` proof block + per-task `<verify>`, analysis paralysis guard, scope reduction prohibition (completed 2026-05-11)
 - [ ] **Phase 405: Deviation Rules & Subagent Management** — 4-rule deviation framework + tiered autonomy, static subagent whitelist + parallel fanout
 - [ ] **Phase 406: Harness Architecture Rollup** — Layered diagram (hooks + MCP + daemon), 4-tier intervention, MCP tool catalog, full-Slice sequence diagram
 
@@ -123,7 +123,7 @@
 |-------|----------------|--------|-----------|
 | 402. Slice-Cycle & Context Window Spec | 4/4 | Complete    | 2026-05-08 |
 | 403. Step/Task Decomposition & Plan-as-Prompt | 4/4 | Complete    | 2026-05-11 |
-| 404. Boolean Proof Gate & Discipline Guards | 0/0 | Not started | - |
+| 404. Boolean Proof Gate & Discipline Guards | 4/4 | Complete    | 2026-05-11 |
 | 405. Deviation Rules & Subagent Management | 0/0 | Not started | - |
 | 406. Harness Architecture Rollup | 0/0 | Not started | - |
 
