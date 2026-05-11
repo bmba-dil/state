@@ -279,3 +279,70 @@ v14 Build Kernel implements:
 See `.planning/milestones/v41/phases/403/specs/STEP-EVENTS.md` for full schemas and replay rules.
 
 *Original v40 spec text and Phase 402 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
+
+---
+
+## v41 Amendment — Phase 404 Discipline-Guard Event Family
+
+> **Source phase:** v41 Phase 404 (Boolean Proof Gate & Discipline Guards)
+> **Amendment date:** 2026-05-11
+> **Amendment type:** Additive — new event types added to the step + slice tiers; v40 baseline events + Phase 402 amendment + Phase 403 amendment unchanged.
+> **Forward-pointers:**
+>   - Gate events: `.planning/milestones/v41/phases/404/specs/PROOF-GATE.md`
+>   - Paralysis event: `.planning/milestones/v41/phases/404/specs/ANALYSIS-PARALYSIS-GUARD.md`
+>   - Scope + split events: `.planning/milestones/v41/phases/404/specs/SCOPE-PROHIBITION.md`
+
+### v40 + Phase 402 + Phase 403 baseline scope
+
+The original v40 EVENT-TAXONOMY.md catalogued 33 events across Arc / Stage / Slice / Step tiers and 2 composite events. The Phase 402 amendment added four Slice stage-boundary events (`state.slice.{design,research,run,verify}_completed`) and two compaction-lifecycle events (`compaction.snapshot_taken`, `compaction.reinject_completed`). The Phase 403 amendment added nine `state.step.*` events for plan-authoring, plan-mutation, autonomy-tiered checkpoint resolution, and replan diff-replay continuity. Phase 404 extends the taxonomy with TEN new events for the boolean proof gate, the analysis-paralysis guard, and the scope-reduction-prohibition discipline guards. None of these v41 additions change v40 baseline event semantics or names.
+
+### v41 extension scope (10 new state.{step,slice}.* events)
+
+| Event Type | Trigger | State Transition | Owning REQ | Owning Spec |
+|-----------|---------|------------------|------------|-------------|
+| `state.step.gate_strike` | Pure-machine evaluator returns `fail` at the completion-claim boundary (Write/Edit to next-task file OR `complete_task` MCP call); strike counter increments for the (task_id, check_id) tuple | (none — append-only audit record; the strike-counter in-memory state transitions on emission) | PRF-06 | PROOF-GATE.md §6 |
+| `state.step.gate_resolved` | (task_id, check_id) chain closes — verdict transitions to pass/flag/omitted, OR human resolution at strike 6 | (none — append-only audit record; closes the strike-chain in the in-memory counter) | PRF-06 | PROOF-GATE.md §7 |
+| `state.step.step_verify_completed` | Step-end after `stepN-VERIFY.json` is written; carries the path + server-side recomputed overall_verdict | step: `verifying` → `verified` (or `verify_failed` on fail verdict) | PRF-05 | PROOF-GATE.md §7 |
+| `state.slice.slice_verify_completed` | Slice-end after `slice-verification.sh` exits 0 AND `N-VERIFICATION.md` is written by the deterministic projector | slice: `verifying` → `verified` | PRF-05 | PROOF-GATE.md §7 |
+| `state.step.paralysis_event` | Per-task consecutive-read-only counter crosses threshold; emits at advisory 1, 2, 3+reinject, 4, 5, 6+human-gate | (none — append-only audit record; the paralysis-counter in-memory state transitions on emission) | APG-06 | ANALYSIS-PARALYSIS-GUARD.md §8 |
+| `state.step.scope_check` | Prohibited-language scan match on a Write/Edit content; emitted whether or not EXCEPTION_RE resolves | (none — write decision flows from exception_matched + exception_resolved tuple) | SRP-02 | SCOPE-PROHIBITION.md §5 |
+| `state.step.scope_deviation` | tool.execute.before Layer 1 rejects a Write/Edit whose target path is not in `files_modified` | (none — append-only audit record; the write was rejected) | SRP-04 | SCOPE-PROHIBITION.md §6 |
+| `state.step.scope_deviation_request` | Agent calls `scope_deviation_request` MCP tool requesting a one-shot allowlist entry | (none — append-only audit record; surfaces a `checkpoint:decision`) | SRP-04 | SCOPE-PROHIBITION.md §7 |
+| `state.step.scope_deviation_resolved` | Human (or harness_auto under `--full-yolo` per Phase 405 DEV-05) resolves the `checkpoint:decision`; carries resolution: approve \| reject | one-shot allowlist entry written on approve; nothing on reject | SRP-04 | SCOPE-PROHIBITION.md §7 |
+| `state.slice.split_recommendation` | Agent calls `request_step_split` MCP tool; harness records the recommendation + takes worktree snapshot + transitions Slice to `pending_replan` | slice: `running` → `pending_replan` (run-slice terminal state) | SRP-05 | SCOPE-PROHIBITION.md §8 |
+
+### Conventions inherited
+
+All v41 Phase 404 additions follow v40 conventions:
+- **Naming**: `state.{tier}.{action}` form preserved; tier ∈ {step, slice}; action is snake_case.
+- **Envelope**: ride `EventEnvelope` outer shape (per v40 baseline + Phase 402 amendment confirmation).
+- **Validation**: `model_config = ConfigDict(extra="forbid")` on every payload (full Pydantic schemas in the owning specs).
+- **Append-only**: event store rows never UPDATED/DELETED; corrections are NEW events (e.g., `state.step.gate_resolved` to close a strike chain; `state.step.scope_deviation_resolved` to close a deviation request).
+- **Mode prefix**: all 10 new events live in `BUILD_ONLY_EVENT_PREFIXES`; teach-mode harness is v47 scope.
+- **Bounded truncation**: `agent_response_summary` / `eval_evidence` / similar excerpt fields are <= 2KB each; 10KB total per event (mirrors PROOF-GATE.md Section 7 §Bounded truncation discipline).
+
+### Counter independence (load-bearing)
+
+Phase 404 introduces TWO independent counters (per `loop-control.md §0 Correction 1` — distinct counters at distinct scopes; conflation forbidden):
+
+- **`gate_strike` chain (PRF)**: per `(task_id, check_id)` tuple. 3 advisory → clear+reinject (single shot) → 3 more → human gate at strike 6. Per failing must_haves check.
+- **`paralysis_event` chain (APG)**: per task. 3 advisory → clear+reinject (single shot) → 3 more → human gate at advisory 6. Per consecutive-read-only-tool-uses window.
+
+Each can independently reach force-stop. The Phase 406 `harness_intervention` event (HRN-05) is the umbrella that aggregates both; this amendment confirms the umbrella's expected member set.
+
+### Event count summary
+
+Event count rises from 39 (after Phase 403 amendment) to **49** after Phase 404 amendment: +4 gate events (gate_strike, gate_resolved, step_verify_completed, slice_verify_completed) + 1 paralysis event + 5 scope events (scope_check, scope_deviation, scope_deviation_request, scope_deviation_resolved, split_recommendation). Mode-isolation rules unchanged — all new events Build-only.
+
+### v14 implementation pointer
+
+v14 Build Kernel implements:
+- Pydantic payload models per the owning Phase 404 specs (PROOF-GATE.md / ANALYSIS-PARALYSIS-GUARD.md / SCOPE-PROHIBITION.md).
+- Daemon emitters at the documented trigger sites (one row per harness action).
+- Projector reducers for in-memory counter state (PRF strike chain, APG paralysis chain, scope_deviation one-shot allowlist).
+- Bounded-truncation utility shared across PROOF-GATE.md / ANALYSIS-PARALYSIS-GUARD.md / SCOPE-PROHIBITION.md events (2KB per excerpt, 10KB total per event, literal marker `[... truncated <N> bytes ...]`).
+- Deterministic projectors for `N-VERIFICATION.md` (PROOF-GATE.md) and `deferred-items.md` (SCOPE-PROHIBITION.md) — both replayable from event store at any time.
+
+See `.planning/milestones/v41/phases/404/specs/{PROOF-GATE,ANALYSIS-PARALYSIS-GUARD,SCOPE-PROHIBITION}.md` for full schemas, behaviors, and cross-references.
+
+*Original v40 spec text, Phase 402 amendment, and Phase 403 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
