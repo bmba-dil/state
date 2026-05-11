@@ -261,4 +261,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-08 — Phase 402 (Slice-Cycle & Context Window Spec) complete. v41 milestone now: 73 v1 reqs (CTX-09 added in Phase 402); 5 phases (402–406); Phase 402 ✓ shipped. Next: Phase 403 (Step / task decomposition protocol).*
+*Last updated: 2026-05-10 — Phase 403 (Step/Task Decomposition & Plan-as-Prompt) complete. Produced 4 spec docs (EXEMPLAR-stepNPLAN.md, STEP-PLAN-FORMAT.md, PLAN-AS-PROMPT.md, STEP-EVENTS.md) covering STP-01..08 + PAP-01..06; appended `## v41 Amendment` block to v40 EVENT-TAXONOMY.md for 9 new `state.step.*` event types. v41: Phases 402+403 ✓ shipped (2/5). Next: Phase 404 (Boolean Proof Gate & Discipline Guards). Two REVIEW.md major findings (EventEnvelope schema fork, dead-branch `immutable_section_touched` field) are advisory — resolve before v14 Build Kernel coding.*
