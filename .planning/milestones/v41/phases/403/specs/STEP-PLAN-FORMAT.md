@@ -675,3 +675,162 @@ Example `<read_first>` block from `.planning/milestones/v41/phases/403/specs/EXE
   whole context.
 
 ---
+
+## Granularity Selection Algorithm (STP-06)
+
+The plan-slice stage auto-selects Step granularity for each Slice based on deterministic inputs.
+The algorithm is a fixed table lookup — no LLM judgment, no formula tuning. Same inputs → same
+output on every invocation (idempotent). This is load-bearing for replan determinism (PAP-04
+audit-log clarity requires that replans with identical inputs produce identical plans).
+
+### Inputs (deterministic)
+
+1. **Slice scope token estimate** — sum of input artifact sizes (`DESIGN.md` + `RESEARCH.md` +
+   `PATTERNS.md`) tokenized with a fixed tokenizer. Pin the tokenizer choice: **`tiktoken
+   cl100k_base` is recommended; chars/4 fallback per CTX-08 rule**. This spec ships with
+   `tiktoken cl100k_base` as the canonical choice; v14 implementations may pin a Python-native
+   alternative if `tiktoken` package availability is constrained.
+
+2. **`files_modified` union count** — distinct files the Slice will touch, computed from the
+   planner's preliminary file map before Step assignment.
+
+3. **`provides:` blocks count** — distinct upstream→downstream artifact handoffs the Slice will
+   produce; maps to DAG edge count.
+
+**LLM-counted task estimates are explicitly REJECTED** — they violate STP-06's "deterministic
+function" wording. Replan determinism is load-bearing for PAP-04 audit-log clarity (see
+PLAN-AS-PROMPT.md).
+
+### Algorithm (table-driven, bucketed thresholds)
+
+```text
+granularity(scope_tokens, files, provides) -> "coarse" | "standard" | "fine":
+  if scope_tokens ≤ 30_000 AND files ≤ 3 AND provides ≤ 2:
+    return "coarse"        # 1–2 Steps
+  elif scope_tokens ≤ 80_000 AND files ≤ 6 AND provides ≤ 5:
+    return "standard"      # 2–3 Steps
+  else:
+    return "fine"          # 3–5 Steps
+```
+
+### Step count (collapsing the range to a single integer)
+
+- **coarse** → 2 if `scope_tokens > 15_000`, else 1.
+- **standard** → 3 if `scope_tokens > 50_000` OR `files > 4`, else 2.
+- **fine** → ceil(`provides` / 2), clamped to [3, 5].
+
+Match REQUIREMENTS literal ranges (1–2 / 2–3 / 3–5). Reproducible, debuggable, easy to tune.
+Inspired by gsd-2 quality-enforcement bucketed gate registries
+(`workflow-docs-from-gsd-2/quality-enforcement.md` §1 five-pipeline taxonomy) — fixed lookup
+tables beat formula tuning for spec docs.
+
+---
+
+## step_id Stable-Hash Rule + Replan Determinism
+
+### step_id derivation
+
+- **step_ids derived from a stable hash:** `step_id = slugify(slice_id) + '-step-' + ordinal`
+- **ordinal:** position after sorting candidate Steps by (min `files_modified` path
+  lexicographically, then `provides` count desc).
+
+**Worked example using EXEMPLAR's step_id:** The EXEMPLAR's step is
+`compaction-snapshot-schema-step-1` — slice slug `compaction-snapshot-schema` + `-step-` +
+ordinal `1` (first in sort order). If a sibling step in the same slice is added later, sorting by
+min `files_modified` path lexicographically determines its ordinal. A second Step that writes
+`tests/state_build/snapshot/test_compaction_v2.py` would sort after `src/state_build/...` (t >
+s), giving it ordinal `2` and step_id `compaction-snapshot-schema-step-2`.
+
+### Replan determinism
+
+- **Same inputs → same Step count + same step_ids.** Replan with identical inputs reproduces the
+  same plan exactly (idempotent at the file level).
+
+- **Replan with changed inputs** recomputes granularity and emits `state.step.renamed` /
+  `state.step.added` / `state.step.removed` events for diff-replay continuity. Schemas: see
+  STEP-EVENTS.md (Plan 04 / Phase 403).
+
+- **Locks held by PAP-03** (`must_haves`, `<verify>`) survive replan when step_id is unchanged;
+  if step_id changes (input change forced rename), the new Step inherits authored content but
+  `must_haves` are re-authored fresh (no carry-over of stale gates).
+
+### Step-id collision strategy
+
+When inputs produce duplicate slugs across Slices, the slice_id slug prefix prevents collision by
+construction. Cross-Slice step_id collisions are not possible because
+`step_id = slugify(slice_id) + '-step-' + ordinal` and slice_ids are unique within the milestone
+scope.
+
+---
+
+## Planner Validation Hooks
+
+This section enumerates the validation checks the research-slice planning + validation pipeline
+runs against authored stepNPLAN.md files. v15 Build Core Commands implements these checks; v41
+specifies them. Validation runs after the plan-slice authoring stage and before execute-slice is
+dispatched. Failure at any check emits `state.slice.validation_failed` and forces a replan
+iteration — no partial execution from a validation-failed plan.
+
+- **Pydantic load** — `StepFrontmatter.model_validate(yaml.safe_load(frontmatter))` raises
+  `ValidationError` on missing required keys, unknown extras (`extra="forbid"`), or wrong types.
+  Failure: planner emits `state.slice.validation_failed`; replan-iteration triggered.
+
+- **`depends_on` IO cross-check** — verify each `depends_on[i]` step_id exists in the same
+  Slice; verify `<read_first>` references resolve against upstream Steps' `provides:` blocks.
+  Reference: `workflow-docs-from-gsd-2/workflow-engine.md` §6 three-scope dependency model +
+  Correction 2.
+
+- **DAG cycle detection** — at the planner-validation stage, NOT runtime. State's Steps are
+  pre-planned, so runtime cycle detection (gsd-2's `reactive-graph.ts:detectDeadlock`) is not
+  needed; cycles fail before execute-slice ever spawns.
+
+- **`files_modified` distinctness** — same-Wave Steps in the same Slice must not share files
+  (parallel-safe). Sequential same-Slice Steps may share files via depends_on edge (later Step's
+  writes are gated on earlier Step's gate-pass).
+
+- **`<read_first>` line-range form** — every `<read_first>` entry matches
+  `^.+ (lines \d+-\d+|\(full file\))$`. STP-08 enforcement.
+
+- **`<interfaces>` non-empty (when depends_on non-empty)** — STP-07 contract; first-Step
+  `<interfaces>` may be empty (no upstream).
+
+- **`<verify><automated>` non-empty** — every task carries an automated verify command (Nyquist
+  rule).
+
+- **`<options>` cardinality (checkpoint:decision tasks)** — 2 ≤ count ≤ 4.
+
+- **Task type ↔ structure consistency** — `<task type="auto+tdd">` MUST have `tdd="true"`
+  attribute (back-compat); `<task type="checkpoint:decision">` MUST have `<options>` block.
+
+---
+
+## Cross-references
+
+- **Sibling spec — mutability matrix:** `PLAN-AS-PROMPT.md` §Mutability Matrix (PAP-03) defines
+  which sections this format declares mutable vs. immutable. This format spec marks each section's
+  mutability inline; PLAN-AS-PROMPT.md authoritatively rolls them up + specifies the runtime
+  enforcer.
+
+- **Sibling spec — events:** `STEP-EVENTS.md` (Plan 04) defines the Pydantic schemas for
+  `state.step.plan_authored`, `state.step.plan_edit`, `state.step.plan_edit_blocked`,
+  `state.step.checkpoint_auto_resolved`, `state.step.checkpoint_human_action_pending`,
+  `state.step.checkpoint_human_action_resolved`, `state.step.renamed`, `state.step.added`,
+  `state.step.removed`.
+
+- **Worked example:** `.planning/milestones/v41/phases/403/specs/EXEMPLAR-stepNPLAN.md` is the
+  canonical hand-authored worked example; v14 implementations use it as a parser test fixture.
+
+- **Phase 402 carry-forward:** filename form `stepNPLAN.md` (no dash, no leading zeros) is locked
+  by 402-CONTEXT.md + v40 ARTIFACT-CATALOG.md; reinject body XML shape compatibility is locked by
+  402's CONTEXT-PROTOCOL.md.
+
+- **v40 baseline:** `state.build.harness.*` MUST NOT import `state.teach.*` (PROJECT.md cardinal
+  rule). This spec is Build-mode only.
+
+v14 Build Kernel implements the StepPlan parser, planner-validation hook chain, granularity
+algorithm, and task-type behavior dispatch from this spec. v15 Build Core Commands implements the
+research-slice multi-stage pipeline that produces stepNPLAN.md files (planning + validation stages
+cited above). Phase 404 consumes the must_haves frontmatter sub-block schema. Phase 405 consumes
+the `<options>` sub-tag and autonomy-tier interactions. Phase 406 cross-references all of the above
+in the layered harness diagram.
+
