@@ -298,7 +298,9 @@ class PlanEdit(BaseModel):
     editor: Literal["executor", "harness", "human"]
     edited_at: datetime                          # UTC, ISO-8601
     session_id: str                              # editing session
-    immutable_section_touched: bool              # set by tool.execute.before; True triggers plan_edit_blocked instead
+    # Note: immutable_section_touched is NOT a field on PlanEdit.
+    # A write that touches a locked section emits plan_edit_blocked INSTEAD of plan_edit.
+    # A single proposed write produces EITHER plan_edit OR plan_edit_blocked, never both.
 ```
 
 ### Replay verification
