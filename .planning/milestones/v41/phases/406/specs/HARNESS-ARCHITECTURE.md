@@ -363,3 +363,119 @@ For each hook the canonical owner spec is listed under its "Source spec" line. T
 
 Drift between any "Source spec" cite above and the canonical spec body is a documented defect, detectable by grep on the literal cross-reference identifier (e.g., `grep "CTX-06" $upstream_spec` MUST locate the same operative description quoted here).
 
+---
+
+## §3 state-build MCP Tool Catalog (HRN-03)
+
+HRN-03 specifies the state-build MCP server tool catalog. **HRN-03 invariant: every harness operation specified in Phases 402–405 maps to at least one MCP tool** (HRN-03 literal). This section enumerates 14 tools. Each tool entry includes the literal MCP registration string (the name the agent invokes), the module path `state_build/<subsystem>/<tool_filename>.py` (single-source-of-truth), the Pydantic input model and output model (both with `model_config = ConfigDict(extra="forbid")`), 1–2 sentences of semantics plus a pointer to the canonical 402–405 spec section, and the plugin-hook integration site (which `tool.execute.before` / `after` layer consumes this tool's invocation, when applicable). Of the 14 tools, 10 are owned by Phases 402–405 source specs and 4 are NEW in this phase: `emit_advisory` (HRN-04 tier 1), `force_clear_and_reinject` (HRN-04 tier 3), `surface_human_gate` (HRN-04 tier 4 + HRN-06), `query_event_store` (HRN-07 replay-only read API).
+
+### Hooks-vs-MCP partition (cross-reference)
+
+Plugin hooks (§2) are sensors + enforcers (READ state, BLOCK writes). MCP tools (this section) are agent-driven actions (the agent CALLS them to signal intent). The two surfaces communicate through the daemon middleware — the daemon decides; hooks and MCP tools execute. Cross-reference from 406-CONTEXT.md `<decisions>` 'MCP tool catalog' subsection.
+
+### Tool roster
+
+| #  | Tool name                       | Owning phase | Source spec section                                  |
+|----|---------------------------------|--------------|------------------------------------------------------|
+| 1  | complete_task                   | 403 + 404    | STEP-PLAN-FORMAT.md §5; PROOF-GATE.md §6             |
+| 2  | complete_slice                  | 402 + 404    | SLICE-CYCLE.md run-slice→verify-slice; PROOF-GATE.md §4 |
+| 3  | request_step_split              | 404          | SCOPE-PROHIBITION.md SRP-05                          |
+| 4  | scope_deviation_request         | 404          | SCOPE-PROHIBITION.md "scope_deviation_request MCP Tool Flow" |
+| 5  | log_deviation                   | 405          | DEVIATION-RULES.md §3                                |
+| 6  | dispatch_subagent               | 405          | SUBAGENT-MANAGEMENT.md §2                            |
+| 7  | check_proof_gate                | 404          | PROOF-GATE.md §4                                     |
+| 8  | emit_advisory                   | 406 (new)    | THIS spec §4 (Plan 03) — HRN-04 tier 1               |
+| 9  | force_clear_and_reinject        | 406 (new)    | THIS spec §4 (Plan 03) — HRN-04 tier 3 + CTX-09      |
+| 10 | surface_human_gate              | 406 (new)    | THIS spec §4 (Plan 03) — HRN-04 tier 4 + HRN-06      |
+| 11 | query_context_meter             | 402          | CONTEXT-PROTOCOL.md CTX-08                           |
+| 12 | request_compaction_snapshot     | 402          | CONTEXT-PROTOCOL.md CTX-03                           |
+| 13 | query_event_store               | 406 (new)    | THIS spec §5 (Plan 04) — HRN-07 reconstruction       |
+| 14 | record_plan_edit                | 403          | PLAN-AS-PROMPT.md PAP-04 / §6                        |
+
+Note: The 14-tool roster is the v1 canonical surface. v14 implements; v15 wires; v17+ may extend (extension requires a new harness spec phase, not a v1 amendment to this rollup).
+
+### MCP_TOOL_REGISTRY
+
+The 14 tools are registered in a single-source-of-truth dictionary `MCP_TOOL_REGISTRY: dict[ToolName, type[McpToolBase]]` at module path `state_build/mcp/registry.py`. Mirrors Phase 405 `SUBAGENT_RETURN_REGISTRY` from SUB-06. Every tool registers a Pydantic input + output class; `mypy --strict src/state_build/mcp/` catches missing registrations at type-check time.
+
+#### ToolName Literal
+
+```python
+# state_build/mcp/registry.py
+from typing import Literal
+
+ToolName = Literal[
+    # Phase 402–405 owned tools
+    "complete_task",
+    "complete_slice",
+    "request_step_split",
+    "scope_deviation_request",
+    "log_deviation",
+    "dispatch_subagent",
+    "check_proof_gate",
+    "query_context_meter",
+    "request_compaction_snapshot",
+    "record_plan_edit",
+    # Phase 406 NEW tools
+    "emit_advisory",
+    "force_clear_and_reinject",
+    "surface_human_gate",
+    "query_event_store",
+]
+```
+
+#### McpToolBase + registry
+
+```python
+from pydantic import BaseModel, ConfigDict
+
+class McpToolBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+class McpToolSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: ToolName
+    module_path: str          # e.g., "state_build/deviation/log_deviation.py"
+    input_model: type[McpToolBase]
+    output_model: type[McpToolBase]
+
+MCP_TOOL_REGISTRY: dict[ToolName, McpToolSpec] = {
+    # Populated by per-tool module __init__ side effect or explicit register() call.
+    # v14 implements; CI verifies len(MCP_TOOL_REGISTRY) == len(typing.get_args(ToolName)).
+    ...
+}
+```
+
+Note: v14 unit test asserts `set(MCP_TOOL_REGISTRY.keys()) == set(typing.get_args(ToolName))` — registry exhaustiveness check that fails CI when a new ToolName is added without registry entry. Mirrors the design-heritage `exhaustive-registry-with-satisfies-constraint` pattern (TypeScript `satisfies` clause); state's Python analog uses `set(...) == set(get_args(...))` + `assert_never` together.
+
+### Exhaustiveness via assert_never
+
+```python
+from typing import assert_never
+
+def dispatch_mcp_tool(tool_name: ToolName, payload: dict) -> McpToolBase:
+    match tool_name:
+        case "complete_task":              return handle_complete_task(payload)
+        case "complete_slice":             return handle_complete_slice(payload)
+        case "request_step_split":         return handle_request_step_split(payload)
+        case "scope_deviation_request":    return handle_scope_deviation_request(payload)
+        case "log_deviation":              return handle_log_deviation(payload)
+        case "dispatch_subagent":          return handle_dispatch_subagent(payload)
+        case "check_proof_gate":           return handle_check_proof_gate(payload)
+        case "emit_advisory":              return handle_emit_advisory(payload)
+        case "force_clear_and_reinject":   return handle_force_clear_and_reinject(payload)
+        case "surface_human_gate":         return handle_surface_human_gate(payload)
+        case "query_context_meter":        return handle_query_context_meter(payload)
+        case "request_compaction_snapshot": return handle_request_compaction_snapshot(payload)
+        case "query_event_store":          return handle_query_event_store(payload)
+        case "record_plan_edit":           return handle_record_plan_edit(payload)
+        case _:
+            assert_never(tool_name)
+```
+
+Note: A future patch adding a `ToolName` Literal value without adding the dispatcher case raises a mypy/pyright error at type-check time. CI MUST run `mypy --strict src/state_build/mcp/`. Mirrors Phase 405 SUBAGENT-MANAGEMENT.md Section 4 `assert_never` pattern with identical 14-case shape.
+
+#### Mode-isolation note
+
+`state_build/mcp/` and every per-tool module under `state_build/<subsystem>/` MUST NOT import from `state_teach/`. CI import-graph lint enforces. All 14 tools register under the `state-build` MCP server (not `state-teach`). Build-mode-only discipline (PROJECT.md cardinal rule, 405 carry-forward).
+
