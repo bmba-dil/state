@@ -1734,3 +1734,149 @@ sequenceDiagram
 
 The worked example completes the HRN-07 proof: the 5-step protocol, applied against the 38-event enumeration, with snapshot + event-store + opencode session API as inputs, recovers full harness state across the hardest realistic failure mode. v14's projector implementation MUST pass this proof's invariants — verified by the v14 EXEMPLAR work's cross-host event-store replay determinism test fixture (deferred per 406-CONTEXT.md `<deferred>` block).
 
+---
+
+## §6 Full-Slice Lifecycle Sequence Diagram (HRN-08)
+
+HRN-08 is the rollup's single load-bearing visualization: **one full Slice walked across all four stages — design-slice → research-slice → run-slice → verify-slice → close — as a Mermaid sequence diagram, showing every event emitted and every harness intervention point**. The exemplar Slice is the `compaction-snapshot-schema` Slice from 403 EXEMPLAR-stepNPLAN.md, with one Step (`compaction-snapshot-schema-step-1`) containing three tasks: RED test (`task-1`), GREEN implement (`task-2`), `checkpoint:decision` for the orjson serialization flag (`task-3`). The exemplar was authored canonically in Phase 403; this section consumes it as the named worked subject for HRN-08.
+
+The diagram covers the four-stage cycle defined by 402 SLICE-CYCLE.md plus the four stage-boundary events (`state.slice.{design,research,run,verify}_completed`). It surfaces at minimum:
+
+- **≥25 events emitted** across the four stages — the 4 Slice stage-boundary events, plus a representative subset of plan-lifecycle, counter-chain, scope, and umbrella events specified in §5.1's 38-event enumeration.
+- **≥4 tier-interventions** — one per intervention tier (advisory, tool_block, clear_reinject, human_gate) — at named sites in the Slice lifecycle. The four named sites are chosen so the diagram covers the full intervention spectrum without contriving artificial trigger conditions:
+  1. **Tier 1 (advisory inject)** — during `task-3`'s research, the APG paralysis counter crosses threshold for advisory 1. The daemon injects a tier-1 advisory.
+  2. **Tier 2 (tool-block)** — during `task-2`, the agent attempts a `Write` to `src/state_build/snapshot/__init__.py` which is in PAP-05 immutable-section territory; the `tool.execute.before` Layer 2 (PAP-05 immutability) blocks the write. (For the diagram's purposes the agent attempts to overwrite the `<plan>` block in the executor-mutable PLAN.md and Layer 2 blocks it; the canonical PAP-05 trigger.)
+  3. **Tier 3 (force_clear_and_reinject)** — during `task-3`'s research, the APG paralysis counter reaches advisory 3 (after the tier-1 advisory at #1 above did not break the read-only window). The daemon fires `force_clear_and_reinject` — `compaction.snapshot_taken(trigger="threshold")` + reinject.
+  4. **Tier 4 (human_gate via opencode `question` tool)** — `task-3` IS a `checkpoint:decision` task; under non-`--full-yolo` autonomy the harness calls `surface_human_gate` to render the orjson flag choice via opencode's `question` tool with the labeled option list `[OPT_NAIVE_UTC, OPT_UTC_Z]`. HRN-06 invariant satisfied: human gate uses opencode's `question` tool — no custom harness UI.
+
+The diagram below covers the lifecycle end-to-end. (§5.3's restart-flow diagram is the restart-specific subset; this diagram is the full-Slice end-to-end view.)
+
+### §6.1 Mermaid sequence diagram — `compaction-snapshot-schema` Slice end-to-end
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant User as User (opencode TUI)
+    participant Plugin as @state/opencode-plugin
+    participant Agent as opencode agent session
+    participant MCP as state-build MCP server
+    participant Daemon as state-daemon
+    participant ES as events.sqlite
+    participant SubR as researcher subagent (inv-A)
+    participant Q as opencode `question` tool
+
+    %% ──────────────── design-slice ────────────────
+    Note over User,ES: Stage 1 — design-slice
+    User->>Plugin: chat.message — "Implement CompactionSnapshot Pydantic"
+    Plugin->>Daemon: chat.message hook event
+    Daemon->>ES: state.slice.created(slice_id=slice-compaction-snapshot-schema)
+    Daemon->>ES: state.slice.worktree_ready
+    Plugin->>Agent: chat.params injects DESIGN-stage context
+    Agent->>Agent: authors DESIGN.md + initial DECISIONS.md
+    Daemon->>ES: state.slice.design_completed(stage=design,<br/>produced_artifacts=[DESIGN.md, DECISIONS.md])
+
+    %% ──────────────── research-slice ────────────────
+    Note over User,ES: Stage 2 — research-slice
+    Plugin->>Agent: chat.params injects RESEARCH-stage context
+    Agent->>MCP: dispatch_subagent(type=researcher, parent_task=research-slice-research)
+    MCP->>Daemon: dispatch_subagent → spawn opencode task
+    Daemon->>ES: state.step.subagent_started(invocation_id=inv-A-research,<br/>subagent_type=researcher)
+    SubR-->>Daemon: SSE: subagent_progress × 4
+    Daemon->>ES: state.step.subagent_progress × 4
+    SubR-->>Daemon: SSE: end_turn
+    Daemon->>ES: state.step.subagent_complete(invocation_id=inv-A-research,<br/>stop_reason=end_turn)
+    Agent->>Agent: authors N-RESEARCH.md + N-PATTERNS.md +<br/>compaction-snapshot-schema-step-1-PLAN.md + N-VALIDATION.md
+    Daemon->>ES: state.step.plan_authored(step_id=…step-1,<br/>original_sha256=<hash>)
+    Daemon->>ES: state.slice.research_completed(stage=research,<br/>produced_artifacts=[N-RESEARCH.md, N-PATTERNS.md,<br/>compaction-snapshot-schema-step-1-PLAN.md, N-VALIDATION.md])
+
+    %% ──────────────── run-slice ────────────────
+    Note over User,ES: Stage 3 — run-slice — Step 1, Task 1 (RED test)
+    Plugin->>Agent: chat.params injects PLAN<br/>(PAP-01 verbatim + PAP-02 @-ref resolution)
+    Agent->>Plugin: Edit tests/state_build/snapshot/test_compaction.py
+    Plugin->>Daemon: tool.execute.before — 6-layer stack (all layers PASS)
+    Daemon-->>Plugin: allow
+    Agent->>Plugin: Bash: pytest -x (RED, exits non-zero)
+    Plugin->>Daemon: tool.execute.after — read-only result
+    Daemon->>ES: state.step.gate_resolved(check_id=red_test_exists,<br/>verdict=pass) (RED phase commit)
+    Daemon->>ES: state.step.step_verify_completed(task_id=task-1, verdict=pass)
+
+    Note over User,ES: run-slice — Step 1, Task 2 (GREEN implement)
+    Agent->>Plugin: Edit src/state_build/snapshot/compaction.py
+    Plugin->>Daemon: tool.execute.before — 6-layer stack (PASS)
+    Daemon-->>Plugin: allow
+    %% Tier-2 site
+    Agent->>Plugin: Edit stepNPLAN.md <plan> immutable block
+    Plugin->>Daemon: tool.execute.before — Layer 2 PAP-05 BLOCKS
+    Daemon->>ES: state.step.plan_edit_blocked(step_id=…step-1,<br/>matched_section=plan)
+    Daemon->>ES: state.harness.intervention(tier=tool_block,<br/>trigger_reason=scope_check_unresolved,<br/>correlation_event_id=<plan_edit_blocked>)
+    Note right of Daemon: ▸ Tier-2 intervention (tool-block)
+    Daemon-->>Plugin: deny — return PAP-05 block reason
+    Plugin-->>Agent: write rejected; Layer 2 reason in advisory
+    Agent->>Plugin: Bash: pytest -x (GREEN, exits zero)
+    Daemon->>ES: state.step.gate_resolved(check_id=tests_green, verdict=pass)
+    Daemon->>ES: state.step.step_verify_completed(task_id=task-2, verdict=pass)
+
+    Note over User,ES: run-slice — Step 1, Task 3 (checkpoint:decision)
+    Plugin->>Agent: chat.params advances task pointer to task-3
+    Agent->>MCP: dispatch_subagent(type=researcher, parent_task=task-3)
+    MCP->>Daemon: dispatch
+    Daemon->>ES: state.step.subagent_started(invocation_id=inv-A, subagent_type=researcher)
+    Agent->>Plugin: Bash: Read × 5 (orjson docs)
+    Plugin->>Daemon: tool.execute.after — read-only classifier ticks counter
+    %% Tier-1 site
+    Daemon->>ES: state.step.paralysis_event(task_id=task-3,<br/>tier=advisory, advisory_number=1)
+    Daemon->>ES: state.harness.intervention(tier=advisory,<br/>trigger_reason=paralysis_threshold_crossed,<br/>correlation_event_id=<paralysis_event_1>)
+    Note right of Daemon: ▸ Tier-1 intervention (advisory)
+    Plugin->>Agent: chat.params next turn injects advisory text
+    Agent->>Plugin: Bash: Read × 6 (still researching)
+    Daemon->>ES: state.step.paralysis_event(tier=advisory, advisory_number=2)
+    Daemon->>ES: state.harness.intervention(tier=advisory,<br/>trigger_reason=paralysis_threshold_crossed)
+    %% Tier-3 site
+    Agent->>Plugin: Bash: Read × 7 (read-only window persists)
+    Daemon->>ES: state.step.paralysis_event(tier=reinject, advisory_number=3,<br/>snapshot_event_id=<sn-3>)
+    Daemon->>ES: compaction.snapshot_taken(trigger=threshold)
+    Daemon->>ES: state.harness.intervention(tier=clear_reinject,<br/>trigger_reason=paralysis_chain_3_reinject,<br/>correlation_event_id=<paralysis_event_3>)
+    Note right of Daemon: ▸ Tier-3 intervention (clear_reinject)
+    Plugin->>Agent: session.compacting fires; daemon mints sess-007
+    Daemon->>ES: compaction.reinject_completed(<br/>prior_session_id=sess-006, new_session_id=sess-007)
+    Plugin->>Agent: chat.params reinjects PLAN + <prior_crash>=none<br/>+ <paralysis_advisory>=advisory_3
+
+    %% Tier-4 site
+    Note over Agent,Q: task-3 is checkpoint:decision —<br/>autonomy=tiered so harness surfaces human gate
+    Agent->>MCP: surface_human_gate(decision_id=orjson_flag,<br/>options=[OPT_NAIVE_UTC, OPT_UTC_Z])
+    MCP->>Daemon: surface_human_gate
+    Daemon->>ES: state.step.checkpoint_human_action_pending(<br/>task_id=task-3, decision_id=orjson_flag)
+    Daemon->>ES: state.harness.intervention(tier=human_gate,<br/>trigger_reason=deviation_rule_4_architectural,<br/>correlation_event_id=<checkpoint_human_action_pending>)
+    Note right of Daemon: ▸ Tier-4 intervention (human_gate via opencode question)
+    Daemon->>Q: render question with [OPT_NAIVE_UTC, OPT_UTC_Z]
+    User->>Q: pick OPT_NAIVE_UTC
+    Q->>Daemon: response selected=OPT_NAIVE_UTC
+    Daemon->>ES: state.step.checkpoint_human_action_resolved(<br/>task_id=task-3, selection=OPT_NAIVE_UTC)
+    Daemon->>ES: state.step.step_verify_completed(task_id=task-3, verdict=pass)
+
+    SubR-->>Daemon: SSE: end_turn (researcher subagent completes)
+    Daemon->>ES: state.step.subagent_complete(invocation_id=inv-A,<br/>stop_reason=end_turn)
+
+    Agent->>MCP: complete_task(task_id=task-3)
+    MCP->>Daemon: complete_task
+    Daemon->>ES: stepNSUMMARY.md written; provides_blocks populated
+    Daemon->>ES: state.slice.run_completed(stage=run,<br/>produced_artifacts=[compaction-snapshot-schema-step-1-SUMMARY.md])
+
+    %% ──────────────── verify-slice ────────────────
+    Note over User,ES: Stage 4 — verify-slice
+    Plugin->>Agent: chat.params injects VERIFY-stage context
+    Agent->>MCP: check_proof_gate(scope=slice, slice_id=slice-compaction-snapshot-schema)
+    MCP->>Daemon: must_haves evaluator dispatch
+    Daemon->>Daemon: evaluate must_haves.truths +<br/>artifacts + key_links
+    Daemon->>ES: state.slice.slice_verify_completed(<br/>slice_id=slice-compaction-snapshot-schema, verdict=pass)
+    Daemon->>ES: state.slice.verify_completed(stage=verify,<br/>produced_artifacts=[N-VERIFICATION.md])
+
+    %% ──────────────── close ────────────────
+    Note over User,ES: Slice close — outer FSM transition
+    Agent->>MCP: complete_slice(slice_id=slice-compaction-snapshot-schema)
+    MCP->>Daemon: complete_slice → outer FSM
+    Daemon->>ES: state.slice.shipped (v40 D-19 composite-state guard)
+    Daemon->>Plugin: SSE — downstream Slices unblock
+    Note over User,ES: Slice complete; downstream deps unblock on slice_verify_completed
+```
+
