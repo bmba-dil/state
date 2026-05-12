@@ -1037,3 +1037,149 @@ HRN-03 requires that **every harness operation specified in Phases 402–405 is 
 
 §3 closes. §4 (Plan 03 of this phase) consumes `emit_advisory`, `force_clear_and_reinject`, and `surface_human_gate` to populate the HRN-04 4-tier intervention ladder + the `state.harness.intervention` umbrella event (HRN-05) + the HRN-06 human-gate-only-via-`question`-tool invariant. §5 (Plan 04 of this phase) consumes `query_event_store` for the HRN-07 reconstruction protocol; §6 (Plan 04) walks `complete_task` and `complete_slice` through the full-Slice lifecycle sequence diagram (HRN-08).
 
+## §4 4-Tier Intervention Ladder + harness_intervention Event + Human-Gate-Only-via-question (HRN-04, HRN-05, HRN-06)
+
+The harness intervenes in agent execution at four ordered tiers — advisory inject → tool-block → force clear+reinject → force-stop + human gate. Each tier escalates the harness's enforcement strength. HRN-04 specifies the four tier behaviors; HRN-05 specifies the `state.harness.intervention` umbrella event that records every intervention regardless of source chain; HRN-06 asserts that all human gates (tier 4) surface exclusively through opencode's `question` tool — the harness invents no custom UI. The 4-tier ladder enumeration in §4.2 is HRN-04's load-bearing claim: every escalation site across APG, PRF, DEV, SUB, SCOPE, and CTX chains is mapped to exactly one tier, so a reader can ground-truth-check "what fires when APG advisory 3 lands?" Answer: `state.step.paralysis_event(tier="reinject")` + `state.harness.intervention(tier="clear_reinject", trigger_reason="paralysis_chain_3_reinject")` simultaneously.
+
+### 4-Tier Ladder Overview (HRN-04)
+
+The four tiers (rendered verbatim from REQUIREMENTS.md HRN-04 as an ordered list):
+
+1. **Advisory inject** — system message into context. The harness pushes an advisory string into the next agent turn via `chat.params` reinject payload. The agent reads it as a system-style message; turn continues normally. Operational tool: `emit_advisory` (§3 entry 8).
+2. **Tool-block** — refuse a tool call via `tool.execute.before`. The hook returns `{allow: false, blockReason: <reason>}`; opencode reports the rejection to the agent; the agent must produce a different tool call. Operational mechanism: the 7-layer write-block stack documented in §2 `tool.execute.before` and §3 cross-references. No dedicated MCP tool — enforcement lives inside the hook middleware.
+3. **Force context clear+reinject** — trigger `session.compacting` with reduced state. The harness invokes `request_compaction_snapshot` then immediately returns the reinject payload to opencode via `session.compacting`; the same session_id continues but with stripped context. Operational tool: `force_clear_and_reinject` (§3 entry 9).
+4. **Force-stop + human gate** — end session, surface via `question` tool. The harness invokes opencode's `question` tool with the named alternatives payload; the agent session pauses pending human selection. Operational tool: `surface_human_gate` (§3 entry 10). HRN-06 asserts this is the ONLY human-gate UI — no custom harness surface.
+
+#### Per-tier MCP-tool surface map
+
+| Tier | MCP tool                  | Module path                                              | §3 entry |
+|------|---------------------------|-----------------------------------------------------------|----------|
+| 1    | emit_advisory             | state_build/harness/intervention/emit_advisory.py        | 8        |
+| 2    | (none — middleware-only)  | (enforced inside tool.execute.before 7-layer stack)      | n/a      |
+| 3    | force_clear_and_reinject  | state_build/harness/intervention/force_clear_and_reinject.py | 9    |
+| 4    | surface_human_gate        | state_build/harness/intervention/surface_human_gate.py   | 10       |
+
+Note: Tier 2 has NO dedicated MCP tool because the agent does not signal intent to block its own tool call — the block happens reactively in the middleware. Tier-2 events are recorded as `plan_edit_blocked`, `scope_check`, `prohibited_language_detected`, `gate_failing_next_task_blocked`, `subagent_whitelist_violation`, `subagent_cap_expansion_rejected`, `context_threshold_warning_block` (per the 7-layer stack).
+
+### Per-tier Trigger-Source Enumeration
+
+Render the canonical 4-row trigger-source table verbatim. Every escalation site documented in Phases 402–405 maps to exactly one tier. The table is the load-bearing HRN-04 claim per 406-CONTEXT.md `<specifics>` 4th bullet.
+
+| Tier | Trigger sources |
+|---|---|
+| Tier 1: advisory inject | APG advisory 1-2 + 4-5; PRF strike 1-2 + 4-5; DEV `log_deviation` accepted (pending resolution); SCOPE `scope_check` unresolved without exception; SUB `subagent_spot_check_failed` first occurrence on a tuple |
+| Tier 2: tool-block (via `tool.execute.before`) | SRP-04 `files_modified` allowlist (Layer 1); PAP-05 immutability (Layer 2); SRP-02 prohibited-language (Layer 3); PRF-07 gate-failing next-task block (Layer 4); SUB-03 `subagent_whitelist_violation` (Layer 6 stage 2); SUB-04 `subagent_cap_expansion_rejected` (Layer 6 stage 3); CTX-04 warning threshold (≤35%) next-task block |
+| Tier 3: force clear+reinject | APG advisory 3 (paralysis chain reinject); PRF strike 3 (gate chain reinject); CTX-04 emergency threshold (≤25%); CTX-09 reactive overflow recovery one-shot |
+| Tier 4: force-stop + human gate (opencode `question` tool only) | APG advisory 6; PRF strike 6; DEV Rule 4 architectural (always-stop, even under `--full-yolo`); DEV cap_exceeded → Rule 3 `checkpoint:decision` OR Rule 4 promotion; SUB `subagent_restart_exhausted`; SUB persistent orphan reconciliation step 6 |
+
+#### Tier-1 trigger-source detail
+
+- **APG (Analysis Paralysis Guard, 404)** — advisories 1-2 + 4-5 on the per-task consecutive-read-only chain. Source event: `state.step.paralysis_event` (`tier="advisory"`). Owner spec: ANALYSIS-PARALYSIS-GUARD.md §"Counter mechanism" + §"6-advisory ladder".
+- **PRF (Boolean Proof Gate, 404)** — gate strikes 1-2 + 4-5 on the per-`(task_id, check_id)` chain. Source event: `state.step.gate_strike` (`strike_number ∈ {1,2,4,5}`). Owner spec: PROOF-GATE.md §6.
+- **DEV (Deviation Rules, 405)** — `log_deviation` accepted (resolution pending). Source event: `state.step.deviation_logged` with `resolution="pending"`. Owner spec: DEVIATION-RULES.md §3 + §6.
+- **SCOPE (Scope Reduction Prohibition, 404)** — `scope_check` unresolved without tracking-issue exception (SRP-02 / SRP-03). Source event: `state.step.scope_check` with `resolved=False, has_exception=False`. Owner spec: SCOPE-PROHIBITION.md SRP-02 + SRP-03.
+- **SUB (Subagent Management, 405)** — `subagent_spot_check_failed` first occurrence on a `(parent_task_id, subagent_type, return_field)` tuple. Source event: `state.step.subagent_spot_check_failed`. Owner spec: SUBAGENT-MONITORING.md §4.
+
+#### Tier-2 trigger-source detail
+
+- **Layer 1: PAP-05 immutability check** (403). Source event: `state.step.plan_edit_blocked`. Owner: PLAN-AS-PROMPT.md PAP-05.
+- **Layer 2: SRP-04 `files_modified` allowlist** (404). Source event: `state.step.scope_check` with `out_of_scope_write=True`. Owner: SCOPE-PROHIBITION.md SRP-04.
+- **Layer 3: SRP-02 prohibited-language scan** (404). Source event: `state.step.scope_check` with `prohibited_token=<token>`. Owner: SCOPE-PROHIBITION.md SRP-02.
+- **Layer 4: PRF-07 gate-failing next-task block** (404). Source event: `state.step.gate_failing_next_task_blocked`. Owner: PROOF-GATE.md PRF-07.
+- **Layer 6 stage 2: SUB-03 `subagent_whitelist_violation`** (405). Source event: `state.step.subagent_whitelist_violation`. Owner: SUBAGENT-MANAGEMENT.md §5.
+- **Layer 6 stage 3: SUB-04 `subagent_cap_expansion_rejected`** (405). Source event: `state.slice.subagent_cap_expansion_rejected`. Owner: SUBAGENT-MANAGEMENT.md §6.
+- **CTX-04 warning threshold ≤35% next-task block** (402). Source event: `state.session.context_threshold_warning_block`. Owner: CONTEXT-PROTOCOL.md CTX-04.
+
+#### Tier-3 trigger-source detail
+
+- **APG advisory 3 — paralysis chain reinject.** Source event: `state.step.paralysis_event(tier="reinject")`. Owner: ANALYSIS-PARALYSIS-GUARD.md APG-04.
+- **PRF strike 3 — gate chain reinject.** Source event: `state.step.gate_strike(strike_number=3)`. Owner: PROOF-GATE.md §6 6-strike ladder.
+- **CTX-04 emergency threshold (≤25%).** Source event: `state.session.context_threshold_emergency`. Owner: CONTEXT-PROTOCOL.md CTX-04 emergency row.
+- **CTX-09 reactive overflow recovery one-shot.** Source event: `state.session.overflow_recovery_attempted`. One-shot per user turn — the `_overflow_recovery_attempted` flag short-circuits on a second overflow within the same turn. Owner: CONTEXT-PROTOCOL.md CTX-09.
+
+#### Tier-4 trigger-source detail
+
+- **APG advisory 6 — paralysis chain human gate.** Source event: `state.step.paralysis_event(tier="human_gate")`. Owner: ANALYSIS-PARALYSIS-GUARD.md APG-05.
+- **PRF strike 6 — gate chain human gate.** Source event: `state.step.gate_strike(strike_number=6)`. Owner: PROOF-GATE.md §6 6-strike ladder.
+- **DEV Rule 4 architectural.** Always human gate, even under `--full-yolo`. Source event: `state.step.deviation_logged(rule_id=4)`. Owner: DEVIATION-RULES.md DEV-04 + §"Rule 4 always-human-gate semantics are STRUCTURAL not policy".
+- **DEV cap_exceeded → Rule 3 `checkpoint:decision` OR Rule 4 promotion.** Source event: `state.step.deviation_cap_exceeded`. Owner: DEVIATION-RULES.md §3 cross-validation step 5.
+- **SUB `subagent_restart_exhausted`.** 3-restart counter exceeded; further restart attempts surface human gate. Source event: `state.step.subagent_restart_exhausted`. Owner: SUBAGENT-MONITORING.md §"5-source crash taxonomy + 3-restart counter".
+- **SUB persistent orphan reconciliation step 6.** When orphan probe persists across 6 reconciliation steps (daemon-down recovery 6-step protocol), surface as DEV Rule 4 human gate. Source event: `state.step.subagent_orphan_persistent`. Owner: SUBAGENT-MONITORING.md §"daemon-down orphan reconciliation 6-step protocol".
+- **SCOPE `scope_deviation_rejected`.** When a `scope_deviation_request` is rejected without matching `ARCH_PATTERN_ALLOWLIST`, the agent must surface to human. Source event: `state.step.scope_deviation_rejected`. Owner: SCOPE-PROHIBITION.md SRP-04 + cross-reference to DEVIATION-RULES.md §"cross-validation step 4 — scope_deviation_request correlation".
+
+### HarnessIntervention Pydantic class (HRN-05)
+
+The `state.harness.intervention` event carries the umbrella view of every harness intervention. Its payload is the `HarnessIntervention` Pydantic class. The class is rendered verbatim from 406-CONTEXT.md `<decisions>` "harness_intervention event + 4-tier ladder (Area 4)" subsection. Fields: `tier` (4-value Literal), `trigger_reason` (18-value Literal exhaustively enumerated across APG / PRF / DEV / SUB / SCOPE / CTX chains), `target_step_or_task`, `correlation_event_id` (back-pointer to originating per-chain event), `slice_id`, `session_id`, `triggered_at` (UTC ISO-8601).
+
+#### Class definition (verbatim)
+
+```python
+from datetime import datetime
+from typing import Literal
+from pydantic import BaseModel, ConfigDict
+
+class HarnessIntervention(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tier: Literal["advisory", "tool_block", "clear_reinject", "human_gate"]
+    trigger_reason: Literal[
+        # APG (404)
+        "paralysis_threshold_crossed",
+        "paralysis_chain_3_reinject",
+        "paralysis_chain_6_human_gate",
+        # PRF (404)
+        "gate_strike_advisory",
+        "gate_strike_3_reinject",
+        "gate_strike_6_human_gate",
+        # DEV (405)
+        "deviation_logged_pending",
+        "deviation_cap_exceeded",
+        "deviation_rule_4_architectural",
+        # SUB (405)
+        "subagent_spot_check_failed",
+        "subagent_crash_detected",
+        "subagent_restart_exhausted",
+        "subagent_orphan_persistent",
+        # SCOPE (404 SRP)
+        "scope_check_unresolved",
+        "scope_deviation_rejected",
+        # CTX (402)
+        "context_threshold_warning",
+        "context_threshold_emergency",
+        "context_overflow_reactive",
+    ]
+    target_step_or_task: str                      # task_id or step_id depending on chain
+    correlation_event_id: str                     # the originating gate_strike / paralysis_event / deviation_logged / subagent_crash_detected / scope_check / harness.context_meter event id
+    slice_id: str
+    session_id: str
+    triggered_at: datetime                        # UTC, ISO-8601
+```
+
+#### Field semantics
+
+| Field                  | Type                                | Semantics                                                              |
+|------------------------|-------------------------------------|------------------------------------------------------------------------|
+| tier                   | Literal[4 values]                   | Server-derived from source-chain event type → dispatch (§4.4)         |
+| trigger_reason         | Literal[18 values]                  | Exhaustive across APG/PRF/DEV/SUB/SCOPE/CTX; pure-machine assignment    |
+| target_step_or_task    | str                                 | task_id or step_id depending on which chain triggered                  |
+| correlation_event_id   | str                                 | Back-pointer to originating per-chain event (paralysis_event, gate_strike, deviation_logged, etc.) |
+| slice_id               | str                                 | Slice owning the intervention                                          |
+| session_id             | str                                 | Active session at trigger time                                         |
+| triggered_at           | datetime (UTC, ISO-8601)            | Pure-machine timestamp; replay-deterministic                           |
+
+#### Module ownership
+
+- **Single-source-of-truth module:** `state_build/harness/intervention/`
+- **Submodules:**
+  - `emit_advisory.py` — tier-1 MCP tool handler (§3 entry 8)
+  - `force_clear_and_reinject.py` — tier-3 MCP tool handler (§3 entry 9)
+  - `surface_human_gate.py` — tier-4 MCP tool handler (§3 entry 10)
+  - `projector.py` — umbrella event reducer (CQRS handler chain entry)
+  - `dispatcher.py` — tier classification dispatch from source chain → umbrella event
+  - `types.py` — `HarnessIntervention` Pydantic class + tier/trigger_reason Literals
+- **Event name:** `state.harness.intervention` (registered under `BUILD_ONLY_EVENT_PREFIXES`)
+- **Event aggregate_type:** `slice` (umbrella event aggregates at Slice level; replay rehydrates per-Slice intervention chain)
+
+#### Cross-reference: HRN-05 satisfied
+
+HRN-05 requires that "each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task." The HarnessIntervention class above satisfies HRN-05 exactly: `tier` field (4-value Literal), `trigger_reason` field (18-value Literal), `target_step_or_task` field. The class also adds `correlation_event_id`, `slice_id`, `session_id`, `triggered_at` for replay completeness (HRN-07).
+
