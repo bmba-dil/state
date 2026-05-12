@@ -22,25 +22,27 @@ concurrency model.
 > dependency-DAG concurrency, cross-host portability — so I never have to
 > choose between "make progress on my project" and "grow as an engineer."
 
-## Current Milestone: v41 Agent Harness & Context Control Design
+## Current Milestone: v42 Build Quality Pipeline Architecture
 
-**Goal:** Design the agent harness — the **control plane** of Build mode. Specify how the daemon/MCP/plugin trio governs agent context, decomposes work into Steps, enforces boolean proof gates, prevents analysis paralysis and scope reduction, applies tiered deviation rules, manages subagent fanout, and intervenes when an agent breaks discipline.
+**Goal:** Design the complete quality pipeline for Build mode — the verifier chain, goal-backward planning protocol, adversarial verification stance, stub detection framework, anti-pattern scanning system, threat modeling framework, plan checker, and evidence chain. The output is what guarantees Build mode's code is correct, complete, secure, and goal-achieving.
 
 **Type:** Design-phase milestone (v40–v50 spike). No code — only architecture documents.
 
-**Target deliverables (10 design areas):**
-- Slice-cycle correction (corrects v40 Phase 400 in-line: Slice owns discuss/plan/execute/verify; Step is a leaf artifact)
-- Context window management (200k absolute Slice budget; Slice-boundary session spawn; structured compaction snapshots)
-- Step / task decomposition protocol (GSD-shape `stepNN-PLAN.md` with YAML frontmatter + XML body)
-- Plan-as-prompt architecture (mutable-with-audit-log; `must_haves` and `<verify>` immutable)
-- Boolean proof gate contract (`must_haves.{truths, artifacts, key_links}` + per-task `<verify><automated>` + slice-level `<verification>` — pure-machine checks)
-- Analysis paralysis guard (5-read default, configurable per stage; 3-advisory + escalation)
-- Scope reduction prohibition (prohibited-language scan; `files_modified` allowlist; split-recommendation)
-- Deviation rules framework (4-tier: auto-fix bug / auto-add critical / auto-fix blocking / human gate; tiered autonomy levels)
-- Subagent management (static whitelist per Slice stage; ~20 parallel default; structured returns)
-- Harness architecture diagram (hooks + MCP + daemon; 4-tier intervention)
+**Target deliverables (9 design areas, from `.planning/milestones/v42/HANDOFF.md`):**
+- Verifier chain architecture (Step → Slice → Phase → Arc → Cross-Tier rollup; input/algorithm/output/failure per verifier)
+- 4-level verification model (Exists → Substantive → Wired → Data-Flowing; tools, edge cases, evidence types per level)
+- Goal-backward planning protocol (plan-checker pre-execution; goal-backward verifier post-execution; must-have derivation)
+- Adversarial verification stance (default assumption: implementation wrong; SUMMARY.md/commit messages not evidence)
+- Stub detection framework (pattern catalog + BLOCKER/WARNING/KNOWN severity + caller trace-through)
+- Anti-pattern scanning system (code, architecture, test anti-patterns; Python-3.12 specific extensions)
+- Threat modeling framework (STRIDE register per PLAN.md; mitigate/accept/transfer dispositions; automated security verifier)
+- Plan checker (9 validation checks → passed/blocked/warnings; pre-execution gate)
+- Evidence & artifact chain (VERIFY.md → PLAN.md → STEP.md → PHASE.md → ARC.md; `state verify trace` walkable)
 
-**Status:** v40 complete (2026-05-07) — 2 phases (400, 401), 6 plans, ~6,200 spec lines. v41 in progress — roadmap created (5 phases 402–406, 73 reqs across 10 categories after Phase 402 added CTX-09). **Phase 402 complete** (2026-05-08): SLICE-CYCLE.md + CONTEXT-PROTOCOL.md authored; 7 v40 specs amended (Slice-owns-cycle correction, SLC-07 closed); CTX-09 (Reactive overflow recovery) added.
+**Dependencies satisfied:** v40 (Hierarchy & Artifacts) ✓, v41 (Agent Harness & Context Control) ✓.
+**Downstream consumer:** v14 (Build Kernel Step FSM) — the v42 specs unblock kernel implementation.
+
+**Status:** Roadmap creation in progress — phases continue from 407.
 
 ## Requirements
 
@@ -60,6 +62,7 @@ concurrency model.
 - ✓ **Four-tier hierarchy definitions (Arc, Stage, Slice, Step) — complete behavioral specs, state machines, event taxonomy, composite cascade, pydantic frontmatter schemas with `extra="forbid"`, descope/abandon/blocked/decimal semantics** — Phase 400 (2026-05-06): 3 plans, 9 spec docs, 14/14 TIER+FSM requirements satisfied, Phase→Stage rename applied.
 - ✓ **Artifact catalog, naming conventions, on-disk filesystem layout, cross-reference system, consistency validation — complete `.state/build/` blueprint** — Phase 401 (2026-05-07): 3 plans, 6 spec docs (~2,900 lines), 17/17 requirements satisfied (ART-01..ART-05, DSK-01..DSK-06, REF-01..REF-06). v40 milestone complete; .state/build/ design filesystem ready for v41+ runtime implementation.
 - ✓ **Slice-cycle specification + context-window protocol + v40 amendments — canonical v41 design contracts** — Phase 402 (2026-05-08): 4 plans, 4 SUMMARY.md, 16/16 requirements satisfied (SLC-01..07 + CTX-01..09 incl. new CTX-09 Reactive overflow recovery). SLICE-CYCLE.md (255 lines) + CONTEXT-PROTOCOL.md (400 lines, `CompactionSnapshot` Pydantic model + hybrid reinject payload + 200k Slice budget + reactive-overflow one-shot pattern). 7 v40 specs amended append-only (`## v41 Amendment` blocks forward-pointing to SLICE-CYCLE.md). 15 threats closed in SECURITY.md, code review clean.
+- ✓ **Agent harness & context control design — 14 canonical specs, 73/73 requirements satisfied** — v41 (2026-05-12): 5 phases (402–406), 20 plans, 8,149 markdown lines. Phases: Slice-Cycle/Context (402), Step Decomposition + Plan-as-Prompt + Step Events (403), Boolean Proof Gates + Discipline Guards (404), Deviation Rules + Subagent Management (405), Harness Architecture Diagrams + MCP Tool Catalog + Intervention Ladder + Replay-Proof Sequence Diagrams (406). 6 cross-phase integration findings + 4 Phase 403 review items resolved inline at milestone close (commit `4fc7fd8`). Append-only invariant preserved across all v40 master registry amendments.
 
 ### Active
 
@@ -246,7 +249,7 @@ This document evolves at phase transitions and milestone boundaries.
 - ~10,015 LoC under `src/state_core/` + ~16,255 LoC of tests.
 - 784+ tests passing (321 v1 baseline + 463 v2 net-new).
 - Subsystems shipped: `state_core.events` (v1), `state_core.auth` (v2), `state_core.providers` (v3), `state_core.worktree` (v4), `state_core.scheduler` (v5), `state_daemon` (v6), `state_worker` (v7), `@state/opencode-plugin` (v8/v9/v10), `state_core.mode` (v11).
-- **14/38 milestones shipped** (v1–v11 + v13 + v40). v40 design spike complete — 2 phases (400 Tier Definitions, 401 Artifact Catalog/Layout/Cross-Refs), 6 spec documents covering `.state/build/` filesystem blueprint. **v41 (Agent Harness & Context Control) is next.** 11 design-phase milestones total (v40–v50) to fully architect build and teach kernels before v14–v27 execution.
+- **15/38 milestones shipped** (v1–v11 + v13 + v40 + v41). v41 design spike complete — 5 phases (402–406), 20 plans, 73/73 requirements satisfied, 14 canonical specs (~8,149 markdown lines). **v42 (Build Quality Pipeline Architecture) is next.** 11 design-phase milestones total (v40–v50) to fully architect build and teach kernels before v14–v27 execution.
 
 **Patterns proven by v2:**
 - Wave-based TDD execution (Wave 0 RED → Wave 1+ GREEN drilling) keeps each plan auditable; 463 net-new tests landed without flaking.
@@ -261,4 +264,4 @@ This document evolves at phase transitions and milestone boundaries.
 - v8 deferred HOOK-05 (event hook) — upstream opencode API gap (not in Hooks type v1.14.35).
 
 ---
-*Last updated: 2026-05-10 — Phase 403 (Step/Task Decomposition & Plan-as-Prompt) complete. Produced 4 spec docs (EXEMPLAR-stepNPLAN.md, STEP-PLAN-FORMAT.md, PLAN-AS-PROMPT.md, STEP-EVENTS.md) covering STP-01..08 + PAP-01..06; appended `## v41 Amendment` block to v40 EVENT-TAXONOMY.md for 9 new `state.step.*` event types. v41: Phases 402+403 ✓ shipped (2/5). Next: Phase 404 (Boolean Proof Gate & Discipline Guards). Two REVIEW.md major findings (EventEnvelope schema fork, dead-branch `immutable_section_touched` field) are advisory — resolve before v14 Build Kernel coding.*
+*Last updated: 2026-05-12 — v41 Agent Harness & Context Control Design shipped (5 phases 402–406, 20/20 plans, 73/73 reqs, 14 canonical specs / 8,149 markdown lines). Append-only invariant preserved across all v40 master registry amendments. **v42 Build Quality Pipeline Architecture started** — questioning → requirements → roadmap. Phases continue from 407. HANDOFF.md at `.planning/milestones/v42/HANDOFF.md` defines 9 design areas.*

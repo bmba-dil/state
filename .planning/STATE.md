@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-status: v41 shipped (Agent Harness & Context Control Design — 5 phases, 20 plans, 73/73 reqs satisfied); v42 activated and ready to discuss
-last_updated: "2026-05-12T08:30:00.000Z"
+status: v42 Build Quality Pipeline Architecture — defining requirements (questioning complete, scope confirmed, no research)
+last_updated: "2026-05-12T14:30:00.000Z"
 phase_state: not_started
 ---
 
 # STATE: state
 
-**Last updated:** 2026-05-12 — **v41 SHIPPED** (Agent Harness & Context Control Design: Phases 402–406 complete, 20/20 plans, 73/73 v1 reqs satisfied, 14 canonical specs / 8,149 markdown lines). 6 cross-phase integration findings + 4 Phase 403 review items resolved inline at milestone close (commit `4fc7fd8`). Append-only invariant preserved across all v40 master registry amendments. **v42 activated** as next design-spike milestone (HANDOFF.md present; needs discuss-milestone before roadmapping).
+**Last updated:** 2026-05-12 — **v42 STARTED** (Build Quality Pipeline Architecture; design-spike milestone). Scope confirmed against HANDOFF.md (9 design areas, no edits). Research skipped — HANDOFF.md's research inputs (GSD verifier/planner/secure-phase/code-review sources + shipped state code) already enumerated. Next: define REQUIREMENTS.md, then spawn roadmapper. Phases continue from **407**.
 
 ---
 
@@ -28,8 +28,9 @@ phase_state: not_started
 
 **Current tier:** Design Spike (v42 active — v41 shipped)
 **Last shipped milestone:** v41 — Agent Harness & Context Control Design — Shipped 2026-05-12
-**Active milestone:** v42 (next design spike — needs discuss-milestone before roadmap)
-**Active phase:** None — v42 needs `/gsd:new-milestone` flow (questioning → research → requirements → roadmap)
+**Active milestone:** v42 — Build Quality Pipeline Architecture (defining requirements; phases 407–TBD)
+**Active phase:** None — REQUIREMENTS.md being authored; roadmapper next
+**Phase numbering:** continues from 407 (highest_phase=406 across all milestones)
 **Previous milestones:** v1 (Event Store), v2 (Auth), v3 (Provider Routing), v4 (Worktree), v5 (DAG Scheduler), v6 (Daemon), v7 (Worker), v8 (Plugin Hooks), v9 (TUI Bundle), v10 (DAG Viewer), v11 (Mode Enforcement), v13 (state-teach MCP), v40 (Hierarchy & Artifacts), v41 (Agent Harness & Context Control Design)
 
 **Phases complete:** 122 / 267 (v1: 11, v2: 15, v3: 7, v4: 9, v5: 9, v6: 10, v7: 8, v8: 11, v9: 9, v10: 8, v11: 9, v13: 9, v40: 2, v41: 5)
