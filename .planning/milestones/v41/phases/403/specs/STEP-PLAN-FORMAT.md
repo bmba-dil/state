@@ -25,7 +25,7 @@ declared once here; v14's StepPlan parser loads this module to construct the val
 
 ```python
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal
 
 
@@ -37,8 +37,8 @@ class ArtifactCheck(BaseModel):
 
 
 class KeyLink(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    from_: str    # alias "from" — Python keyword collision
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    from_: str = Field(alias="from")  # YAML/JSON keyword "from"; Pydantic alias bridges Python keyword collision
     to: str
     via: str
     pattern: str
@@ -413,7 +413,7 @@ checkpoint complexity:
     - Verify mode isolation: the file MUST NOT import from the teach-mode subsystem.
     - Run `pytest tests/state_build/snapshot/test_compaction.py -x` — all tests must pass.
     - Commit with message: `feat(compaction-snapshot-schema-step-1): implement CompactionSnapshot Pydantic model`
-      and trailer `GSD-Test-Result: PASS`.
+      and trailer `STATE-Test-Result: PASS`.
   </action>
 
   <verify>
@@ -425,7 +425,7 @@ checkpoint complexity:
     - All 5 tests in `test_compaction.py` pass (pytest exits 0).
     - `grep -q 'extra="forbid"' src/state_build/snapshot/compaction.py` exits 0.
     - `grep -c "state_teach" src/state_build/snapshot/compaction.py` returns 0.
-    - `git log -1 --format=%B | grep -q "GSD-Test-Result: PASS"` exits 0.
+    - `git log -1 --format=%B | grep -q "STATE-Test-Result: PASS"` exits 0.
   </acceptance_criteria>
 
   <done>GREEN phase complete. CompactionSnapshot is importable, all field constraints enforced, orjson round-trip confirmed identity-preserving.</done>
@@ -468,11 +468,11 @@ permit `auto` tasks without stopping. The autonomy tier only differentiates chec
 - Harness consults git log for the current task's commit chain.
 - Rejects writes to non-test files until at least one commit exists with a `test:` or `red:` prefix
   AND a captured failing-test artifact (e.g., pytest exit code != 0 stored in commit trailer
-  `GSD-Test-Result: FAIL`).
-- After the first commit with `GSD-Test-Result: PASS` (GREEN), refactor commits unrestricted within
+  `STATE-Test-Result: FAIL`).
+- After the first commit with `STATE-Test-Result: PASS` (GREEN), refactor commits unrestricted within
   `files_modified`.
-- Pure-machine, replayable. Aligns with `file-tracking.md` Correction 3: GSD metadata in commit
-  trailers (`GSD-Task: <sliceId>/<taskId>`); state extends with `GSD-Test-Result: FAIL|PASS`.
+- Pure-machine, replayable. Aligns with `file-tracking.md` Correction 3: state metadata in commit
+  trailers (`STATE-Task: <sliceId>/<taskId>`, project-specific successor to gsd-2's heritage `GSD-Task:` trailer); state extends with `STATE-Test-Result: FAIL|PASS`.
 
 **Gate/checkpoint mechanism:** Same as `auto` after GREEN is reached. Before GREEN, any Write/Edit
 to non-test files is blocked by `tool.execute.before` with the message "RED phase not complete —

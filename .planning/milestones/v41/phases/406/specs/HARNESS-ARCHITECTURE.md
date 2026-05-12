@@ -319,7 +319,8 @@ type ShellEnvHook = (ctx: ShellEnvContext) => Env | Promise<Env>;
   - `STATE_DEVIATION_ATTEMPT={attempt_number_if_active}` (omitted when no active deviation chain)
   - `STATE_SUBAGENT_INVOCATION={invocation_id_if_subagent_session}` (set only inside subagent sessions)
 - The trailer constants come from `state_build/commit/trailers.py` (single-source-of-truth module per DEVIATION-RULES.md §"Naming Discipline").
-- **STATE-Task** is the canonical task-id trailer; **STATE-DeviationRule** + **STATE-DeviationAttempt** are the deviation-chain trailers; **STATE-Subagent-Invocation** is the subagent-session correlation trailer.
+- **STATE-Task** is the canonical task-id trailer; **STATE-DeviationRule** + **STATE-DeviationAttempt** are the deviation-chain trailers; **STATE-Subagent-Invocation** is the subagent-session correlation trailer; **STATE-Test-Result** (`FAIL|PASS`) is the auto+tdd RED/GREEN trailer (STP-05; see STEP-PLAN-FORMAT.md §"auto+tdd" + EXEMPLAR-stepNPLAN.md Task 1/Task 2 examples).
+- **Heritage migration.** Phase 403 specs originally referenced the legacy gsd-2 trailer `GSD-Test-Result`; the canonical state-project trailer is `STATE-Test-Result` (project naming rule — no `GSD-` literal trailer prefix). v14 implementers MUST emit `STATE-Test-Result` only; v14 readers MAY accept `GSD-Test-Result` as a heritage alias when reading pre-v14 git history but MUST normalize to `STATE-Test-Result` on any new commits.
 
 **Records / does NOT block.** Shell env injection augments the environment; it does not abort or veto shell commands. Shell-command blocking lives in `tool.execute.before` (which sees Bash as a tool call before `shell.env` fires).
 
@@ -1106,10 +1107,15 @@ Render the canonical 4-row trigger-source table verbatim. Every escalation site 
 - **SUB `subagent_restart_exhausted`.** 3-restart counter exceeded; further restart attempts surface human gate. Source event: `state.step.subagent_restart_exhausted`. Owner: SUBAGENT-MONITORING.md §"5-source crash taxonomy + 3-restart counter".
 - **SUB persistent orphan reconciliation step 6.** When orphan probe persists across 6 reconciliation steps (daemon-down recovery 6-step protocol), surface as DEV Rule 4 human gate. Source event: `state.step.subagent_orphan_persistent`. Owner: SUBAGENT-MONITORING.md §"daemon-down orphan reconciliation 6-step protocol".
 - **SCOPE `scope_deviation_rejected`.** When a `scope_deviation_request` is rejected without matching `ARCH_PATTERN_ALLOWLIST`, the agent must surface to human. Source event: `state.step.scope_deviation_rejected`. Owner: SCOPE-PROHIBITION.md SRP-04 + cross-reference to DEVIATION-RULES.md §"cross-validation step 4 — scope_deviation_request correlation".
+- **STP-05 `checkpoint:decision` / `checkpoint:human-action` routine human gate.** Source event: `state.step.checkpoint_human_action_pending`. Distinct from DEV Rule-4 architectural always-stop — these are routine task-level decisions (e.g., orjson serialization flag selection from the EXEMPLAR) that surface via opencode `question` tool under `--tiered` autonomy. Trigger reason: `checkpoint_decision_human_action`. Owner: STEP-PLAN-FORMAT.md STP-05 task-type taxonomy.
+
+#### Tier-1 SRP-05 split-request advisory
+
+- **SRP-05 `split_recommendation` step-split request.** Source event: `state.slice.split_recommendation`. Agent-initiated routing into plan-slice re-entry (not a counter chain; one-shot per Step). Trigger reason: `split_recommendation_pending`. Owner: SCOPE-PROHIBITION.md "request_step_split MCP Tool (SRP-05)".
 
 ### HarnessIntervention Pydantic class (HRN-05)
 
-The `state.harness.intervention` event carries the umbrella view of every harness intervention. Its payload is the `HarnessIntervention` Pydantic class. The class is rendered verbatim from 406-CONTEXT.md `<decisions>` "harness_intervention event + 4-tier ladder (Area 4)" subsection. Fields: `tier` (4-value Literal), `trigger_reason` (18-value Literal exhaustively enumerated across APG / PRF / DEV / SUB / SCOPE / CTX chains), `target_step_or_task`, `correlation_event_id` (back-pointer to originating per-chain event), `slice_id`, `session_id`, `triggered_at` (UTC ISO-8601).
+The `state.harness.intervention` event carries the umbrella view of every harness intervention. Its payload is the `HarnessIntervention` Pydantic class. The class is rendered verbatim from 406-CONTEXT.md `<decisions>` "harness_intervention event + 4-tier ladder (Area 4)" subsection. Fields: `tier` (4-value Literal), `trigger_reason` (20-value Literal exhaustively enumerated across APG / PRF / DEV / SUB / SCOPE / CTX / STP-checkpoint / SRP-05 split-request chains), `target_step_or_task`, `correlation_event_id` (back-pointer to originating per-chain event), `slice_id`, `session_id`, `triggered_at` (UTC ISO-8601).
 
 #### Class definition (verbatim)
 
@@ -1146,6 +1152,13 @@ class HarnessIntervention(BaseModel):
         "context_threshold_warning",
         "context_threshold_emergency",
         "context_overflow_reactive",
+        # STP (403) — checkpoint:decision / checkpoint:human-action routine human gates
+        # (distinct from DEV Rule-4 architectural always-stop; see §4.4 dispatcher arm
+        # for state.step.checkpoint_human_action_pending)
+        "checkpoint_decision_human_action",
+        # SCOPE (404 SRP-05) — agent-initiated step-split request surfaces as advisory
+        # routing into plan-slice re-entry (not a counter chain; one-shot per Step)
+        "split_recommendation_pending",
     ]
     target_step_or_task: str                      # task_id or step_id depending on chain
     correlation_event_id: str                     # the originating gate_strike / paralysis_event / deviation_logged / subagent_crash_detected / scope_check / harness.context_meter event id
@@ -1159,7 +1172,7 @@ class HarnessIntervention(BaseModel):
 | Field                  | Type                                | Semantics                                                              |
 |------------------------|-------------------------------------|------------------------------------------------------------------------|
 | tier                   | Literal[4 values]                   | Server-derived from source-chain event type → dispatch (§4.4)         |
-| trigger_reason         | Literal[18 values]                  | Exhaustive across APG/PRF/DEV/SUB/SCOPE/CTX; pure-machine assignment    |
+| trigger_reason         | Literal[20 values]                  | Exhaustive across APG/PRF/DEV/SUB/SCOPE/CTX + STP checkpoint routes + SRP-05 split request; pure-machine assignment |
 | target_step_or_task    | str                                 | task_id or step_id depending on which chain triggered                  |
 | correlation_event_id   | str                                 | Back-pointer to originating per-chain event (paralysis_event, gate_strike, deviation_logged, etc.) |
 | slice_id               | str                                 | Slice owning the intervention                                          |
@@ -1181,7 +1194,7 @@ class HarnessIntervention(BaseModel):
 
 #### Cross-reference: HRN-05 satisfied
 
-HRN-05 requires that "each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task." The HarnessIntervention class above satisfies HRN-05 exactly: `tier` field (4-value Literal), `trigger_reason` field (18-value Literal), `target_step_or_task` field. The class also adds `correlation_event_id`, `slice_id`, `session_id`, `triggered_at` for replay completeness (HRN-07).
+HRN-05 requires that "each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task." The HarnessIntervention class above satisfies HRN-05 exactly: `tier` field (4-value Literal), `trigger_reason` field (20-value Literal), `target_step_or_task` field. The class also adds `correlation_event_id`, `slice_id`, `session_id`, `triggered_at` for replay completeness (HRN-07).
 
 ### Emission Model — Alongside Source Events
 
@@ -1252,6 +1265,10 @@ SourceEventType = Literal[
     "state.step.subagent_orphan_persistent",
     "state.step.scope_check",
     "state.step.scope_deviation_rejected",
+    # SRP-05 step-split request — agent-initiated routine that routes to plan-slice re-entry
+    "state.slice.split_recommendation",
+    # STP-05 checkpoint:decision / checkpoint:human-action routine human gates
+    "state.step.checkpoint_human_action_pending",
     "state.session.context_threshold_warning_block",
     "state.session.context_threshold_emergency",
     "state.session.overflow_recovery_attempted",
@@ -1318,6 +1335,17 @@ def dispatch_to_umbrella(
             return _build(tier="clear_reinject", reason="context_threshold_emergency", source_payload=source_payload)
         case "state.session.overflow_recovery_attempted":
             return _build(tier="clear_reinject", reason="context_overflow_reactive", source_payload=source_payload)
+
+        # SRP-05 step-split request — agent-initiated re-plan signal; tier-1 advisory
+        # surfaces the request to the harness while plan-slice re-entry is queued
+        case "state.slice.split_recommendation":
+            return _build(tier="advisory", reason="split_recommendation_pending", source_payload=source_payload)
+
+        # STP-05 checkpoint:decision / checkpoint:human-action routine human gate
+        # (distinct from DEV Rule-4 architectural always-stop — routine task-level
+        # decision that surfaces via opencode `question` tool under --tiered autonomy)
+        case "state.step.checkpoint_human_action_pending":
+            return _build(tier="human_gate", reason="checkpoint_decision_human_action", source_payload=source_payload)
 
         # tool.execute.before tier-2 events
         case "state.step.plan_edit_blocked":
@@ -1386,7 +1414,7 @@ The umbrella `tier` value is server-derived, never agent-emitted. The dispatcher
 
 ### Forward reference: §5 + §6 (Plan 04)
 
-§5 (Plan 04 of this phase) will enumerate the `state.harness.intervention` event among the ~30 event types the HRN-07 replay protocol must consume — Category 5 (umbrella + context) of the 5-table breakdown. §6 (Plan 04) will surface specific intervention emission points in the full-Slice lifecycle Mermaid sequence diagram (HRN-08); the exemplar Slice is the `compaction-snapshot-schema` Slice from 403 EXEMPLAR-stepNPLAN.md, with at least one tier-1 advisory site (paralysis-counter cross), one tier-2 site (PAP-05 immutability block), one tier-3 site (force_clear_and_reinject demo), and one tier-4 site (the `checkpoint:decision` task on orjson flag selection, surfaced via surface_human_gate).
+§5 (Plan 04 of this phase) will enumerate the `state.harness.intervention` event among the ~42 event types the HRN-07 replay protocol must consume — Category 5 (umbrella + context) of the 5-table breakdown. §6 (Plan 04) will surface specific intervention emission points in the full-Slice lifecycle Mermaid sequence diagram (HRN-08); the exemplar Slice is the `compaction-snapshot-schema` Slice from 403 EXEMPLAR-stepNPLAN.md, with at least one tier-1 advisory site (paralysis-counter cross), one tier-2 site (PAP-05 immutability block), one tier-3 site (force_clear_and_reinject demo), and one tier-4 site (the `checkpoint:decision` task on orjson flag selection, surfaced via surface_human_gate).
 
 ---
 
@@ -1398,7 +1426,7 @@ This section is the proof: it enumerates the canonical set of replay-input event
 
 ### §5.1 Replay-input event enumeration (5-category breakdown)
 
-The replay-input set is organized into five categories. Total: ~30 event types. For each event, the table names the event type string (the `type` field on the `EventEnvelope` outer shape from `src/state_core/schema.py` lines 239-265), the Pydantic payload class that rides `data`, and the owning v41 spec. The table is HRN-07's load-bearing enumeration: any v14 implementation that omits a replay-input event from its projector chain fails the HRN-07 contract.
+The replay-input set is organized into five categories. Total: 42 event types. For each event, the table names the event type string (the `type` field on the `EventEnvelope` outer shape from `src/state_core/schema.py` lines 239-265), the Pydantic payload class that rides `data`, and the owning v41 spec. The table is HRN-07's load-bearing enumeration: any v14 implementation that omits a replay-input event from its projector chain fails the HRN-07 contract.
 
 #### Category 1 — Slice-stage chain (4 events)
 
@@ -1470,7 +1498,7 @@ The four independent per-chain counters (APG paralysis, PRF gate strikes, DEV de
 | `state.step.subagent_restart_exhausted` | `SubagentRestartExhausted` | 405 SUBAGENT-MONITORING.md §"Restart counter" |
 | `state.step.subagent_orphan_detected` | `SubagentOrphanDetected` | 405 SUBAGENT-MONITORING.md §"Orphan reconciliation flow" |
 
-#### Category 4 — Scope chain (4 events)
+#### Category 4 — Scope chain (5 events)
 
 Scope-prohibition events fired by the SRP machinery (404 SCOPE-PROHIBITION.md) plus the two subagent-scope events from 405 SUBAGENT-MANAGEMENT.md that share Layer-6 enforcement with the SRP `files_modified` allowlist.
 
@@ -1480,12 +1508,15 @@ Scope-prohibition events fired by the SRP machinery (404 SCOPE-PROHIBITION.md) p
 | `state.step.scope_deviation` | `ScopeDeviation` (SRP-04) | 404 SCOPE-PROHIBITION.md §"Layer 1 — files_modified allowlist" |
 | `state.step.scope_deviation_request` | `ScopeDeviationRequest` (SRP-05) | 404 SCOPE-PROHIBITION.md §"scope_deviation_request MCP Tool Flow" |
 | `state.step.scope_deviation_resolved` | `ScopeDeviationResolved` (SRP-05) | 404 SCOPE-PROHIBITION.md §"scope_deviation_request MCP Tool Flow" |
+| `state.slice.split_recommendation` | `SplitRecommendation` (SRP-05) | 404 SCOPE-PROHIBITION.md §"request_step_split MCP Tool (SRP-05)" |
+
+The `split_recommendation` row is Slice-aggregated (the projector applies it to the parent Slice's `pending_replan` flag, not to a per-Step counter) — when present, it signals plan-slice re-entry is queued. Replay rebuilds the pending-replan state by walking `split_recommendation` rows whose `resolved_at` is null. The §4.4 dispatcher emits a paired `state.harness.intervention(tier="advisory", trigger_reason="split_recommendation_pending")` so the umbrella view surfaces the agent's signal alongside its source event.
 
 (Note: `state.step.subagent_whitelist_violation` and `state.slice.subagent_cap_expansion_rejected` from 405 SUBAGENT-MANAGEMENT.md SUB-03/SUB-04 surface in §4 as tier-2 tool-block triggers but are not separately enumerated here because they project into the umbrella event's `trigger_reason` field, not into an independent counter chain. v14 MUST persist them to the event store; the projector consumes them via the §4.4 dispatcher.)
 
-#### Category 5 — Umbrella + context (4 events)
+#### Category 5 — Umbrella + context (7 events)
 
-The umbrella intervention event introduced by this phase (HRN-05) plus the three context-meter / compaction events from 402 CONTEXT-PROTOCOL.md that drive both the umbrella event's CTX trigger reasons and the daemon's snapshot rehydration.
+The umbrella intervention event introduced by this phase (HRN-05) plus the context-meter / compaction events from 402 CONTEXT-PROTOCOL.md that drive both the umbrella event's CTX trigger reasons and the daemon's snapshot rehydration, plus the three `state.session.*` threshold/overflow events whose dispatcher entries land the CTX `tier` decisions in §4.4.
 
 | Event type | Pydantic class | Owning spec |
 | --- | --- | --- |
@@ -1493,6 +1524,11 @@ The umbrella intervention event introduced by this phase (HRN-05) plus the three
 | `compaction.snapshot_taken` | `CompactionSnapshotTaken` | 402 CONTEXT-PROTOCOL.md §"Trigger sources" |
 | `compaction.reinject_completed` | `CompactionReinjectCompleted` | 402 CONTEXT-PROTOCOL.md §"Reinjection event" |
 | `harness.context_meter` | `HarnessContextMeter` (CTX-08) | 402 CONTEXT-PROTOCOL.md §"Daemon SSE event" |
+| `state.session.context_threshold_warning_block` | `ContextThresholdWarningBlock` (CTX-04) | 402 CONTEXT-PROTOCOL.md §"Threshold Action Table (CTX-04 + CTX-09)" |
+| `state.session.context_threshold_emergency` | `ContextThresholdEmergency` (CTX-04) | 402 CONTEXT-PROTOCOL.md §"Threshold Action Table (CTX-04 + CTX-09)" |
+| `state.session.overflow_recovery_attempted` | `OverflowRecoveryAttempted` (CTX-09) | 402 CONTEXT-PROTOCOL.md §"Reactive Overflow Recovery (CTX-09)" |
+
+The three `state.session.*` events are emitted by the daemon's context-meter watcher (CTX-04 + CTX-09) when an active session crosses a context-budget threshold or a provider rejects a request with a context-overflow error. They drive the §4.4 dispatcher's CTX-chain case arms — `context_threshold_warning_block` → tier-2 tool_block, `context_threshold_emergency` → tier-3 clear_reinject, `overflow_recovery_attempted` → tier-3 clear_reinject (one-shot per user turn per CTX-09's `_overflow_recovery_attempted` flag). Mode-isolation: `state.session.` is a Build-mode-only prefix (registered in `BUILD_ONLY_EVENT_PREFIXES`; see EVENT-TAXONOMY.md v41 Audit Supplement amendment).
 
 #### Total event surface
 
@@ -1501,11 +1537,11 @@ The umbrella intervention event introduced by this phase (HRN-05) plus the three
 | 1. Slice-stage chain | 4 | 402 |
 | 2. Plan-lifecycle chain | 9 | 403 |
 | 3. Counter chains (APG + PRF + DEV + SUB) | 17 | 404 + 405 |
-| 4. Scope chain | 4 | 404 |
-| 5. Umbrella + context | 4 | 406 + 402 |
-| **Total** | **38 event types** | 402–406 |
+| 4. Scope chain | 5 | 404 |
+| 5. Umbrella + context | 7 | 406 + 402 |
+| **Total** | **42 event types** | 402–406 |
 
-The 38-event count is the operative replay-input enumeration. A v14 projector that handles only 37 categories is by construction non-conformant. Beyond this set, v40 EVENT-TAXONOMY.md's 11 baseline Step events (`created` / `designed` / `planned` / `ran` / `verify_started` / `verify_passed` / `verify_failed` / `advanced` / `blocked` / `unblocked` / `abandoned`) plus the v40 baseline Slice events also replay — but they are the v40 FSM-transition tier handled by the existing v40 projector, not the harness-specific reducer chains added by 402–405 + this phase. HRN-07 covers the v41-additive harness surface; v40's FSM tier is inherited as-is.
+The 42-event count is the operative replay-input enumeration. A v14 projector that handles only 41 categories is by construction non-conformant. Beyond this set, v40 EVENT-TAXONOMY.md's 11 baseline Step events (`created` / `designed` / `planned` / `ran` / `verify_started` / `verify_passed` / `verify_failed` / `advanced` / `blocked` / `unblocked` / `abandoned`) plus the v40 baseline Slice events also replay — but they are the v40 FSM-transition tier handled by the existing v40 projector, not the harness-specific reducer chains added by 402–405 + this phase. HRN-07 covers the v41-additive harness surface; v40's FSM tier is inherited as-is.
 
 The double-count discipline (406-CONTEXT.md `<decisions>` "Per-tier event count enumeration accuracy"): every counter-chain event in Categories 3–4 that triggers an umbrella intervention ALSO produces a paired Category-5 `state.harness.intervention` row. The two rows replay independently; the projector can compute counter state from Category 3 alone OR umbrella state from Category 5 alone. The two-event emission rule (§4.4 carry-forward) is the structural guarantee.
 
@@ -1562,7 +1598,7 @@ This step is the only step in the protocol with a side effect outside the daemon
 Once the projector state is rehydrated (Steps 1–4 complete), the daemon resumes the plugin hooks for the active session(s):
 
 - **`chat.params` re-injects the reinject payload** computed from the rehydrated state: the active `stepNPLAN.md` content (from `active_plan_path`), the current task pointer, the last verify result, the upstream Step `SUMMARY.md` `provides:` blocks for resolved deps (`provides_blocks` from the snapshot), the current worktree path. If any restart-chain has fired (SUB counter > 0 for the active task), the reinject also includes the `<prior_crash>` XML block (405 SUBAGENT-MONITORING.md §"`<prior_crash>` continuation XML block" carry-forward).
-- **`tool.execute.before` re-attaches the 6-layer write-block stack.** The 6 layers are (1) SRP-04 `files_modified` allowlist, (2) PAP-05 immutability, (3) SRP-02 prohibited-language scan, (4) PRF-07 gate-failing next-task block, (5) SUB-03 `subagent_whitelist_violation`, (6) SUB-04 `subagent_cap_expansion_rejected`. The stack is rebuilt from the rehydrated projector state — each layer queries the appropriate per-chain reducer for its block decisions.
+- **`tool.execute.before` re-attaches the 7-layer write-block stack** (canonical enumeration in §2 `tool.execute.before` / SUBAGENT-MANAGEMENT.md §5): (1) PAP-05 immutability, (2) SRP-04 `files_modified` allowlist, (3) SRP-02 prohibited-language scan, (4) SRP-04 `<discovered_threats>` append-only carve-out, (5) DEV `log_deviation` routing + 5-step cross-validation, (6) SUB-03 `dispatch_subagent` whitelist + SUB-04 parallel-cap accounting, (7) DEV arch-pattern allowlist match. PRF-07 gate-failing-next-task block + CTX-04 warning-threshold next-task block compose on top of the 7 layers (see §2). The stack is rebuilt from the rehydrated projector state — each layer queries the appropriate per-chain reducer for its block decisions.
 - **`session.compacting`, `chat.message`, `tool.execute.after`, `shell.env`** resume in default-bind mode; their state-derived behavior (counter-meter mirroring, turn-mirror, STATE-* trailer env injection) reads directly from the rehydrated projector.
 
 Resume completes when the next `chat.params` invocation lands and the daemon confirms (via SSE) that the plugin hooks have re-attached. The daemon emits a `state.harness.intervention(tier="advisory", trigger_reason="paralysis_chain_3_reinject", ...)` event ONLY if rehydration discovered a strike chain still pending; clean rehydration (all chains closed) emits no intervention event — silence is success.
@@ -1671,7 +1707,7 @@ The daemon emits the rehydrated reinject payload for `chat.params` to consume on
 - **`<prior_crash>` block — present because `subagent_restart_counters[("task-3", "researcher")] = 1` is non-zero.** The block names the prior crash on `inv-A`'s preceding incarnation, the timeout reason (from the SubagentCrashDetected row that triggered the restart counter increment), and the recovery hint. Per 405 SUBAGENT-MONITORING.md §"`<prior_crash>` continuation XML block" carry-forward.
 - **No `<paralysis_advisory>` block in the reinject** even though the APG counter is at 4. The advisory injection is performed in the next `chat.params` cycle, not during rehydration — rehydration is silent. The next agent turn that triggers `chat.params` reads the rehydrated APG counter; if the agent's response on that turn surfaces another read-only-only window (advisory 5), THAT turn emits the advisory. The APG counter rehydration's job is to make sure the next advisory is correctly numbered (advisory_number=5, not advisory_number=1).
 
-**6-layer write-block stack re-attachment.** The `tool.execute.before` hook re-attaches all 6 layers — SRP-04 + PAP-05 + SRP-02 + PRF-07 + SUB-03 + SUB-04. Each layer queries the rehydrated reducer state for its block decisions. Layer 4 (PRF-07 gate-failing next-task block) is INACTIVE because the last gate verdict on `task-2` was `pass`; Layer 5 (SUB-03 whitelist) and Layer 6 (SUB-04 cap expansion) are ACTIVE because two subagents are in-flight under the Slice's parallel cap of 20.
+**7-layer write-block stack re-attachment.** The `tool.execute.before` hook re-attaches all 7 layers per §2's canonical enumeration — PAP-05 + SRP-04 + SRP-02 + SRP-04 `<discovered_threats>` carve-out + DEV `log_deviation` routing + SUB dispatch_subagent (whitelist + cap) + DEV arch-pattern allowlist. Each layer queries the rehydrated reducer state for its block decisions. The PRF-07 gate-failing next-task block (composes on top of the 7-layer stack) is INACTIVE because the last gate verdict on `task-2` was `pass`; Layer 6's SUB-03 whitelist and SUB-04 cap-expansion components are ACTIVE because two subagents are in-flight under the Slice's parallel cap of 20.
 
 **No intervention event emitted on resume.** All chains are mid-flight but not at escalation boundaries:
 - APG at 4 of 6 — no umbrella event needed until the next advisory fires (advisory 5 will be a tier-1 advisory; advisory 6 will be tier-4 human_gate).
@@ -1719,7 +1755,7 @@ sequenceDiagram
     Note over Daemon,Proj: no orphan detected — silent success
 
     Daemon->>Plugin: Step 5 — assemble reinject payload<br/>(includes <prior_crash> for inv-A;<br/>NO new <paralysis_advisory>)
-    Daemon->>Plugin: Step 5 — re-attach tool.execute.before 6-layer stack
+    Daemon->>Plugin: Step 5 — re-attach tool.execute.before 7-layer stack
     Plugin-->>Daemon: hooks re-attached (SSE confirm)
     Note over Daemon: rehydration complete; no intervention event<br/>emitted on resume (silence = success).
 ```
@@ -1730,7 +1766,7 @@ sequenceDiagram
 2. **The orphan probe is the only network dependency.** Steps 1-3 are SQLite-only; Step 4 is the only step that reaches outside the daemon process. opencode's session API SLA is the implicit dependency for the HRN-07 contract under restart.
 3. **Counters rehydrate from events alone — even without snapshot SUB-08 extension fields for non-SUB chains.** The APG counter rebuilt to `4 of 6` purely from replaying the `paralysis_event` chain post-snapshot. The snapshot's SUB-08 extension carries SUB state because the SUB chain has cross-process state (the orphan map references opencode-owned processes); the APG / PRF / DEV chains are pure event-derived and need no snapshot extension.
 4. **Silence is success.** When all chains rehydrate to mid-flight-but-stable, the protocol emits no intervention event on resume. The next agent turn will surface the rehydrated state naturally — through advisory injection if a new chain advance happens, through write-block enforcement if the agent tries a layer-violating write, through gate evaluation if the agent completes a task. The protocol is silent until the agent generates new signal.
-5. **The 38-event surface is necessary and sufficient.** Every event consulted in the worked example — `compaction.snapshot_taken`, `state.step.subagent_progress`, `state.step.paralysis_event`, `state.harness.intervention` — is in the §5.1 enumeration. No event outside the 38 was consulted; no event inside the 38 was missing. The enumeration is closed against the realistic failure mode.
+5. **The 42-event surface is necessary and sufficient.** Every event consulted in the worked example — `compaction.snapshot_taken`, `state.step.subagent_progress`, `state.step.paralysis_event`, `state.harness.intervention` — is in the §5.1 enumeration. No event outside the 38 was consulted; no event inside the 38 was missing. The enumeration is closed against the realistic failure mode.
 
 The worked example completes the HRN-07 proof: the 5-step protocol, applied against the 38-event enumeration, with snapshot + event-store + opencode session API as inputs, recovers full harness state across the hardest realistic failure mode. v14's projector implementation MUST pass this proof's invariants — verified by the v14 EXEMPLAR work's cross-host event-store replay determinism test fixture (deferred per 406-CONTEXT.md `<deferred>` block).
 
@@ -1793,7 +1829,7 @@ sequenceDiagram
     Note over User,ES: Stage 3 — run-slice — Step 1, Task 1 (RED test)
     Plugin->>Agent: chat.params injects PLAN<br/>(PAP-01 verbatim + PAP-02 @-ref resolution)
     Agent->>Plugin: Edit tests/state_build/snapshot/test_compaction.py
-    Plugin->>Daemon: tool.execute.before — 6-layer stack (all layers PASS)
+    Plugin->>Daemon: tool.execute.before — 7-layer stack (all layers PASS)
     Daemon-->>Plugin: allow
     Agent->>Plugin: Bash: pytest -x (RED, exits non-zero)
     Plugin->>Daemon: tool.execute.after — read-only result
@@ -1802,7 +1838,7 @@ sequenceDiagram
 
     Note over User,ES: run-slice — Step 1, Task 2 (GREEN implement)
     Agent->>Plugin: Edit src/state_build/snapshot/compaction.py
-    Plugin->>Daemon: tool.execute.before — 6-layer stack (PASS)
+    Plugin->>Daemon: tool.execute.before — 7-layer stack (PASS)
     Daemon-->>Plugin: allow
     %% Tier-2 site
     Agent->>Plugin: Edit stepNPLAN.md <plan> immutable block
@@ -1846,7 +1882,7 @@ sequenceDiagram
     Agent->>MCP: surface_human_gate(decision_id=orjson_flag,<br/>options=[OPT_NAIVE_UTC, OPT_UTC_Z])
     MCP->>Daemon: surface_human_gate
     Daemon->>ES: state.step.checkpoint_human_action_pending(<br/>task_id=task-3, decision_id=orjson_flag)
-    Daemon->>ES: state.harness.intervention(tier=human_gate,<br/>trigger_reason=deviation_rule_4_architectural,<br/>correlation_event_id=<checkpoint_human_action_pending>)
+    Daemon->>ES: state.harness.intervention(tier=human_gate,<br/>trigger_reason=checkpoint_decision_human_action,<br/>correlation_event_id=<checkpoint_human_action_pending>)
     Note right of Daemon: ▸ Tier-4 intervention (human_gate via opencode question)
     Daemon->>Q: render question with [OPT_NAIVE_UTC, OPT_UTC_Z]
     User->>Q: pick OPT_NAIVE_UTC
@@ -1894,7 +1930,7 @@ sequenceDiagram
 | verify-slice | `state.slice.slice_verify_completed`, `state.slice.verify_completed` — **2 events** |
 | close | `state.slice.shipped` — **1 event** |
 
-**Total emitted in diagram: 35+ event rows, 14 distinct event types, exceeding HRN-08's ≥25-event load-bearing minimum.** The full enumeration is a subset of §5.1's 38-event surface; HRN-08 surfaces the lifecycle-active subset, not the full replay-input set (e.g., `state.step.deviation_logged` is not emitted in this exemplar because the Slice executes without rule-classified deviations; `state.step.subagent_orphan_detected` is not emitted because no subagent goes orphan; etc.).
+**Total emitted in diagram: 35+ event rows, 14 distinct event types, exceeding HRN-08's ≥25-event load-bearing minimum.** The full enumeration is a subset of §5.1's 42-event surface; HRN-08 surfaces the lifecycle-active subset, not the full replay-input set (e.g., `state.step.deviation_logged` is not emitted in this exemplar because the Slice executes without rule-classified deviations; `state.step.subagent_orphan_detected` is not emitted because no subagent goes orphan; etc.).
 
 #### Tier-intervention call-out summary
 
@@ -1905,7 +1941,7 @@ The diagram surfaces all four intervention tiers, with named trigger sources fro
 | 1 (advisory) | run-slice task-3 — APG paralysis cross threshold 1st time | APG | `state.step.paralysis_event(tier=advisory, advisory_number=1)` | `paralysis_threshold_crossed` |
 | 2 (tool_block) | run-slice task-2 — agent attempts edit to PLAN.md `<plan>` immutable block | PAP-05 (404 SCOPE-PROHIBITION.md Layer 2) | `state.step.plan_edit_blocked` | `scope_check_unresolved` (per §4.4 v1 closest-umbrella mapping; v17 may introduce tier-2-specific reasons per the TODO(HRN-04.tier2) tracking issue) |
 | 3 (clear_reinject) | run-slice task-3 — APG paralysis advisory 3 fires force_clear_and_reinject | APG | `state.step.paralysis_event(tier=reinject, advisory_number=3)` + `compaction.snapshot_taken` | `paralysis_chain_3_reinject` |
-| 4 (human_gate) | run-slice task-3 — `checkpoint:decision` task surfaces orjson flag selection | STP-05 (checkpoint:decision) + HRN-06 invariant | `state.step.checkpoint_human_action_pending` | `deviation_rule_4_architectural` (per §4.4 v1 closest-umbrella mapping; v17 may introduce a `checkpoint_decision_human_action` reason for finer disambiguation) |
+| 4 (human_gate) | run-slice task-3 — `checkpoint:decision` task surfaces orjson flag selection | STP-05 (checkpoint:decision) + HRN-06 invariant | `state.step.checkpoint_human_action_pending` | `checkpoint_decision_human_action` (semantically scoped to routine task-level checkpoints; distinct from `deviation_rule_4_architectural` which is reserved for DEV Rule-4 always-stop escalations) |
 
 The exemplar Slice was chosen specifically because `task-3` is a `checkpoint:decision`; this lets HRN-08 demonstrate tier-4 against a real (not contrived) trigger source. The tier-1 + tier-3 sites both ride the APG paralysis chain on `task-3` — the same chain crossing thresholds at advisory 1 (tier-1 site) and advisory 3 (tier-3 site) shows the per-tier escalation behavior live in a single Slice. The tier-2 site rides PAP-05 on `task-2` because PLAN immutability is the canonical tier-2 trigger across all v41 specs.
 
@@ -1969,22 +2005,22 @@ This document closes Phase 406. Every v41 HRN requirement — HRN-01 through HRN
 - **Build-mode only.** Every harness module specified in this rollup lives under `src/state_build/` and MUST NOT import from `src/state_teach/`. CI import-graph lint enforces (PROJECT.md cardinal rule). The teach-mode harness equivalent is explicitly deferred to v47 per 406-CONTEXT.md `<deferred>` block.
 - **STATE-* naming discipline.** Every identifier in this rollup uses `state-*` / `STATE-*` prefixes. The design-heritage prior-generation prefix (referenced only in gsd-2 KB pattern docs cited by this rollup as PATTERN sources) is never used as an identifier prefix in state-project code, events, modules, registries, env vars, CLI commands, or file prefixes. The 405 DEV-08 `STATE-*` commit-trailer convention applies to the executor's commits for this phase's plans.
 - **Pure-machine everywhere.** No LLM-as-judge in the umbrella event (§4), the intervention dispatcher (§4.4), the replay protocol (§5.2), or the lifecycle diagram (§6.1). Every decision is a deterministic dispatch from event type + payload field. Carry-forward of the PRF-04 spirit (404 PROOF-GATE.md) project-wide.
-- **Append-only event store.** Every event in the 38-event surface (§5.1) is append-only. Corrections are NEW events (e.g., `state.step.deviation_resolution_recorded` to update a `Deviation` row's resolution). Replay reconstructs from the append-only log without consulting any mutable on-disk projection.
+- **Append-only event store.** Every event in the 42-event surface (§5.1) is append-only. Corrections are NEW events (e.g., `state.step.deviation_resolution_recorded` to update a `Deviation` row's resolution). Replay reconstructs from the append-only log without consulting any mutable on-disk projection.
 
 ### Forward-reference into v14
 
 v14 (Build Kernel) implements the contracts inlined in this rollup:
 
-- **Daemon's HTTP middleware** including the 6-layer write-block stack (404 Layers 1-4 + 405 Layers 5-6), the `MCP_TOOL_REGISTRY` dispatch (§3), and the `state.harness.intervention` emitter (§4.4).
+- **Daemon's HTTP middleware** including the 7-layer write-block stack (per §2's canonical enumeration: PAP-05 + SRP-04 + SRP-02 + SRP-04 carve-out + DEV `log_deviation` routing + SUB dispatch + DEV arch-pattern allowlist) plus the PRF-07 + CTX-04 next-task block composers, the `MCP_TOOL_REGISTRY` dispatch (§3), and the `state.harness.intervention` emitter (§4.4).
 - **Projector replay-verifier** implementing the §5.2 5-step protocol with the 5 per-chain reducers; including the SUB-08 orphan reconciliation 6-step flow; including the §5.3 worked-example invariants.
-- **SSE bus** carrying every event in the §5.1 38-event surface plus the v40 baseline events.
+- **SSE bus** carrying every event in the §5.1 42-event surface plus the v40 baseline events.
 - **opencode plugin bundle** owning the 6 hooks from §2 with the daemon-driven inject + block + record behaviors.
 
 v15 (Build Core Commands) wires per-stage emitters into the research-slice pipeline and the execute-slice harness; consumes this rollup as the implementation contract. v9 TUI bundle subscribes to `state.harness.intervention` SSE stream and renders tier-1 (advisory toast), tier-2 (block reason), tier-3 (reinject banner), tier-4 (opencode `question` tool surface via daemon-coordinated hand-off).
 
 ### Final invariant
 
-**The harness's state — every counter, every in-flight subagent, every pending intervention, every plan-edit chain, every Slice-stage progression — is fully reconstructable from `.state/events.sqlite` alone, given a daemon restart at any moment.** §5 is the proof; §6 is the live walk; §1–§4 are the operative contracts that make the proof and the walk possible. v14's projector implementation passes HRN-07 iff the 5-step protocol against the 38-event surface reconstructs the harness's pre-restart state bit-identically. v14's daemon middleware passes HRN-04/05 iff the four named tier sites in §6.1 fire the §4.4 dispatcher's exact umbrella `trigger_reason` values. v14's MCP server passes HRN-03 iff every tool in §3's roster registers in `MCP_TOOL_REGISTRY` and the `assert_never` exhaustiveness check holds at `mypy --strict`. v14's plugin bundle passes HRN-02 iff the six hooks in §2 fire with the daemon-driven inject + block + record behaviors named per-hook. v14's three-process topology passes HRN-01 iff the layered diagram in §1 reproduces every named node and at minimum every labelled edge.
+**The harness's state — every counter, every in-flight subagent, every pending intervention, every plan-edit chain, every Slice-stage progression — is fully reconstructable from `.state/events.sqlite` alone, given a daemon restart at any moment.** §5 is the proof; §6 is the live walk; §1–§4 are the operative contracts that make the proof and the walk possible. v14's projector implementation passes HRN-07 iff the 5-step protocol against the 42-event surface reconstructs the harness's pre-restart state bit-identically. v14's daemon middleware passes HRN-04/05 iff the four named tier sites in §6.1 fire the §4.4 dispatcher's exact umbrella `trigger_reason` values. v14's MCP server passes HRN-03 iff every tool in §3's roster registers in `MCP_TOOL_REGISTRY` and the `assert_never` exhaustiveness check holds at `mypy --strict`. v14's plugin bundle passes HRN-02 iff the six hooks in §2 fire with the daemon-driven inject + block + record behaviors named per-hook. v14's three-process topology passes HRN-01 iff the layered diagram in §1 reproduces every named node and at minimum every labelled edge.
 
 **Phase 406 closes.** v14 begins.
 

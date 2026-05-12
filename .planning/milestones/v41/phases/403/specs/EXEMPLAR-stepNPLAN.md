@@ -155,7 +155,7 @@ Excerpts above are LITERAL upstream content. The executor must NOT re-derive the
     - Run `pytest tests/state_build/snapshot/test_compaction.py -x 2>&1 | tee /tmp/red.log`.
     - Confirm pytest exits non-zero. Capture the exit code.
     - Commit with message: `test(compaction-snapshot-schema-step-1): add failing tests for CompactionSnapshot`
-      and commit trailer `GSD-Test-Result: FAIL`.
+      and commit trailer `STATE-Test-Result: FAIL`.
   </action>
 
   <verify>
@@ -165,7 +165,7 @@ Excerpts above are LITERAL upstream content. The executor must NOT re-derive the
   <acceptance_criteria>
     - Test file `tests/state_build/snapshot/test_compaction.py` exists with ≥80 lines.
     - pytest exits non-zero (RED) — collection error or test failures confirm the module is absent.
-    - `git log -1 --format=%B` shows commit with `test:` prefix and trailer `GSD-Test-Result: FAIL`.
+    - `git log -1 --format=%B` shows commit with `test:` prefix and trailer `STATE-Test-Result: FAIL`.
   </acceptance_criteria>
 
   <done>RED phase complete; failing tests captured and committed. The implementation Step (Task 2) may now proceed.</done>
@@ -201,7 +201,7 @@ Excerpts above are LITERAL upstream content. The executor must NOT re-derive the
       `grep -n "state_teach" src/state_build/snapshot/compaction.py` — must return nothing.
     - Run `pytest tests/state_build/snapshot/test_compaction.py -x` — all tests must pass.
     - Commit with message: `feat(compaction-snapshot-schema-step-1): implement CompactionSnapshot Pydantic model`
-      and trailer `GSD-Test-Result: PASS`.
+      and trailer `STATE-Test-Result: PASS`.
   </action>
 
   <verify>
@@ -213,7 +213,7 @@ Excerpts above are LITERAL upstream content. The executor must NOT re-derive the
     - All 5 tests in `test_compaction.py` pass (pytest exits 0).
     - `grep -q 'extra="forbid"' src/state_build/snapshot/compaction.py` exits 0.
     - `grep -c "state_teach" src/state_build/snapshot/compaction.py` returns 0 (no teach-mode imports; mode isolation).
-    - `git log -1 --format=%B | grep -q "GSD-Test-Result: PASS"` exits 0.
+    - `git log -1 --format=%B | grep -q "STATE-Test-Result: PASS"` exits 0.
   </acceptance_criteria>
 
   <done>GREEN phase complete. CompactionSnapshot is importable, all field constraints enforced, orjson round-trip confirmed identity-preserving.</done>
@@ -253,7 +253,7 @@ Excerpts above are LITERAL upstream content. The executor must NOT re-derive the
     - `checkpoint_auto_resolved` or `checkpoint_human_action_resolved` event emitted with `selection` field set to one of the option `name` attributes.
   </acceptance_criteria>
 
-  <done>Decision recorded; emit `state.step.checkpoint_resolved` event with `selection` set to one of the option `name` attributes (`OPT_NAIVE_UTC` or `OPT_UTC_Z`).</done>
+  <done>Decision recorded; emit `state.step.checkpoint_auto_resolved` (autonomy=full-yolo) or `state.step.checkpoint_human_action_resolved` (autonomy=tiered) event with `selection` set to one of the option `name` attributes (`OPT_NAIVE_UTC` or `OPT_UTC_Z`).</done>
 </task>
 
 </tasks>

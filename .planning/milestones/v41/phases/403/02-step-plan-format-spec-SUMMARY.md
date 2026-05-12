@@ -38,7 +38,7 @@ tech-stack:
     - "XML body sections with explicit mutability classification (Immutable / Mutable / Hybrid append-only carve-out)"
     - "Table-driven granularity algorithm with bucketed thresholds — fixed lookup tables beat formula tuning"
     - "step_id stable-hash derivation (slugify(slice_id)+'-step-'+ordinal) for replan idempotency"
-    - "GSD-Test-Result FAIL|PASS commit trailer extending gsd-2's GSD-Task: trailer convention (file-tracking.md Correction 3)"
+    - "STATE-Test-Result FAIL|PASS commit trailer extending gsd-2's GSD-Task: trailer convention (file-tracking.md Correction 3)"
     - "auto+tdd RED-before-GREEN enforcement via git-log check + tool.execute.before block on non-test writes"
 
 key-files:
@@ -135,7 +135,7 @@ One fix applied during Task 1: XML body section headings were initially authored
 - All 4 Pydantic classes present with `extra="forbid"`.
 - 16 EXEMPLAR-stepNPLAN.md citations (requirement: ≥3).
 - 9 REJECT counterexamples (requirement: ≥8).
-- GSD-Test-Result trailer convention referenced for auto+tdd.
+- STATE-Test-Result trailer convention referenced for auto+tdd.
 - discovered_threats carve-out present.
 - granularity thresholds 30_000 and 80_000 present.
 - step_id worked example `compaction-snapshot-schema-step-1` present.

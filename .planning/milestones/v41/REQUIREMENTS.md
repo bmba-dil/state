@@ -12,126 +12,126 @@
 
 ### Slice-Cycle Specification (v40 Correction)
 
-- [ ] **SLC-01**: The Slice tier owns the four-stage cycle: discuss-slice → plan-slice → execute-slice → verify-slice. Step is a leaf artifact, **not** its own cycle. (Corrects Phase 400 spec.)
-- [ ] **SLC-02**: discuss-slice produces `N-CONTEXT.md` (XML-tagged: `<domain>`, `<decisions>`, `<canonical_refs>`, `<code_context>`, `<deferred>`) and `N-DISCUSSION-LOG.md` (tabular Q/decision/options).
-- [ ] **SLC-03**: plan-slice is a multi-stage internal pipeline (research → pattern-mapping → planning → validation), each stage producing one artifact: `N-RESEARCH.md`, `N-PATTERNS.md`, `stepNN-PLAN.md` (one per Step), `N-VALIDATION.md`. Validation re-runs planning on failure.
-- [ ] **SLC-04**: execute-slice runs each Step's PLAN per DAG ordering and writes `stepNN-SUMMARY.md` for each Step.
-- [ ] **SLC-05**: verify-slice writes `N-VERIFICATION.md` (truth table) and emits the slice-complete event.
-- [ ] **SLC-06**: Slice folder canonical layout: `slices/N-name/{N-CONTEXT.md, N-DISCUSSION-LOG.md, N-RESEARCH.md, N-PATTERNS.md, N-VALIDATION.md, N-UI-SPEC.md (optional), stepNN-PLAN.md (1..M), stepNN-SUMMARY.md (1..M), N-VERIFICATION.md, RESUME.txt}`.
-- [ ] **SLC-07**: v41 amends Phase 400 spec documents in-line so Slice-owns-cycle is the canonical model going forward; affected docs receive a `## v41 Amendment` header noting the change.
+- [x] **SLC-01**: The Slice tier owns the four-stage cycle: discuss-slice → plan-slice → execute-slice → verify-slice. Step is a leaf artifact, **not** its own cycle. (Corrects Phase 400 spec.)
+- [x] **SLC-02**: discuss-slice produces `N-CONTEXT.md` (XML-tagged: `<domain>`, `<decisions>`, `<canonical_refs>`, `<code_context>`, `<deferred>`) and `N-DISCUSSION-LOG.md` (tabular Q/decision/options).
+- [x] **SLC-03**: plan-slice is a multi-stage internal pipeline (research → pattern-mapping → planning → validation), each stage producing one artifact: `N-RESEARCH.md`, `N-PATTERNS.md`, `stepNN-PLAN.md` (one per Step), `N-VALIDATION.md`. Validation re-runs planning on failure.
+- [x] **SLC-04**: execute-slice runs each Step's PLAN per DAG ordering and writes `stepNN-SUMMARY.md` for each Step.
+- [x] **SLC-05**: verify-slice writes `N-VERIFICATION.md` (truth table) and emits the slice-complete event.
+- [x] **SLC-06**: Slice folder canonical layout: `slices/N-name/{N-CONTEXT.md, N-DISCUSSION-LOG.md, N-RESEARCH.md, N-PATTERNS.md, N-VALIDATION.md, N-UI-SPEC.md (optional), stepNN-PLAN.md (1..M), stepNN-SUMMARY.md (1..M), N-VERIFICATION.md, RESUME.txt}`.
+- [x] **SLC-07**: v41 amends Phase 400 spec documents in-line so Slice-owns-cycle is the canonical model going forward; affected docs receive a `## v41 Amendment` header noting the change.
 
 ### Context Window Management (CTX)
 
-- [ ] **CTX-01**: Slice token budget is **200k absolute**, regardless of model context-window size (200k or 1M+). Plan-slice sizes the Step set to ≤80% of budget (~160k of executor work).
-- [ ] **CTX-02**: A fresh opencode session is spawned at every Slice boundary. Daemon initiates spawn, plugin's `chat.params` hook injects the new Slice context (parent Phase intentions, non-negotiables/crits, current Slice scope).
-- [ ] **CTX-03**: Intra-Slice context pressure is handled via opencode's `session.compacting` hook (no session spawn); harness snapshots state, strips stale content, reinjects compact form. Same session_id continues.
-- [ ] **CTX-04**: Threshold actions (relative to active session's context window):
+- [x] **CTX-01**: Slice token budget is **200k absolute**, regardless of model context-window size (200k or 1M+). Plan-slice sizes the Step set to ≤80% of budget (~160k of executor work).
+- [x] **CTX-02**: A fresh opencode session is spawned at every Slice boundary. Daemon initiates spawn, plugin's `chat.params` hook injects the new Slice context (parent Phase intentions, non-negotiables/crits, current Slice scope).
+- [x] **CTX-03**: Intra-Slice context pressure is handled via opencode's `session.compacting` hook (no session spawn); harness snapshots state, strips stale content, reinjects compact form. Same session_id continues.
+- [x] **CTX-04**: Threshold actions (relative to active session's context window):
   - **≤25% remaining (Emergency):** record state via compaction, prepare handoff if Step is mid-flight.
   - **≤35% remaining (Warning):** allow current task to wrap, block start of new task in same session.
   - **Slice boundary:** end session, spawn fresh.
-- [ ] **CTX-05**: The compaction snapshot is a **structured artifact** (Pydantic model serialized via orjson, stored in event store), not markdown. Reinjection rehydrates from the event-store row, not a filesystem `.md` file.
-- [ ] **CTX-06**: On compaction reinject, harness includes: active `stepNN-PLAN.md`, current task pointer, last task's verify result, all upstream Step `SUMMARY.md` `provides:` blocks for resolved deps, current worktree path.
-- [ ] **CTX-07**: `task_id`, `step_id`, and `slice_id` survive compaction and Slice-boundary session spawn (linked via event store; reinjection events reference prior session_id).
-- [ ] **CTX-08**: Harness reads opencode's context meter via plugin hook on each tool-execute event; daemon mirrors meter state to SSE for TUI consumption.
-- [ ] **CTX-09**: Reactive overflow recovery — when the provider rejects a request with a context-overflow error, the harness mirrors gsd-2's `_overflowRecoveryAttempted` one-shot pattern. Six-step flow: (1) strip the failing assistant turn from context; (2) force-compact (snapshot+reinject), bypassing the percent-threshold check; (3) retry the provider call once; (4) set `_overflow_recovery_attempted` flag on the active session; (5) reset the flag on next user/agent message OR on successful turn; (6) if the flag is already set when a second overflow fires within the same user turn, surface the error to the user (no infinite loop).
+- [x] **CTX-05**: The compaction snapshot is a **structured artifact** (Pydantic model serialized via orjson, stored in event store), not markdown. Reinjection rehydrates from the event-store row, not a filesystem `.md` file.
+- [x] **CTX-06**: On compaction reinject, harness includes: active `stepNN-PLAN.md`, current task pointer, last task's verify result, all upstream Step `SUMMARY.md` `provides:` blocks for resolved deps, current worktree path.
+- [x] **CTX-07**: `task_id`, `step_id`, and `slice_id` survive compaction and Slice-boundary session spawn (linked via event store; reinjection events reference prior session_id).
+- [x] **CTX-08**: Harness reads opencode's context meter via plugin hook on each tool-execute event; daemon mirrors meter state to SSE for TUI consumption.
+- [x] **CTX-09**: Reactive overflow recovery — when the provider rejects a request with a context-overflow error, the harness mirrors gsd-2's `_overflowRecoveryAttempted` one-shot pattern. Six-step flow: (1) strip the failing assistant turn from context; (2) force-compact (snapshot+reinject), bypassing the percent-threshold check; (3) retry the provider call once; (4) set `_overflow_recovery_attempted` flag on the active session; (5) reset the flag on next user/agent message OR on successful turn; (6) if the flag is already set when a second overflow fires within the same user turn, surface the error to the user (no infinite loop).
 
 ### Step / Task Decomposition (STP)
 
-- [ ] **STP-01**: Each Step is a single `stepNN-PLAN.md` file: YAML frontmatter + XML-tagged body, matching the GSD-shape demonstrated by `~/projects/moon/.../02-01-PLAN.md`.
-- [ ] **STP-02**: Step frontmatter (Pydantic-validated, `extra="forbid"`) declares: `phase`, `slice`, `step`, `type`, `wave`, `depends_on`, `files_modified`, `autonomous`, `requirements`, and the `must_haves` proof block (see PRF-01).
-- [ ] **STP-03**: Step body sections (XML-tagged): `<objective>`, `<execution_context>`, `<context>` (`@`-references), `<interfaces>` (literal code excerpts from upstream artifacts), `<tasks>` (one or more `<task>` blocks), `<threat_model>`, `<verification>`, `<success_criteria>`, `<output>`.
-- [ ] **STP-04**: Each `<task>` declares: `type`, `tdd` flag, `<name>`, `<files>`, `<read_first>` (exact files + line ranges), `<action>` (step-by-step prose with code blocks), `<verify><automated>` bash, `<acceptance_criteria>`, `<done>`.
-- [ ] **STP-05**: Task type taxonomy: `auto`, `auto+tdd`, `checkpoint:human-verify`, `checkpoint:decision`, `checkpoint:human-action`. Behavior of each is fully specified.
-- [ ] **STP-06**: plan-slice auto-selects Step granularity (coarse: 1–2 Steps; standard: 2–3; fine: 3–5) based on Slice scope and the 200k budget.
-- [ ] **STP-07**: `<interfaces>` block contains literal code excerpts from upstream artifacts so the executor needs **zero codebase exploration** for upstream context.
-- [ ] **STP-08**: `<read_first>` specifies exact files and line ranges per task — never "explore the codebase."
+- [x] **STP-01**: Each Step is a single `stepNN-PLAN.md` file: YAML frontmatter + XML-tagged body, matching the GSD-shape demonstrated by `~/projects/moon/.../02-01-PLAN.md`.
+- [x] **STP-02**: Step frontmatter (Pydantic-validated, `extra="forbid"`) declares: `phase`, `slice`, `step`, `type`, `wave`, `depends_on`, `files_modified`, `autonomous`, `requirements`, and the `must_haves` proof block (see PRF-01).
+- [x] **STP-03**: Step body sections (XML-tagged): `<objective>`, `<execution_context>`, `<context>` (`@`-references), `<interfaces>` (literal code excerpts from upstream artifacts), `<tasks>` (one or more `<task>` blocks), `<threat_model>`, `<verification>`, `<success_criteria>`, `<output>`.
+- [x] **STP-04**: Each `<task>` declares: `type`, `tdd` flag, `<name>`, `<files>`, `<read_first>` (exact files + line ranges), `<action>` (step-by-step prose with code blocks), `<verify><automated>` bash, `<acceptance_criteria>`, `<done>`.
+- [x] **STP-05**: Task type taxonomy: `auto`, `auto+tdd`, `checkpoint:human-verify`, `checkpoint:decision`, `checkpoint:human-action`. Behavior of each is fully specified.
+- [x] **STP-06**: plan-slice auto-selects Step granularity (coarse: 1–2 Steps; standard: 2–3; fine: 3–5) based on Slice scope and the 200k budget.
+- [x] **STP-07**: `<interfaces>` block contains literal code excerpts from upstream artifacts so the executor needs **zero codebase exploration** for upstream context.
+- [x] **STP-08**: `<read_first>` specifies exact files and line ranges per task — never "explore the codebase."
 
 ### Plan-as-Prompt (PAP)
 
-- [ ] **PAP-01**: `stepNN-PLAN.md` IS the executor's primary system prompt at execute-slice start. The harness injects it verbatim plus runtime augmentation (worktree path, prior task results, resolved dep `provides:` blocks).
-- [ ] **PAP-02**: Harness resolves all `@.planning/...` and `@-` references at injection time so the executor sees inlined content, not the literal `@` syntax.
-- [ ] **PAP-03**: Plans are **mutable with audit log**: `must_haves.*` and every `<verify>` block (task-level and slice-level) are immutable; `<action>`, `<read_first>`, prose-style sections are mutable by the executor.
-- [ ] **PAP-04**: Every plan edit emits a `plan_edit` event with `step_id`, diff, editor (executor/harness/human), and timestamp.
-- [ ] **PAP-05**: Harness blocks attempts to edit immutable sections via the `tool.execute.before` hook; rejected edits emit `plan_edit_blocked` events.
-- [ ] **PAP-06**: PLAN content stripping: harness removes upstream-only sections (e.g., plan-slice reasoning meta) at injection time to save tokens, but preserves the audit-logged original on disk.
+- [x] **PAP-01**: `stepNN-PLAN.md` IS the executor's primary system prompt at execute-slice start. The harness injects it verbatim plus runtime augmentation (worktree path, prior task results, resolved dep `provides:` blocks).
+- [x] **PAP-02**: Harness resolves all `@.planning/...` and `@-` references at injection time so the executor sees inlined content, not the literal `@` syntax.
+- [x] **PAP-03**: Plans are **mutable with audit log**: `must_haves.*` and every `<verify>` block (task-level and slice-level) are immutable; `<action>`, `<read_first>`, prose-style sections are mutable by the executor.
+- [x] **PAP-04**: Every plan edit emits a `plan_edit` event with `step_id`, diff, editor (executor/harness/human), and timestamp.
+- [x] **PAP-05**: Harness blocks attempts to edit immutable sections via the `tool.execute.before` hook; rejected edits emit `plan_edit_blocked` events.
+- [x] **PAP-06**: PLAN content stripping: harness removes upstream-only sections (e.g., plan-slice reasoning meta) at injection time to save tokens, but preserves the audit-logged original on disk.
 
 ### Boolean Proof Gate (PRF)
 
-- [ ] **PRF-01**: Step proof gate is the `must_haves` frontmatter block:
+- [x] **PRF-01**: Step proof gate is the `must_haves` frontmatter block:
   - `truths`: list of assertions verifiable by bash/python (e.g., "ofxparse2 is importable").
   - `artifacts`: list of `{path, provides, min_lines}` — files that must exist with content size ≥ `min_lines`.
   - `key_links`: list of `{from, to, via, pattern}` — cross-file references the harness greps for via regex.
-- [ ] **PRF-02**: Each `<task>` carries its own gate: `<verify><automated>` bash (must exit 0) and `<acceptance_criteria>` bullets (each verifiable).
-- [ ] **PRF-03**: Slice carries a slice-level gate: pre-commit `<verification>` bash blocks at end of each Step + `N-VERIFICATION.md` truth table at Slice wrap.
-- [ ] **PRF-04**: All proof checks are **pure-machine**: bash exit codes, file existence, line counts, regex matches. No LLM-as-judge anywhere in the gate.
-- [ ] **PRF-05**: Gate evaluation order: at task end → run task `<verify>` + `<acceptance_criteria>`; at Step end → run frontmatter `must_haves.*` checks; at Slice end → run slice `<verification>` + write `N-VERIFICATION.md`.
-- [ ] **PRF-06**: Failure escalation: 3 strikes (advisory inject) → context clear+reinject (single shot) → 3 more strikes → human gate at 6 total. Each strike = `gate_strike` event with `check_id`, `strike_number`, `agent_response_summary`.
-- [ ] **PRF-07**: A failed gate **blocks advancement**. The agent cannot start the next task/Step until every check passes. The harness enforces this via `tool.execute.before` blocking writes-to-next-step-files.
+- [x] **PRF-02**: Each `<task>` carries its own gate: `<verify><automated>` bash (must exit 0) and `<acceptance_criteria>` bullets (each verifiable).
+- [x] **PRF-03**: Slice carries a slice-level gate: pre-commit `<verification>` bash blocks at end of each Step + `N-VERIFICATION.md` truth table at Slice wrap.
+- [x] **PRF-04**: All proof checks are **pure-machine**: bash exit codes, file existence, line counts, regex matches. No LLM-as-judge anywhere in the gate.
+- [x] **PRF-05**: Gate evaluation order: at task end → run task `<verify>` + `<acceptance_criteria>`; at Step end → run frontmatter `must_haves.*` checks; at Slice end → run slice `<verification>` + write `N-VERIFICATION.md`.
+- [x] **PRF-06**: Failure escalation: 3 strikes (advisory inject) → context clear+reinject (single shot) → 3 more strikes → human gate at 6 total. Each strike = `gate_strike` event with `check_id`, `strike_number`, `agent_response_summary`.
+- [x] **PRF-07**: A failed gate **blocks advancement**. The agent cannot start the next task/Step until every check passes. The harness enforces this via `tool.execute.before` blocking writes-to-next-step-files.
 
 ### Analysis Paralysis Guard (APG)
 
-- [ ] **APG-01**: Harness counts consecutive read-only tool uses per active task. Read-only set: `Read`, `Grep`, `Glob`, `Explore`, `Bash` (when matching read-only command patterns).
-- [ ] **APG-02**: Default threshold: **5 consecutive read-only tools** without an intervening Write/Edit/Bash-mutating call. On hit, harness injects advisory: *"5+ read-only operations. State your hypothesis and either write code or report what's blocking you."*
-- [ ] **APG-03**: Threshold is configurable per step-type via plan frontmatter: research-heavy stages (discuss-slice, plan-slice/research) default to 15; execute-slice tasks default to 5.
-- [ ] **APG-04**: After 3 advisory injections in the same task without resolution, harness escalates: clears context and reinjects PLAN with a focused prompt naming the specific blocker.
-- [ ] **APG-05**: After escalation + 3 more advisories without resolution, harness force-stops the session and surfaces a human gate via opencode `question` tool.
-- [ ] **APG-06**: Each advisory and escalation emits a `paralysis_event` with task_id, count, threshold, agent_response.
+- [x] **APG-01**: Harness counts consecutive read-only tool uses per active task. Read-only set: `Read`, `Grep`, `Glob`, `Explore`, `Bash` (when matching read-only command patterns).
+- [x] **APG-02**: Default threshold: **5 consecutive read-only tools** without an intervening Write/Edit/Bash-mutating call. On hit, harness injects advisory: *"5+ read-only operations. State your hypothesis and either write code or report what's blocking you."*
+- [x] **APG-03**: Threshold is configurable per step-type via plan frontmatter: research-heavy stages (discuss-slice, plan-slice/research) default to 15; execute-slice tasks default to 5.
+- [x] **APG-04**: After 3 advisory injections in the same task without resolution, harness escalates: clears context and reinjects PLAN with a focused prompt naming the specific blocker.
+- [x] **APG-05**: After escalation + 3 more advisories without resolution, harness force-stops the session and surfaces a human gate via opencode `question` tool.
+- [x] **APG-06**: Each advisory and escalation emits a `paralysis_event` with task_id, count, threshold, agent_response.
 
 ### Scope Reduction Prohibition (SRP)
 
-- [ ] **SRP-01**: Harness validates each task's `<done>` against the Step's `must_haves.artifacts` after task completion; missing artifacts trigger gate failure (PRF-06).
-- [ ] **SRP-02**: Prohibited language scan on every Write/Edit content: `v1`, `simplified`, `placeholder`, `TODO`, `FIXME`, `future`. Detection emits `scope_check` event and injects a justification request.
-- [ ] **SRP-03**: Prohibited language is allowed only when paired with an explicit tracking-issue reference (e.g., `# TODO(SLC-09)` referencing a deferred-items entry).
-- [ ] **SRP-04**: Harness blocks Write/Edit to files outside the Step's `files_modified` allowlist (`tool.execute.before` hook). Out-of-scope edits require a deviation event with justification before being unblocked.
-- [ ] **SRP-05**: When the agent reports "this is too much for one Step," harness records a `split_recommendation` event and routes to plan-slice for re-planning rather than allowing scope reduction.
-- [ ] **SRP-06**: Out-of-scope findings (issues outside the current Step's blast radius) are logged to `slices/N-name/deferred-items.md` and surface in the Slice SUMMARY.
+- [x] **SRP-01**: Harness validates each task's `<done>` against the Step's `must_haves.artifacts` after task completion; missing artifacts trigger gate failure (PRF-06).
+- [x] **SRP-02**: Prohibited language scan on every Write/Edit content: `v1`, `simplified`, `placeholder`, `TODO`, `FIXME`, `future`. Detection emits `scope_check` event and injects a justification request.
+- [x] **SRP-03**: Prohibited language is allowed only when paired with an explicit tracking-issue reference (e.g., `# TODO(SLC-09)` referencing a deferred-items entry).
+- [x] **SRP-04**: Harness blocks Write/Edit to files outside the Step's `files_modified` allowlist (`tool.execute.before` hook). Out-of-scope edits require a deviation event with justification before being unblocked.
+- [x] **SRP-05**: When the agent reports "this is too much for one Step," harness records a `split_recommendation` event and routes to plan-slice for re-planning rather than allowing scope reduction.
+- [x] **SRP-06**: Out-of-scope findings (issues outside the current Step's blast radius) are logged to `slices/N-name/deferred-items.md` and surface in the Slice SUMMARY.
 
 ### Deviation Rules (DEV)
 
-- [ ] **DEV-01**: **Rule 1** — Auto-fix bugs (wrong queries, logic errors, type errors, null pointer). Max 3 attempts per issue. Each fix commits with `fix:` prefix. After 3 failures → escalate to Rule 4.
-- [ ] **DEV-02**: **Rule 2** — Auto-add missing critical functionality (error handling, input validation, null checks, missing auth on protected routes, missing DB indexes). Max 3 attempts. Documented in `stepNN-SUMMARY.md` `## Deviations` section.
-- [ ] **DEV-03**: **Rule 3** — Auto-fix blocking issues (missing dependency, wrong types, broken imports, build config errors). Max 3 attempts. After 3 failures → `checkpoint:decision`.
-- [ ] **DEV-04**: **Rule 4** — Architectural changes (new DB table, major schema change, switching frameworks, new infrastructure). **Always** human gate via opencode `question` tool with pros/cons table. Never auto-approved, even under `--full-yolo`.
-- [ ] **DEV-05**: Tiered autonomy levels:
+- [x] **DEV-01**: **Rule 1** — Auto-fix bugs (wrong queries, logic errors, type errors, null pointer). Max 3 attempts per issue. Each fix commits with `fix:` prefix. After 3 failures → escalate to Rule 4.
+- [x] **DEV-02**: **Rule 2** — Auto-add missing critical functionality (error handling, input validation, null checks, missing auth on protected routes, missing DB indexes). Max 3 attempts. Documented in `stepNN-SUMMARY.md` `## Deviations` section.
+- [x] **DEV-03**: **Rule 3** — Auto-fix blocking issues (missing dependency, wrong types, broken imports, build config errors). Max 3 attempts. After 3 failures → `checkpoint:decision`.
+- [x] **DEV-04**: **Rule 4** — Architectural changes (new DB table, major schema change, switching frameworks, new infrastructure). **Always** human gate via opencode `question` tool with pros/cons table. Never auto-approved, even under `--full-yolo`.
+- [x] **DEV-05**: Tiered autonomy levels:
   - **default (`--tiered`)**: `checkpoint:human-verify` auto-approves (visual sanity); `checkpoint:decision` and `checkpoint:human-action` stop.
   - **`--full-yolo`**: `human-verify` and `decision` auto-pick option 1; `human-action` and Rule 4 still stop.
   - **`--conservative`**: stop at every checkpoint.
-- [ ] **DEV-06**: Per-Slice autonomy override allowed (sensitive Slices may pin `--conservative` while milestone defaults to `--tiered`). Frontmatter field `autonomy` on the Slice.
-- [ ] **DEV-07**: Each deviation emits a `deviation` event with rule_id, fix_attempt_count, resolution path. SUMMARY.md `## Deviations` section is generated from these events at Step end.
+- [x] **DEV-06**: Per-Slice autonomy override allowed (sensitive Slices may pin `--conservative` while milestone defaults to `--tiered`). Frontmatter field `autonomy` on the Slice.
+- [x] **DEV-07**: Each deviation emits a `deviation` event with rule_id, fix_attempt_count, resolution path. SUMMARY.md `## Deviations` section is generated from these events at Step end.
 
 ### Subagent Management (SUB)
 
-- [ ] **SUB-01**: Harness spawns subagents via opencode's `task` tool with explicit `subagent_type`. No string-prompt-only spawns.
-- [ ] **SUB-02**: Static subagent whitelist per Slice stage:
+- [x] **SUB-01**: Harness spawns subagents via opencode's `task` tool with explicit `subagent_type`. No string-prompt-only spawns.
+- [x] **SUB-02**: Static subagent whitelist per Slice stage:
   - **discuss-slice**: `researcher`, `code-mapper`, `requirements-analyzer`
   - **plan-slice**: `researcher`, `pattern-mapper`, `planner`, `plan-validator`, `plan-checker`
   - **execute-slice**: `executor`, `code-fixer`, `test-generator`, `security-auditor`
   - **verify-slice**: `verifier`, `integration-checker`, `nyquist-auditor`
-- [ ] **SUB-03**: Plan frontmatter MAY narrow the whitelist (`allowed_subagents:` subset) but cannot expand it. Defense-in-depth.
-- [ ] **SUB-04**: Parallel subagent count is near-uncapped (default cap **20 concurrent**, configurable). Subagents are treated as **free context** — aggressive fanout for research, pattern-mapping, validation is encouraged.
-- [ ] **SUB-05**: Harness monitors subagent sessions via SSE events linked by parent `task_id`; child sessions emit `subagent_started`, `subagent_progress`, `subagent_complete` events.
-- [ ] **SUB-06**: Subagent results are **structured** (typed return shape per subagent_type). Harness spot-checks: declared artifacts exist, declared commits exist (git log).
-- [ ] **SUB-07**: Subagent crash recovery: max 3 restarts with continuation context. Each restart emits `subagent_restart` event.
-- [ ] **SUB-08**: `task_id` storage in event store survives both compaction and Slice-boundary session spawn.
-- [ ] **SUB-09**: Subagents inherit the parent Slice's autonomy level.
+- [x] **SUB-03**: Plan frontmatter MAY narrow the whitelist (`allowed_subagents:` subset) but cannot expand it. Defense-in-depth.
+- [x] **SUB-04**: Parallel subagent count is near-uncapped (default cap **20 concurrent**, configurable). Subagents are treated as **free context** — aggressive fanout for research, pattern-mapping, validation is encouraged.
+- [x] **SUB-05**: Harness monitors subagent sessions via SSE events linked by parent `task_id`; child sessions emit `subagent_started`, `subagent_progress`, `subagent_complete` events.
+- [x] **SUB-06**: Subagent results are **structured** (typed return shape per subagent_type). Harness spot-checks: declared artifacts exist, declared commits exist (git log).
+- [x] **SUB-07**: Subagent crash recovery: max 3 restarts with continuation context. Each restart emits `subagent_restart` event.
+- [x] **SUB-08**: `task_id` storage in event store survives both compaction and Slice-boundary session spawn.
+- [x] **SUB-09**: Subagents inherit the parent Slice's autonomy level.
 
 ### Harness Architecture (HRN)
 
-- [ ] **HRN-01**: Harness physical decomposition is documented as a layered diagram:
+- [x] **HRN-01**: Harness physical decomposition is documented as a layered diagram:
   - **Plugin hooks (control surface)** — chat.params, chat.message, tool.execute.before/after, session.compacting, shell.env.
   - **state-build MCP server** — plan_step, execute_step, verify_step, check_proof_gate, deviation_log, and 10+ more tools.
   - **state-daemon (background)** — event store, projector, scheduler, SSE bus, crash recovery.
-- [ ] **HRN-02**: Each plugin hook's role is fully specified: signature, when it fires, what it injects/blocks/records.
-- [ ] **HRN-03**: state-build MCP tool catalog is enumerated with input/output Pydantic models per tool.
-- [ ] **HRN-04**: Intervention tier order (all four levels are designed):
+- [x] **HRN-02**: Each plugin hook's role is fully specified: signature, when it fires, what it injects/blocks/records.
+- [x] **HRN-03**: state-build MCP tool catalog is enumerated with input/output Pydantic models per tool.
+- [x] **HRN-04**: Intervention tier order (all four levels are designed):
   1. **Advisory inject** (system message into context)
   2. **Tool-block** (refuse a tool call via `tool.execute.before`)
   3. **Force context clear+reinject** (trigger `session.compacting` with reduced state)
   4. **Force-stop + human gate** (end session, surface via `question`)
-- [ ] **HRN-05**: Each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task.
-- [ ] **HRN-06**: All human gates use opencode's `question` tool; harness never invents its own UI.
-- [ ] **HRN-07**: Harness state is fully reconstructable from event store (daemon restart-safe).
-- [ ] **HRN-08**: Architecture document includes a sequence diagram for one full Slice lifecycle (spawn → discuss → plan → execute with one Step → verify → close).
+- [x] **HRN-05**: Each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task.
+- [x] **HRN-06**: All human gates use opencode's `question` tool; harness never invents its own UI.
+- [x] **HRN-07**: Harness state is fully reconstructable from event store (daemon restart-safe).
+- [x] **HRN-08**: Architecture document includes a sequence diagram for one full Slice lifecycle (spawn → discuss → plan → execute with one Step → verify → close).
 
 ---
 
@@ -166,79 +166,79 @@ Populated by gsd-roadmapper on 2026-05-08 during v41 roadmap creation. All 72 v1
 
 | Requirement | Phase | Status |
 |---|---|---|
-| SLC-01 | 402 | Pending |
-| SLC-02 | 402 | Pending |
-| SLC-03 | 402 | Pending |
-| SLC-04 | 402 | Pending |
-| SLC-05 | 402 | Pending |
-| SLC-06 | 402 | Pending |
-| SLC-07 | 402 | Pending |
-| CTX-01 | 402 | Pending |
-| CTX-02 | 402 | Pending |
-| CTX-03 | 402 | Pending |
-| CTX-04 | 402 | Pending |
-| CTX-05 | 402 | Pending |
-| CTX-06 | 402 | Pending |
-| CTX-07 | 402 | Pending |
-| CTX-08 | 402 | Pending |
-| CTX-09 | 402 | Pending |
-| STP-01 | 403 | Pending |
-| STP-02 | 403 | Pending |
-| STP-03 | 403 | Pending |
-| STP-04 | 403 | Pending |
-| STP-05 | 403 | Pending |
-| STP-06 | 403 | Pending |
-| STP-07 | 403 | Pending |
-| STP-08 | 403 | Pending |
-| PAP-01 | 403 | Pending |
-| PAP-02 | 403 | Pending |
-| PAP-03 | 403 | Pending |
-| PAP-04 | 403 | Pending |
-| PAP-05 | 403 | Pending |
-| PAP-06 | 403 | Pending |
-| PRF-01 | 404 | Pending |
-| PRF-02 | 404 | Pending |
-| PRF-03 | 404 | Pending |
-| PRF-04 | 404 | Pending |
-| PRF-05 | 404 | Pending |
-| PRF-06 | 404 | Pending |
-| PRF-07 | 404 | Pending |
-| APG-01 | 404 | Pending |
-| APG-02 | 404 | Pending |
-| APG-03 | 404 | Pending |
-| APG-04 | 404 | Pending |
-| APG-05 | 404 | Pending |
-| APG-06 | 404 | Pending |
-| SRP-01 | 404 | Pending |
-| SRP-02 | 404 | Pending |
-| SRP-03 | 404 | Pending |
-| SRP-04 | 404 | Pending |
-| SRP-05 | 404 | Pending |
-| SRP-06 | 404 | Pending |
-| DEV-01 | 405 | Pending |
-| DEV-02 | 405 | Pending |
-| DEV-03 | 405 | Pending |
-| DEV-04 | 405 | Pending |
-| DEV-05 | 405 | Pending |
-| DEV-06 | 405 | Pending |
-| DEV-07 | 405 | Pending |
-| SUB-01 | 405 | Pending |
-| SUB-02 | 405 | Pending |
-| SUB-03 | 405 | Pending |
-| SUB-04 | 405 | Pending |
-| SUB-05 | 405 | Pending |
-| SUB-06 | 405 | Pending |
-| SUB-07 | 405 | Pending |
-| SUB-08 | 405 | Pending |
-| SUB-09 | 405 | Pending |
-| HRN-01 | 406 | Pending |
-| HRN-02 | 406 | Pending |
-| HRN-03 | 406 | Pending |
-| HRN-04 | 406 | Pending |
-| HRN-05 | 406 | Pending |
-| HRN-06 | 406 | Pending |
-| HRN-07 | 406 | Pending |
-| HRN-08 | 406 | Pending |
+| SLC-01 | 402 | Satisfied |
+| SLC-02 | 402 | Satisfied |
+| SLC-03 | 402 | Satisfied |
+| SLC-04 | 402 | Satisfied |
+| SLC-05 | 402 | Satisfied |
+| SLC-06 | 402 | Satisfied |
+| SLC-07 | 402 | Satisfied |
+| CTX-01 | 402 | Satisfied |
+| CTX-02 | 402 | Satisfied |
+| CTX-03 | 402 | Satisfied |
+| CTX-04 | 402 | Satisfied |
+| CTX-05 | 402 | Satisfied |
+| CTX-06 | 402 | Satisfied |
+| CTX-07 | 402 | Satisfied |
+| CTX-08 | 402 | Satisfied |
+| CTX-09 | 402 | Satisfied |
+| STP-01 | 403 | Satisfied |
+| STP-02 | 403 | Satisfied |
+| STP-03 | 403 | Satisfied |
+| STP-04 | 403 | Satisfied |
+| STP-05 | 403 | Satisfied |
+| STP-06 | 403 | Satisfied |
+| STP-07 | 403 | Satisfied |
+| STP-08 | 403 | Satisfied |
+| PAP-01 | 403 | Satisfied |
+| PAP-02 | 403 | Satisfied |
+| PAP-03 | 403 | Satisfied |
+| PAP-04 | 403 | Satisfied |
+| PAP-05 | 403 | Satisfied |
+| PAP-06 | 403 | Satisfied |
+| PRF-01 | 404 | Satisfied |
+| PRF-02 | 404 | Satisfied |
+| PRF-03 | 404 | Satisfied |
+| PRF-04 | 404 | Satisfied |
+| PRF-05 | 404 | Satisfied |
+| PRF-06 | 404 | Satisfied |
+| PRF-07 | 404 | Satisfied |
+| APG-01 | 404 | Satisfied |
+| APG-02 | 404 | Satisfied |
+| APG-03 | 404 | Satisfied |
+| APG-04 | 404 | Satisfied |
+| APG-05 | 404 | Satisfied |
+| APG-06 | 404 | Satisfied |
+| SRP-01 | 404 | Satisfied |
+| SRP-02 | 404 | Satisfied |
+| SRP-03 | 404 | Satisfied |
+| SRP-04 | 404 | Satisfied |
+| SRP-05 | 404 | Satisfied |
+| SRP-06 | 404 | Satisfied |
+| DEV-01 | 405 | Satisfied |
+| DEV-02 | 405 | Satisfied |
+| DEV-03 | 405 | Satisfied |
+| DEV-04 | 405 | Satisfied |
+| DEV-05 | 405 | Satisfied |
+| DEV-06 | 405 | Satisfied |
+| DEV-07 | 405 | Satisfied |
+| SUB-01 | 405 | Satisfied |
+| SUB-02 | 405 | Satisfied |
+| SUB-03 | 405 | Satisfied |
+| SUB-04 | 405 | Satisfied |
+| SUB-05 | 405 | Satisfied |
+| SUB-06 | 405 | Satisfied |
+| SUB-07 | 405 | Satisfied |
+| SUB-08 | 405 | Satisfied |
+| SUB-09 | 405 | Satisfied |
+| HRN-01 | 406 | Satisfied |
+| HRN-02 | 406 | Satisfied |
+| HRN-03 | 406 | Satisfied |
+| HRN-04 | 406 | Satisfied |
+| HRN-05 | 406 | Satisfied |
+| HRN-06 | 406 | Satisfied |
+| HRN-07 | 406 | Satisfied |
+| HRN-08 | 406 | Satisfied |
 
 **Coverage:**
 - v1 requirements: 73 total (SLC: 7, CTX: 9, STP: 8, PAP: 6, PRF: 7, APG: 6, SRP: 6, DEV: 7, SUB: 9, HRN: 8)

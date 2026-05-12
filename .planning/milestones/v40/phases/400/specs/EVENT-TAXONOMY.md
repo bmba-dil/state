@@ -389,3 +389,71 @@ Pydantic class definitions in the owning Phase 405 spec docs are authoritative; 
 ### Cross-reference to umbrella event (Phase 406)
 
 Phase 406's `state.harness.intervention` umbrella event (HRN-05) aggregates Rule-4 escalations from `deviation_logged`, `subagent_spot_check_failed`, `subagent_crash_detected`, and `subagent_orphan_detected`. The umbrella event is owned by Phase 406's HARNESS-ARCHITECTURE.md; this amendment forward-references the rollup.
+
+---
+
+## v41 Amendment — Audit Supplement: Context + Harness + SRP-05 Split Event Registration
+
+**Phase:** 406 (Harness Architecture Rollup — audit-time supplementary registration)
+**Status:** Canonical (v41)
+**Append-only:** All entries below are NEW; nothing above this header has been edited.
+**Build-mode only:** All new event types and prefixes registered here live in `BUILD_ONLY_EVENT_PREFIXES`. No `state.teach.*` analog exists.
+
+This supplementary amendment closes registration gaps discovered during the v41 audit (`.planning/v41-MILESTONE-AUDIT.md` Findings INT-01..INT-03):
+
+1. Three `state.session.*` context-threshold + overflow-recovery events are consumed by Phase 406 HARNESS-ARCHITECTURE.md §4.4 dispatcher (CTX-04 + CTX-09) but were never registered in the master taxonomy.
+2. The `harness.context_meter` event referenced in CONTEXT-PROTOCOL.md §"Daemon SSE event" (CTX-08) and HARNESS-ARCHITECTURE.md §5.1 Cat.5 was never registered here.
+3. The `state.slice.split_recommendation` event referenced by SCOPE-PROHIBITION.md §"request_step_split MCP Tool (SRP-05)" was indexed in Phase 404's amendment via `split_recommendation` SCOPE event but the slice-aggregated variant (the canonical form used by the projector for the parent Slice's pending-replan flag) was not separately surfaced.
+
+This amendment is purely additive — Phase 402, 403, 404, 405 amendment blocks above are byte-preserved.
+
+### 5 supplementary event types
+
+| Event Type | Trigger | State Transition | Owning REQ → Spec |
+|---|---|---|---|
+| `state.session.context_threshold_warning_block` | Context meter crosses ≤35% remaining (CTX-04 warning threshold) AND agent attempts a write belonging to next `<task>` | Active session → next-task write blocked until compact-and-rotate completes | CTX-04 → CONTEXT-PROTOCOL.md §"Threshold Action Table (CTX-04 + CTX-09)" |
+| `state.session.context_threshold_emergency` | Context meter crosses ≤25% remaining (CTX-04 emergency threshold) | Active session → triggers compaction snapshot + reinject | CTX-04 → CONTEXT-PROTOCOL.md §"Threshold Action Table (CTX-04 + CTX-09)" |
+| `state.session.overflow_recovery_attempted` | Provider rejects request with context-overflow error; one-shot per user turn via `_overflow_recovery_attempted` flag | Active session → reactive compact + retry once; second overflow in same turn surfaces to user | CTX-09 → CONTEXT-PROTOCOL.md §"Reactive Overflow Recovery (CTX-09)" |
+| `harness.context_meter` | Daemon `tool.execute.after` reads opencode context meter and mirrors to SSE bus | (no state change; observability event consumed by TUI) | CTX-08 → CONTEXT-PROTOCOL.md §"Context-Meter Wiring (CTX-08)" |
+| `state.slice.split_recommendation` | Agent invokes `request_step_split` MCP tool; harness records the request and routes to plan-slice re-entry | Slice `pending_replan` flag set; projector replays unresolved rows to rebuild state | SRP-05 → SCOPE-PROHIBITION.md §"request_step_split MCP Tool (SRP-05)" |
+
+### Mode-isolation: extend `BUILD_ONLY_EVENT_PREFIXES`
+
+The two new prefixes (`state.session.` and `harness.`) are Build-mode only — they live alongside the v40 prefixes plus the v41 additions registered in earlier amendments. The canonical `BUILD_ONLY_EVENT_PREFIXES` value as of v41 audit close is:
+
+```python
+BUILD_ONLY_EVENT_PREFIXES: frozenset[str] = frozenset({
+    "state.arc.",
+    "state.stage.",
+    "state.slice.",
+    "state.step.",
+    "state.harness.",       # added by Phase 404 §"Mode-isolation note" carry-forward; reasserted here
+    "state.session.",       # NEW — registers CTX-04 + CTX-09 + (future v17) context-threshold + overflow events
+    "compaction.",          # registered by Phase 402 amendment
+    "harness.",             # NEW — registers CTX-08 context-meter observability surface
+})
+```
+
+The `state.session.` prefix is distinct from the `state.harness.` prefix because the former is anchored to the active opencode session (session-scoped events), while the latter is anchored to the harness intervention dispatcher (correlation-scoped umbrella events). The `harness.` prefix without `state.` namespace is reserved for cross-cutting daemon observability events that do not aggregate to a specific FSM tier (`harness.context_meter` is its sole v1 inhabitant).
+
+### Naming-convention check
+
+- `state.session.*` events match the regex `^state\.session\.[a-z_]+$`.
+- `harness.context_meter` matches the regex `^harness\.[a-z_]+$`.
+- `state.slice.split_recommendation` matches the regex `^state\.slice\.[a-z_]+$`.
+- No naming-drift entries; all entries `[a-z_]+` only.
+
+### Authoritative-ordering note
+
+CONTEXT-PROTOCOL.md (CTX-04, CTX-08, CTX-09) and SCOPE-PROHIBITION.md (SRP-05) own the canonical Pydantic payload schemas. HARNESS-ARCHITECTURE.md §4.4 owns the dispatcher routing. This amendment is a registry index — when field-set details diverge between this index and the owning spec, the owning spec wins.
+
+### Cross-reference to umbrella event (Phase 406)
+
+The 5 supplementary events all feed Phase 406's `state.harness.intervention` umbrella event via §4.4 dispatcher case arms:
+- `state.session.context_threshold_warning_block` → tier-2 tool_block with `trigger_reason="context_threshold_warning"`.
+- `state.session.context_threshold_emergency` → tier-3 clear_reinject with `trigger_reason="context_threshold_emergency"`.
+- `state.session.overflow_recovery_attempted` → tier-3 clear_reinject with `trigger_reason="context_overflow_reactive"`.
+- `harness.context_meter` → no umbrella emission (pure observability); consumed by TUI and APG counter via `tool.execute.after`.
+- `state.slice.split_recommendation` → tier-1 advisory with `trigger_reason="split_recommendation_pending"`.
+
+*Original v40 spec text and all four prior v41 amendment blocks (Phase 402, 403, 404, 405) above this block are untouched. This amendment is purely additive, appended per Phase 402 convention.*

@@ -48,8 +48,8 @@ section of the stepNPLAN.md format:
   `<context>`, `<interfaces>`, `<tasks>`, `<threat_model>`, `<verification>`,
   `<success_criteria>`, `<output>`.
 - **Three task types** demonstrated in `<tasks>`:
-  - `auto+tdd` (Task 1) — RED-before-GREEN with `GSD-Test-Result: FAIL` commit trailer.
-  - `auto` (Task 2) — GREEN implementation with `GSD-Test-Result: PASS` commit trailer.
+  - `auto+tdd` (Task 1) — RED-before-GREEN with `STATE-Test-Result: FAIL` commit trailer.
+  - `auto` (Task 2) — GREEN implementation with `STATE-Test-Result: PASS` commit trailer.
   - `checkpoint:decision` (Task 3) — `<options>` sub-tag with 2 named options
     (`OPT_NAIVE_UTC`, `OPT_UTC_Z`) each carrying `pros` and `cons` attributes.
 - **STP-07 compliant `<interfaces>` block** with two LITERAL upstream excerpts:
