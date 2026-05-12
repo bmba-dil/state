@@ -1388,3 +1388,124 @@ The umbrella `tier` value is server-derived, never agent-emitted. The dispatcher
 
 §5 (Plan 04 of this phase) will enumerate the `state.harness.intervention` event among the ~30 event types the HRN-07 replay protocol must consume — Category 5 (umbrella + context) of the 5-table breakdown. §6 (Plan 04) will surface specific intervention emission points in the full-Slice lifecycle Mermaid sequence diagram (HRN-08); the exemplar Slice is the `compaction-snapshot-schema` Slice from 403 EXEMPLAR-stepNPLAN.md, with at least one tier-1 advisory site (paralysis-counter cross), one tier-2 site (PAP-05 immutability block), one tier-3 site (force_clear_and_reinject demo), and one tier-4 site (the `checkpoint:decision` task on orjson flag selection, surfaced via surface_human_gate).
 
+---
+
+## §5 Event-Replay Reconstruction Proof (HRN-07)
+
+HRN-07 is the harness's restart-safety contract: **full harness state — every per-task counter, every in-flight subagent, every pending intervention, every plan-edit chain, every Slice-stage progression — MUST be reconstructable from `.state/events.sqlite` alone**, given a daemon restart at any moment. The event store is the single source of truth (PROJECT.md cardinal rule). The projector's in-memory state is a derived projection; the on-disk markdown artifacts (`stepNSUMMARY.md`, `N-VERIFICATION.md`, `last-snapshot.md`) are convenience side-effects. After a daemon crash the daemon must boot, open the SQLite event store via the single-writer facade, load the latest `CompactionSnapshot` row per active Slice, replay events forward applying per-chain reducers, reconcile orphan subagents through opencode's session API, and resume the plugin hooks — all without referring to any prior in-memory state.
+
+This section is the proof: it enumerates the canonical set of replay-input events (§5.1), specifies the 5-step reconstruction protocol the daemon runs at boot (§5.2), and walks the hard-case worked example — a daemon restart mid-`run-slice` with two in-flight subagents and a paralysis counter at 4 of 6 — to show every counter rehydrates and every orphan reconciles (§5.3). Every event in the replay enumeration was specified by one of the prior v41 specs (402–405) plus this phase's umbrella event; this section adds no new event types — it consolidates the replay-input set into one operative table.
+
+### §5.1 Replay-input event enumeration (5-category breakdown)
+
+The replay-input set is organized into five categories. Total: ~30 event types. For each event, the table names the event type string (the `type` field on the `EventEnvelope` outer shape from `src/state_core/schema.py` lines 239-265), the Pydantic payload class that rides `data`, and the owning v41 spec. The table is HRN-07's load-bearing enumeration: any v14 implementation that omits a replay-input event from its projector chain fails the HRN-07 contract.
+
+#### Category 1 — Slice-stage chain (4 events)
+
+Stage-boundary events fired by the four-stage Slice cycle (402 SLICE-CYCLE.md §"Stage-Boundary Events"). One per stage; each `aggregate_id` is the `slice_id`. Replay rebuilds the current Slice stage by walking the most recent stage-boundary event per Slice.
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.slice.design_completed` | `SliceStageCompleted` (stage=`"design"`) | 402 SLICE-CYCLE.md §"Stage-Boundary Events" |
+| `state.slice.research_completed` | `SliceStageCompleted` (stage=`"research"`) | 402 SLICE-CYCLE.md §"Stage-Boundary Events" |
+| `state.slice.run_completed` | `SliceStageCompleted` (stage=`"run"`) | 402 SLICE-CYCLE.md §"Stage-Boundary Events" |
+| `state.slice.verify_completed` | `SliceStageCompleted` (stage=`"verify"`) | 402 SLICE-CYCLE.md §"Stage-Boundary Events" |
+
+#### Category 2 — Plan-lifecycle chain (9 events)
+
+Step-tier plan-authoring + checkpoint + replan-continuity events (403 STEP-EVENTS.md). All carry `aggregate_type="step"` except the three replan-continuity events (`renamed` / `added` / `removed`) which carry `aggregate_type="slice"` because they are emitted by the parent Slice's replan transition.
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.plan_authored` | `StepPlanAuthored` (PAP-06) | 403 STEP-EVENTS.md §"Plan-Lifecycle Events" |
+| `state.step.plan_edit` | `PlanEdit` (PAP-04) | 403 STEP-EVENTS.md §"Plan-Lifecycle Events" |
+| `state.step.plan_edit_blocked` | `PlanEditBlocked` (PAP-05) | 403 STEP-EVENTS.md §"Plan-Lifecycle Events" |
+| `state.step.checkpoint_auto_resolved` | `CheckpointAutoResolved` (STP-05) | 403 STEP-EVENTS.md §"Checkpoint Events" |
+| `state.step.checkpoint_human_action_pending` | `CheckpointHumanActionPending` (STP-05) | 403 STEP-EVENTS.md §"Checkpoint Events" |
+| `state.step.checkpoint_human_action_resolved` | `CheckpointHumanActionResolved` (STP-05) | 403 STEP-EVENTS.md §"Checkpoint Events" |
+| `state.step.renamed` | `StepRenamed` (STP-06) | 403 STEP-EVENTS.md §"Replan-Continuity Events" |
+| `state.step.added` | `StepAdded` (STP-06) | 403 STEP-EVENTS.md §"Replan-Continuity Events" |
+| `state.step.removed` | `StepRemoved` (STP-06) | 403 STEP-EVENTS.md §"Replan-Continuity Events" |
+
+The PAP-04 `plan_edit` event chain is replay-deterministic: each row carries a unified diff plus `before_sha256` + `after_sha256`. The projector replays the diff chain from the original `plan_authored` event, verifying the hash continuity at each step (403 STEP-EVENTS.md §"Replay-time integrity check"). A hash break halts replay and emits a `state.harness.intervention(tier="human_gate", trigger_reason="deviation_rule_4_architectural")` for the affected `step_id` — replay corruption is treated as architectural debt, not a recoverable bug.
+
+#### Category 3 — Counter chains (17 events)
+
+The four independent per-chain counters (APG paralysis, PRF gate strikes, DEV deviations, SUB subagent crashes). Each chain emits its own counter-affecting events; the projector reduces them independently per the 4-counter independence discipline (PROOF-GATE.md §6 + DEVIATION-RULES.md §6 + SUBAGENT-MONITORING.md §4 carry-forward).
+
+**APG (1 event):**
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.paralysis_event` | `ParalysisEvent` (APG) | 404 ANALYSIS-PARALYSIS-GUARD.md §"Pydantic payload" |
+
+**PRF (4 events):**
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.gate_strike` | `GateStrike` (PRF-06) | 404 PROOF-GATE.md §"state.step.gate_strike" |
+| `state.step.gate_resolved` | `GateResolved` | 404 PROOF-GATE.md §"state.step.gate_resolved" |
+| `state.step.step_verify_completed` | `StepVerifyCompleted` | 404 PROOF-GATE.md §"state.step.step_verify_completed" |
+| `state.slice.slice_verify_completed` | `SliceVerifyCompleted` | 404 PROOF-GATE.md §"state.slice.slice_verify_completed" |
+
+**DEV (4 events):**
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.deviation_logged` | `Deviation` | 405 DEVIATION-RULES.md §"deviation_* event registry" |
+| `state.step.deviation_classification_rejected` | `DeviationClassificationRejected` | 405 DEVIATION-RULES.md §"deviation_* event registry" |
+| `state.step.deviation_resolution_recorded` | `DeviationResolutionRecorded` | 405 DEVIATION-RULES.md §"deviation_* event registry" |
+| `state.step.deviation_cap_exceeded` | `DeviationCapExceeded` | 405 DEVIATION-RULES.md §"deviation_* event registry" |
+
+**SUB (8 events):**
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.subagent_started` | `SubagentStarted` | 405 SUBAGENT-MONITORING.md §"8 new SSE event types" |
+| `state.step.subagent_progress` | `SubagentProgress` | 405 SUBAGENT-MONITORING.md §"8 new SSE event types" |
+| `state.step.subagent_complete` | `SubagentComplete` | 405 SUBAGENT-MONITORING.md §"8 new SSE event types" |
+| `state.step.subagent_spot_check_failed` | `SubagentSpotCheckFailed` | 405 SUBAGENT-MONITORING.md §"Spot-check failure event" |
+| `state.step.subagent_crash_detected` | `SubagentCrashDetected` | 405 SUBAGENT-MONITORING.md §"Crash taxonomy" |
+| `state.step.subagent_restart` | `SubagentRestart` | 405 SUBAGENT-MONITORING.md §"Restart counter" |
+| `state.step.subagent_restart_exhausted` | `SubagentRestartExhausted` | 405 SUBAGENT-MONITORING.md §"Restart counter" |
+| `state.step.subagent_orphan_detected` | `SubagentOrphanDetected` | 405 SUBAGENT-MONITORING.md §"Orphan reconciliation flow" |
+
+#### Category 4 — Scope chain (4 events)
+
+Scope-prohibition events fired by the SRP machinery (404 SCOPE-PROHIBITION.md) plus the two subagent-scope events from 405 SUBAGENT-MANAGEMENT.md that share Layer-6 enforcement with the SRP `files_modified` allowlist.
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.step.scope_check` | `ScopeCheck` (SRP-02) | 404 SCOPE-PROHIBITION.md §"scope_check event" |
+| `state.step.scope_deviation` | `ScopeDeviation` (SRP-04) | 404 SCOPE-PROHIBITION.md §"Layer 1 — files_modified allowlist" |
+| `state.step.scope_deviation_request` | `ScopeDeviationRequest` (SRP-05) | 404 SCOPE-PROHIBITION.md §"scope_deviation_request MCP Tool Flow" |
+| `state.step.scope_deviation_resolved` | `ScopeDeviationResolved` (SRP-05) | 404 SCOPE-PROHIBITION.md §"scope_deviation_request MCP Tool Flow" |
+
+(Note: `state.step.subagent_whitelist_violation` and `state.slice.subagent_cap_expansion_rejected` from 405 SUBAGENT-MANAGEMENT.md SUB-03/SUB-04 surface in §4 as tier-2 tool-block triggers but are not separately enumerated here because they project into the umbrella event's `trigger_reason` field, not into an independent counter chain. v14 MUST persist them to the event store; the projector consumes them via the §4.4 dispatcher.)
+
+#### Category 5 — Umbrella + context (4 events)
+
+The umbrella intervention event introduced by this phase (HRN-05) plus the three context-meter / compaction events from 402 CONTEXT-PROTOCOL.md that drive both the umbrella event's CTX trigger reasons and the daemon's snapshot rehydration.
+
+| Event type | Pydantic class | Owning spec |
+| --- | --- | --- |
+| `state.harness.intervention` | `HarnessIntervention` (HRN-05) | 406 HARNESS-ARCHITECTURE.md §4 (this rollup) |
+| `compaction.snapshot_taken` | `CompactionSnapshotTaken` | 402 CONTEXT-PROTOCOL.md §"Trigger sources" |
+| `compaction.reinject_completed` | `CompactionReinjectCompleted` | 402 CONTEXT-PROTOCOL.md §"Reinjection event" |
+| `harness.context_meter` | `HarnessContextMeter` (CTX-08) | 402 CONTEXT-PROTOCOL.md §"Daemon SSE event" |
+
+#### Total event surface
+
+| Category | Count | Owning phase(s) |
+| --- | --- | --- |
+| 1. Slice-stage chain | 4 | 402 |
+| 2. Plan-lifecycle chain | 9 | 403 |
+| 3. Counter chains (APG + PRF + DEV + SUB) | 17 | 404 + 405 |
+| 4. Scope chain | 4 | 404 |
+| 5. Umbrella + context | 4 | 406 + 402 |
+| **Total** | **38 event types** | 402–406 |
+
+The 38-event count is the operative replay-input enumeration. A v14 projector that handles only 37 categories is by construction non-conformant. Beyond this set, v40 EVENT-TAXONOMY.md's 11 baseline Step events (`created` / `designed` / `planned` / `ran` / `verify_started` / `verify_passed` / `verify_failed` / `advanced` / `blocked` / `unblocked` / `abandoned`) plus the v40 baseline Slice events also replay — but they are the v40 FSM-transition tier handled by the existing v40 projector, not the harness-specific reducer chains added by 402–405 + this phase. HRN-07 covers the v41-additive harness surface; v40's FSM tier is inherited as-is.
+
+The double-count discipline (406-CONTEXT.md `<decisions>` "Per-tier event count enumeration accuracy"): every counter-chain event in Categories 3–4 that triggers an umbrella intervention ALSO produces a paired Category-5 `state.harness.intervention` row. The two rows replay independently; the projector can compute counter state from Category 3 alone OR umbrella state from Category 5 alone. The two-event emission rule (§4.4 carry-forward) is the structural guarantee.
+
