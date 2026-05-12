@@ -1509,3 +1509,71 @@ The 38-event count is the operative replay-input enumeration. A v14 projector th
 
 The double-count discipline (406-CONTEXT.md `<decisions>` "Per-tier event count enumeration accuracy"): every counter-chain event in Categories 3–4 that triggers an umbrella intervention ALSO produces a paired Category-5 `state.harness.intervention` row. The two rows replay independently; the projector can compute counter state from Category 3 alone OR umbrella state from Category 5 alone. The two-event emission rule (§4.4 carry-forward) is the structural guarantee.
 
+### §5.2 Reconstruction protocol (5 numbered steps)
+
+The daemon executes this 5-step protocol on every boot — cold start, restart-after-crash, or controlled relaunch are all the same code path. Every step is deterministic given the inputs (event store contents + opencode session API responses); no LLM call appears in the protocol (pure-machine carry-forward from §1).
+
+**Step 1 — Open the event store via the single-writer facade.**
+
+Open `.state/events.sqlite` through the project's single-writer-sqlite-facade implementation (carry-forward of the gsd-2 `single-writer-sqlite-facade.md` pattern as a state-project discipline). The facade enforces serialized writes through a single writer task and pooled readers; concurrent daemon boots (which should not happen — launchd / `systemd --user` guarantees a single instance) would block at facade-creation time rather than corrupt the WAL. The facade exposes a `query_events_since(entry_id: str) -> AsyncIterator[EventEnvelope]` cursor that the replay loop consumes in Steps 3 + 4.
+
+**Step 2 — Load the latest `CompactionSnapshot` row per active Slice.**
+
+For each Slice whose outer FSM state is not in `{shipped, reverted, abandoned}` (v40 D-19 + D-13 + D-14 + D-15 carry-forward), query the event store for the most recent `compaction.snapshot_taken` row matching `aggregate_id == slice_id`. Decode the row's `data` field as a `CompactionSnapshot` Pydantic instance (402 CONTEXT-PROTOCOL.md §5 CTX-05 schema). Seed the projector's per-Slice in-memory state from the snapshot's fields:
+
+- `slice_id`, `step_id`, `task_id` — restore the current execution pointer.
+- `session_id`, `prior_session_id` — restore the session chain (`prior_session_id` is non-None on Slice-boundary spawns and lets the projector reconstruct the cross-Slice session lineage per CTX-07 Identifier Survival).
+- `active_plan_path` — the on-disk `stepNPLAN.md` path used by the executor's next reinject.
+- `current_task_pointer`, `last_verify_result` — restore the executor's task-cursor and last gate verdict.
+- `provides_blocks` — the upstream Step `SUMMARY.md` `provides:` blocks already injected into the prior session's reinject payload (CTX-06 carry-forward).
+- `worktree_path` — the Slice's per-Slice worktree (SLC-04 carry-forward).
+
+The 405 SUB-08 extension of `CompactionSnapshot` (`in_flight_subagents: list[InFlightSubagent]` + `subagent_restart_counters: dict[tuple[str, str], int]`) is also seeded at this step. Slices with no `compaction.snapshot_taken` row yet (a Slice that crashed before its first compaction) seed an empty per-Slice state and rely on Step 3's full-replay-from-Slice-creation fallback.
+
+The snapshot is the projector's "fast-forward token" — replay starts from `snapshot.first_kept_entry_id` rather than from the Slice's beginning, bounding worst-case replay to the last compaction window (typically ≤25k tokens, by CTX-04 threshold rules). v14's projector MAY skip Step 2 entirely and replay every Slice from the original `state.slice.created` event; correctness is preserved but boot time scales linearly with Slice age. The snapshot fast-forward is a performance optimization layered on top of the correctness contract.
+
+**Step 3 — Replay forward, applying per-chain reducers.**
+
+Walk every event row from `first_kept_entry_id` (per Slice) forward, sorted by `(seq, id)` (the per-aggregate monotonic sequence number + ULID tiebreak from `EventEnvelope`). For each event, dispatch to the per-chain reducer that owns the event type. The 5-reducer roster:
+
+1. **APG counter** (`state_build/paralysis/counter.py`) — consumes `state.step.paralysis_event`; maintains `per_task_consecutive_read_only_count: dict[task_id, int]`. Tier transitions (advisory → reinject → human_gate) are recomputed from the chain of `paralysis_event` rows with matching `task_id`, ordered by `triggered_at` (404 ANALYSIS-PARALYSIS-GUARD.md §"Replay rebuilds counter state" carry-forward).
+2. **PRF counter** (`state_build/proof/counter.py`) — consumes `state.step.gate_strike`, `state.step.gate_resolved`, `state.step.step_verify_completed`, `state.slice.slice_verify_completed`; maintains `per_check_strike_chain: dict[tuple[task_id, check_id], int]`. A `gate_resolved` row with `pass|flag|omitted` verdict closes the chain; a `state.harness.intervention(tier="human_gate", trigger_reason="gate_strike_6_human_gate")` row in Category 5 confirms strike-6 was reached without the chain being closed (404 PROOF-GATE.md §"On `(task_id, check_id)` close" carry-forward).
+3. **DEV counter** (`state_build/deviation/counter.py`) — consumes the four DEV events (`deviation_logged`, `deviation_classification_rejected`, `deviation_resolution_recorded`, `deviation_cap_exceeded`); maintains `per_signature_attempt_chain: dict[tuple[task_id, rule_id, issue_signature], int]`. A `deviation_cap_exceeded` row records the 4th-attempt structural promotion; the chain transitions to "Rule 4 human gate pending" until a paired `state.harness.intervention(tier="human_gate", trigger_reason="deviation_rule_4_architectural")` row + `deviation_resolution_recorded` row close it (405 DEVIATION-RULES.md §"Cap check" carry-forward).
+4. **SUB counter** (`state_build/subagents/restart_counter.py`) — consumes the eight SUB events; maintains `per_tuple_restart_count: dict[tuple[parent_task_id, subagent_type], int]` plus `in_flight_subagents: dict[invocation_id, InFlightSubagent]`. The in-flight map is built by matching every `subagent_started` row against the absence of a paired `subagent_complete` / `subagent_crash_detected` row (405 SUBAGENT-MONITORING.md §"Orphan reconciliation flow" Step 1 carry-forward).
+5. **Intervention chain** (`state_build/harness/intervention/projector.py`) — consumes `state.harness.intervention`; maintains `per_tier_intervention_log: dict[tier, list[InterventionRow]]` plus `correlation_index: dict[correlation_event_id, intervention_row]`. Provides the umbrella view the v9 TUI bundle subscribes to; also provides the cross-validation surface for Step 4 (orphan persistence is signaled by an unresolved Category-5 row whose `trigger_reason == "subagent_orphan_persistent"`).
+
+The five reducers operate independently — the 4-counter independence discipline (§1 carry-forward) carries through replay. No reducer reads another reducer's in-memory state; each consumes its event subset and writes its own derived projection. The intervention reducer (#5) does cross-correlate via `correlation_event_id`, but the correlation is event-store lookup, not in-memory peer state.
+
+**Step 4 — Reconcile orphan subagents.**
+
+For each `invocation_id` in the in-flight map from Step 3 reducer #4, execute the 6-step orphan reconciliation flow from 405 SUBAGENT-MONITORING.md §"Orphan reconciliation flow (numbered)":
+
+1. Replay event-store (already done in Step 3 above) to surface the in-flight set.
+2. Probe opencode: HTTP call to opencode's session API with the orphan's `session_id` / `task_id`.
+3. If opencode reports still running → re-subscribe to opencode SSE for that session.
+4. If opencode reports done but no terminal event was received → reconstruct from opencode's session log; emit synthetic `state.step.subagent_complete` event.
+5. If opencode reports the task gone → emit `state.step.subagent_orphan_detected` with `last_known_state="gone"`.
+6. Persistent orphan (unresolved after Slice-boundary spawn) → emit paired `state.harness.intervention(tier="human_gate", trigger_reason="subagent_orphan_persistent")` and surface via opencode `question` tool with the pre-authored alternatives `[abort_slice, retry_subagent, manual_resolve]`.
+
+This step is the only step in the protocol with a side effect outside the daemon's projector: it issues synthetic `subagent_complete` and `subagent_orphan_detected` event rows reconstructed from opencode's session log. The synthetic-event rule (SUB-08 §"orphan reconciliation flow" carry-forward): synthetic events carry a `synthesized_at_replay: bool = True` field on the payload so downstream consumers can distinguish reconstructed events from live ones. Replay integrity is preserved — synthetic events are not retro-active claims about the past, they are reconstructions emitted at replay time with the replay-time `triggered_at`.
+
+**Step 5 — Resume plugin hooks.**
+
+Once the projector state is rehydrated (Steps 1–4 complete), the daemon resumes the plugin hooks for the active session(s):
+
+- **`chat.params` re-injects the reinject payload** computed from the rehydrated state: the active `stepNPLAN.md` content (from `active_plan_path`), the current task pointer, the last verify result, the upstream Step `SUMMARY.md` `provides:` blocks for resolved deps (`provides_blocks` from the snapshot), the current worktree path. If any restart-chain has fired (SUB counter > 0 for the active task), the reinject also includes the `<prior_crash>` XML block (405 SUBAGENT-MONITORING.md §"`<prior_crash>` continuation XML block" carry-forward).
+- **`tool.execute.before` re-attaches the 6-layer write-block stack.** The 6 layers are (1) SRP-04 `files_modified` allowlist, (2) PAP-05 immutability, (3) SRP-02 prohibited-language scan, (4) PRF-07 gate-failing next-task block, (5) SUB-03 `subagent_whitelist_violation`, (6) SUB-04 `subagent_cap_expansion_rejected`. The stack is rebuilt from the rehydrated projector state — each layer queries the appropriate per-chain reducer for its block decisions.
+- **`session.compacting`, `chat.message`, `tool.execute.after`, `shell.env`** resume in default-bind mode; their state-derived behavior (counter-meter mirroring, turn-mirror, STATE-* trailer env injection) reads directly from the rehydrated projector.
+
+Resume completes when the next `chat.params` invocation lands and the daemon confirms (via SSE) that the plugin hooks have re-attached. The daemon emits a `state.harness.intervention(tier="advisory", trigger_reason="paralysis_chain_3_reinject", ...)` event ONLY if rehydration discovered a strike chain still pending; clean rehydration (all chains closed) emits no intervention event — silence is success.
+
+#### Protocol invariants
+
+- **Deterministic.** Given the same event-store state and the same opencode session API responses, every daemon boot produces the same projector state. No `datetime.now()` reads in reducers; every timestamp comes from an event row's `triggered_at` field. Carry-forward from PROJECT.md "Event payloads must be deterministic — no `datetime.now()` or randomness in handlers; replay must be bit-identical."
+- **O(N) in event count.** Each reducer is single-pass over its event subset. Step 4's opencode probes are O(K) where K is the in-flight set size (typically ≤20 per Slice per SUB-04). The composite protocol is O(N + K), with N events and K orphans. v14's projector implementation MUST achieve this complexity per 405 SUBAGENT-MONITORING.md §"HRN-07 guarantee preservation".
+- **Snapshot-optional.** Step 2's snapshot fast-forward is a performance optimization, not a correctness requirement. A Slice with no snapshot replays from its `state.slice.created` event; correctness is preserved.
+- **Synthetic-event traceable.** Step 4's reconstructed events carry `synthesized_at_replay=True`; downstream consumers can filter them out for analytics or include them for audit completeness.
+- **Pure-machine.** No LLM call anywhere in the 5 steps. Every decision is a deterministic reducer match on event type + payload field (§4.4 dispatcher carry-forward).
+
+The protocol IS the HRN-07 proof: given the event store and the opencode session API, every harness state — every counter, every in-flight subagent, every pending intervention, every plan-edit chain, every Slice-stage progression — is reconstructable. The next subsection (§5.3) demonstrates the protocol against the hardest realistic failure mode: a daemon restart mid-`run-slice` with two in-flight subagents and a paralysis counter mid-chain.
+
