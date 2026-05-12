@@ -98,7 +98,11 @@
   4. A `SUBAGENT-MANAGEMENT.md` spec document defines the typed-spawn rule (SUB-01: opencode `task` tool with explicit `subagent_type`, no string-prompt-only), the static whitelist per Slice stage (SUB-02: discuss/plan/execute/verify rosters with named subagent_types), the narrowing-only frontmatter override (SUB-03: `allowed_subagents` may subset but not expand), and the 20-default parallel cap with "subagents are free context" guidance (SUB-04).
   5. The subagent monitoring protocol is specified: SSE events linked by parent `task_id` with `subagent_started`/`subagent_progress`/`subagent_complete` schemas (SUB-05), the structured return shape per subagent_type with artifact/commit spot-checks via git log (SUB-06), the 3-restart crash-recovery with `subagent_restart` event (SUB-07), `task_id` survival across compaction and Slice-boundary spawn (SUB-08, cross-references CTX-07), and autonomy inheritance from parent Slice (SUB-09).
 
-**Plans**: TBD
+**Plans:** 4 plans
+- [ ] 01-deviation-rules-spec-PLAN.md — Author canonical DEVIATION-RULES.md spec doc (DEV-01..DEV-07: 4 rules, log_deviation MCP tool, tiered autonomy, deviation event family, ## Deviations SUMMARY projector)
+- [ ] 02-subagent-management-spec-PLAN.md — Author canonical SUBAGENT-MANAGEMENT.md spec doc (SUB-01..SUB-04: dispatch_subagent MCP tool, SubagentType + STAGE_ROSTER, narrowing-only whitelist, 20-default parallel cap)
+- [ ] 03-subagent-monitoring-spec-PLAN.md — Author canonical SUBAGENT-MONITORING.md spec doc (SUB-05..SUB-09: SSE event family, SUBAGENT_RETURN_REGISTRY + 4-layer spot-check, 5-source crash taxonomy + 3-restart counter, task_id survival + orphan reconciliation, autonomy inheritance)
+- [ ] 04-event-amendments-PLAN.md — Append v41 amendment blocks to v40 EVENT-TAXONOMY.md + ARTIFACT-CATALOG.md + FRONTMATTER-SCHEMAS.md (registers 14 new events + 13 new modules + 3 SliceFrontmatter fields)
 
 ---
 
@@ -124,7 +128,7 @@
 | 402. Slice-Cycle & Context Window Spec | 4/4 | Complete    | 2026-05-08 |
 | 403. Step/Task Decomposition & Plan-as-Prompt | 4/4 | Complete    | 2026-05-11 |
 | 404. Boolean Proof Gate & Discipline Guards | 4/4 | Complete    | 2026-05-11 |
-| 405. Deviation Rules & Subagent Management | 0/0 | Not started | - |
+| 405. Deviation Rules & Subagent Management | 0/4 | Planned     | - |
 | 406. Harness Architecture Rollup | 0/0 | Not started | - |
 
 ---
