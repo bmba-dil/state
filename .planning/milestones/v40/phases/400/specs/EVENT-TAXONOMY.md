@@ -346,3 +346,46 @@ v14 Build Kernel implements:
 See `.planning/milestones/v41/phases/404/specs/{PROOF-GATE,ANALYSIS-PARALYSIS-GUARD,SCOPE-PROHIBITION}.md` for full schemas, behaviors, and cross-references.
 
 *Original v40 spec text, Phase 402 amendment, and Phase 403 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
+
+---
+
+## v41 Amendment — Phase 405 Deviation + Subagent Event Family
+
+**Phase:** 405 (Deviation Rules & Subagent Management)
+**Status:** Canonical (v41)
+**Append-only:** All entries below are NEW; nothing above this header has been edited.
+**Build-mode only:** All 14 new event types live in `BUILD_ONLY_EVENT_PREFIXES`. No `state.teach.*` analog exists; teach-mode harness owns its own event family (v47 territory).
+**Naming discipline:** All identifiers are `STATE-*` / `state-*`. The four commit trailers (`STATE-Task`, `STATE-DeviationRule`, `STATE-DeviationAttempt`, `STATE-Subagent-Invocation`) are documented in DEVIATION-RULES.md §5.
+
+Phase 405 introduces three sibling spec documents (DEVIATION-RULES.md, SUBAGENT-MANAGEMENT.md, SUBAGENT-MONITORING.md) which together specify the deviation framework + subagent management subsystem. The following 14 new event types are emitted by the deviation classifier, subagent dispatch handler, and subagent monitoring projector. Full Pydantic payload schemas live in the owning specs; this amendment is a registry index.
+
+### 14 New Event Types
+
+| Event Type | Trigger | State Transition | Owning REQ → Spec |
+|---|---|---|---|
+| `state.step.deviation_logged` | `log_deviation` MCP call after harness cross-validation succeeds (or on cap-exceeded for audit completeness) | task → deviation chain attempt N | DEV-07 → DEVIATION-RULES.md §9 |
+| `state.step.deviation_classification_rejected` | Cross-validation step 1-4 rejects the agent's declared `rule_id` | (no state change; advisory event) | DEV-07 → DEVIATION-RULES.md §4 |
+| `state.step.deviation_resolution_recorded` | Append-only mutation event; updates `Deviation.resolution` from `pending` → terminal value | deviation row resolution → terminal | DEV-07 → DEVIATION-RULES.md §9 |
+| `state.step.deviation_cap_exceeded` | Cross-validation step 5 detects the 4th attempt on the same `(task_id, rule_id, issue_signature)` tuple | deviation chain → escalation (Rule 4 promotion or `checkpoint:decision`) | DEV-07 → DEVIATION-RULES.md §4 |
+| `state.step.subagent_started` | Daemon dispatch handler after opencode `task` tool spawn confirms session creation | parent task → subagent in-flight | SUB-05 → SUBAGENT-MONITORING.md §2 |
+| `state.step.subagent_progress` | Every TUI-visible event from child session (message_end, tool_use start/end) | (no state change; observability event) | SUB-05 → SUBAGENT-MONITORING.md §2 |
+| `state.step.subagent_complete` | Child session reaches `stop_reason ∈ {end_turn, tool_use, max_tokens, error, aborted}` | subagent in-flight → completed (success or crash; spot-check follows) | SUB-05 → SUBAGENT-MONITORING.md §2 |
+| `state.step.subagent_spot_check_failed` | Any layer 1-4 of the 4-layer pure-machine spot-check stack fails | feeds into restart counter chain (not PRF strike chain) | SUB-06 → SUBAGENT-MONITORING.md §4 |
+| `state.step.subagent_crash_detected` | Any of 5 crash sources (process_exit / stop_reason / spot_check / sse_silence / parent_task_error) fires | restart counter for `(parent_task_id, subagent_type)` increments | SUB-07 → SUBAGENT-MONITORING.md §5 |
+| `state.step.subagent_restart` | Daemon spawns retry with augmented `<prior_crash>` continuation context | new invocation_id; restart_number 1..3 | SUB-07 → SUBAGENT-MONITORING.md §5-6 |
+| `state.step.subagent_restart_exhausted` | Restart counter hits 4th occurrence on the same tuple | escalation → parent must call `log_deviation(rule_id=3|4)` | SUB-07 → SUBAGENT-MONITORING.md §5 |
+| `state.step.subagent_orphan_detected` | Daemon resume reconciliation cannot resolve an in-flight subagent | persistent orphan → Rule 4 human gate | SUB-08 → SUBAGENT-MONITORING.md §7 |
+| `state.step.subagent_whitelist_violation` | `dispatch_subagent` payload references a SubagentType not in the effective whitelist | dispatch rejected at runtime `tool.execute.before` | SUB-03 → SUBAGENT-MANAGEMENT.md §5 |
+| `state.slice.subagent_cap_expansion_rejected` | Slice frontmatter `subagent.parallel_cap` exceeds 20 at plan-validation stage | replan iteration triggered | SUB-04 → SUBAGENT-MANAGEMENT.md §6 |
+
+### Naming-convention check
+
+Every event type above matches the regex `^state\.(step|slice)\.[a-z_]+$`. No naming-drift entries. Mode-isolation gate: all entries are `state.{step,slice}.*` (Build-only); no `state.teach.*` references in Phase 405.
+
+### Authoritative-ordering note
+
+Pydantic class definitions in the owning Phase 405 spec docs are authoritative; this amendment is a registry index. When event-payload field-set details diverge between this index and the owning spec, the owning spec wins.
+
+### Cross-reference to umbrella event (Phase 406)
+
+Phase 406's `state.harness.intervention` umbrella event (HRN-05) aggregates Rule-4 escalations from `deviation_logged`, `subagent_spot_check_failed`, `subagent_crash_detected`, and `subagent_orphan_detected`. The umbrella event is owned by Phase 406's HARNESS-ARCHITECTURE.md; this amendment forward-references the rollup.
