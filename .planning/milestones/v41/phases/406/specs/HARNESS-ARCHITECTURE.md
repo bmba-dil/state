@@ -479,3 +479,561 @@ Note: A future patch adding a `ToolName` Literal value without adding the dispat
 
 `state_build/mcp/` and every per-tool module under `state_build/<subsystem>/` MUST NOT import from `state_teach/`. CI import-graph lint enforces. All 14 tools register under the `state-build` MCP server (not `state-teach`). Build-mode-only discipline (PROJECT.md cardinal rule, 405 carry-forward).
 
+### Per-tool catalog entries
+
+Each of the 14 tools below is rendered in the locked roster order. Field types use concrete Pydantic-compatible types; `Literal` discriminators are used where the source spec defines a closed value set. The shared base class is `McpToolBase` from §3.2; per-tool input/output classes inherit. The cross-spec referenced classes (`Rule4Option`, `DispatchSubagent`, `SingleDispatch`, `ParallelDispatch`, `ChainDispatch`, `SubagentRejection`, `MustHavesBlock`, `FailedCheck`, `EventEnvelope`, `QuestionAlternative`) keep their canonical definitions in their owning specs; this section re-inlines the operative shape where the tool's input/output directly depends on it.
+
+#### 1. complete_task
+
+**MCP registration:** `state-build:complete_task`
+**Module path:** `state_build/tasks/complete_task.py`
+**Owning phase:** 403 + 404
+**Source spec:** STEP-PLAN-FORMAT.md §5 (task-type behaviors); PROOF-GATE.md §6 (strike trigger on `verify_passed=False`)
+**Semantics:** Agent signals task completion. Daemon runs the task's `<verify><automated>` block plus `<acceptance_criteria>` per PRF-05; on failure, increments the `gate_strike` counter per PRF-06 and may escalate via the HRN-04 ladder.
+**Plugin-hook integration site:** `tool.execute.before` layer 4 (gate-failing next-task block — writes to the next Step are rejected until the strike chain resolves).
+
+**Input model:**
+
+```python
+class CompleteTaskInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    step_id: str
+    slice_id: str
+    verify_passed: bool
+    evidence: dict[str, Any]
+```
+
+**Output model:**
+
+```python
+class CompleteTaskOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool
+    gate_strike_id: str | None
+    next_task_id: str | None
+```
+
+#### 2. complete_slice
+
+**MCP registration:** `state-build:complete_slice`
+**Module path:** `state_build/slices/complete_slice.py`
+**Owning phase:** 402 + 404
+**Source spec:** SLICE-CYCLE.md run-slice → verify-slice transition; PROOF-GATE.md §4 Slice-end gate
+**Semantics:** Agent signals run-slice or verify-slice completion. Daemon runs the slice-level `<verification>` block, writes `N-VERIFICATION.md` per PRF-03, and emits `state.slice.{run,verify}_completed`.
+**Plugin-hook integration site:** no hook — agent-only (daemon-side `complete_slice` handler invokes `check_proof_gate` internally for the Slice-end gate).
+
+**Input model:**
+
+```python
+class CompleteSliceInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    slice_id: str
+    stage: Literal["run-slice", "verify-slice"]
+    verification_passed: bool
+    n_verification_md_path: str
+```
+
+**Output model:**
+
+```python
+class CompleteSliceOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    accepted: bool
+    slice_event_id: str
+    next_stage: Literal["verify-slice", "close"] | None
+```
+
+#### 3. request_step_split
+
+**MCP registration:** `state-build:request_step_split`
+**Module path:** `state_build/scope/request_step_split.py`
+**Owning phase:** 404
+**Source spec:** SCOPE-PROHIBITION.md SRP-05
+**Semantics:** Agent reports "this Step is too large." Daemon emits `state.step.split_recommendation` and routes to plan-slice for re-planning rather than allowing in-place scope reduction (SRP-05 forbids mid-execute scope shrink).
+**Plugin-hook integration site:** no hook — agent-only.
+
+**Input model:**
+
+```python
+class RequestStepSplitInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    step_id: str
+    reason: str
+    proposed_split: list[str]
+```
+
+**Output model:**
+
+```python
+class RequestStepSplitOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    split_recommendation_event_id: str
+    replan_required: bool
+```
+
+#### 4. scope_deviation_request
+
+**MCP registration:** `state-build:scope_deviation_request`
+**Module path:** `state_build/scope/scope_deviation_request.py`
+**Owning phase:** 404
+**Source spec:** SCOPE-PROHIBITION.md "scope_deviation_request MCP Tool Flow" (SRP-04)
+**Semantics:** Agent requests permission to Write/Edit outside the active Step's `files_modified` allowlist. Daemon evaluates (often pairing with `log_deviation` for Rule-2/Rule-4 classification); granted requests update the active allowlist set for the open task.
+**Plugin-hook integration site:** `tool.execute.before` layer 2 — `files_modified` allowlist consults open requests; layer 7 cross-validates against `ARCH_PATTERN_ALLOWLIST` for Rule-4 auto-promotion.
+
+**Input model:**
+
+```python
+class ScopeDeviationRequestInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    requested_path: str
+    justification: str
+```
+
+**Output model:**
+
+```python
+class ScopeDeviationRequestOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    request_event_id: str
+    granted: bool
+    granted_paths: list[str] | None
+    rejection_reason: str | None
+```
+
+#### 5. log_deviation
+
+**MCP registration:** `state-build:log_deviation`
+**Module path:** `state_build/deviation/log_deviation.py`
+**Owning phase:** 405
+**Source spec:** DEVIATION-RULES.md §3
+**Semantics:** Agent logs a deviation under one of 4 rules. Daemon runs 5-step cross-validation (`issue_signature` recomputation → Rule-4 alternatives check → Rule-4 auto-promotion against `ARCH_PATTERN_ALLOWLIST` → `scope_deviation_request` correlation → cap check). Rule 4 always surfaces opencode's `question` tool — no autonomy bypass, no `--full-yolo` carve-out (DEV-04 absence-of-bypass).
+**Plugin-hook integration site:** `tool.execute.before` layer 5 — `log_deviation` routing + 5-step cross-validation.
+
+**Input model (re-inlines `Rule4Option` from DEVIATION-RULES.md §3 for self-containment):**
+
+```python
+class Rule4Option(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str
+    description: str
+    pros: list[str]
+    cons: list[str]
+    recommended: bool  # Exactly one option must have recommended=True
+
+class LogDeviationInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    rule_id: Literal[1,2,3,4]
+    issue_signature: str
+    classification_source: Literal["agent_declared", "harness_promoted", "arch_pattern_match"]
+    alternatives: list[Rule4Option] | None  # required when rule_id=4
+    error_excerpt: str
+    agent_response_summary: str
+```
+
+**Output model:**
+
+```python
+class LogDeviationOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    deviation_event_id: str
+    attempt_number: int
+    cap_exceeded: bool
+    classification_accepted: bool
+    rejection_reason: str | None
+```
+
+#### 6. dispatch_subagent
+
+**MCP registration:** `state-build:dispatch_subagent`
+**Module path:** `state_build/subagents/dispatch.py`
+**Owning phase:** 405
+**Source spec:** SUBAGENT-MANAGEMENT.md §2 (SUB-01..SUB-04)
+**Semantics:** Agent dispatches one or more subagents under typed-spawn discipline (no string-prompt-only). Three modes: single / parallel / chain (exactly-one-mode root validator). Daemon enforces whitelist (`STAGE_ROSTER[current_stage]` ∩ `effective_whitelist`) and 20-default parallel cap with FIFO queuing.
+**Plugin-hook integration site:** `tool.execute.before` layer 6 — whitelist + parallel-cap.
+
+**Input model (re-inlines `DispatchSubagent` + the three mode classes verbatim from SUBAGENT-MANAGEMENT.md §2; the root validator enforces exactly-one-mode):**
+
+```python
+class SingleDispatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    subagent_type: str            # Literal SubagentType union from SUBAGENT-MANAGEMENT.md §2
+    prompt: str
+    parent_task_id: str
+
+class ParallelDispatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    dispatches: list[SingleDispatch]   # all sibling, all dispatched simultaneously
+
+class ChainDispatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sequence: list[SingleDispatch]     # each runs only after prior completes successfully
+
+class DispatchSubagent(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    single: SingleDispatch | None = None
+    parallel: ParallelDispatch | None = None
+    chain: ChainDispatch | None = None
+    # Root validator: sum(1 for x in (single, parallel, chain) if x is not None) == 1
+```
+
+**Output model (re-inlines `SubagentRejection` shape from SUBAGENT-MANAGEMENT.md §5):**
+
+```python
+class SubagentRejection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requested: str
+    reason: Literal["whitelist_violation", "cap_exceeded", "stage_mismatch"]
+    expected: list[str] | None = None
+
+class DispatchSubagentOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    dispatched_task_ids: list[str]
+    queued_count: int
+    rejected: list[SubagentRejection]
+```
+
+#### 7. check_proof_gate
+
+**MCP registration:** `state-build:check_proof_gate`
+**Module path:** `state_build/proof/check_proof_gate.py`
+**Owning phase:** 404
+**Source spec:** PROOF-GATE.md §4 (gate evaluation order PRF-05)
+**Semantics:** Driver tool that runs the proof gate at task-end / Step-end / Slice-end scopes. Pure-machine evaluation (no LLM-as-judge); checks bash exit codes, file existence, line counts, regex matches per PRF-04. Used both internally by `complete_task` / `complete_slice` and as an agent-side pre-check.
+**Plugin-hook integration site:** no hook — invoked by `complete_task` and `complete_slice` handlers internally; agent MAY also call directly for pre-check.
+
+**Input model (re-inlines `MustHavesBlock` + `ArtifactCheck` + `KeyLinkCheck` + `FailedCheck` from PROOF-GATE.md §4):**
+
+```python
+class ArtifactCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+    provides: str
+    min_lines: int | None = None
+
+class KeyLinkCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    from_: str
+    to: str
+    via: str
+    pattern: str
+
+class MustHavesBlock(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    truths: list[str]
+    artifacts: list[ArtifactCheck]
+    key_links: list[KeyLinkCheck]
+
+class FailedCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    check_id: str
+    check_type: Literal["truth", "artifact", "key_link", "automated"]
+    reason: str
+
+class CheckProofGateInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    scope: Literal["task", "step", "slice"]
+    scope_id: str
+    must_haves: MustHavesBlock | None
+    automated_command: str | None
+    acceptance_criteria: list[str] | None
+```
+
+**Output model:**
+
+```python
+class CheckProofGateOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    gate_passed: bool
+    failed_checks: list[FailedCheck]
+    strike_count: int
+    escalation_action: Literal["none", "advisory", "reinject", "human_gate"]
+```
+
+#### 8. emit_advisory *(NEW in Phase 406 — HRN-04 tier 1)*
+
+**MCP registration:** `state-build:emit_advisory`
+**Module path:** `state_build/harness/intervention/emit_advisory.py`
+**Owning phase:** 406 (new)
+**Source spec:** THIS spec §4 (Plan 03) — HRN-04 tier 1
+**Semantics:** Inject an advisory message into the agent's context (tier-1 intervention). Source triggers: APG advisory 1-2 + 4-5; PRF strike 1-2 + 4-5; DEV `log_deviation` accepted (pending resolution); SCOPE `scope_check` unresolved; SUB `subagent_spot_check_failed` first occurrence on a tuple. Daemon emits paired `state.harness.intervention` event (`tier="advisory"`) alongside the per-chain source event; both replay independently.
+**Plugin-hook integration site:** pushes advisory string into the next `chat.params` reinject payload (advisory is consumed by the executor on its next turn).
+
+**Input model:**
+
+```python
+class EmitAdvisoryInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    advisory_text: str
+    source_trigger: Literal[
+        "paralysis",
+        "gate_strike",
+        "deviation_pending",
+        "scope_unresolved",
+        "subagent_spot_check",
+    ]
+    correlation_event_id: str
+```
+
+**Output model:**
+
+```python
+class EmitAdvisoryOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    advisory_event_id: str
+    intervention_event_id: str
+```
+
+#### 9. force_clear_and_reinject *(NEW in Phase 406 — HRN-04 tier 3)*
+
+**MCP registration:** `state-build:force_clear_and_reinject`
+**Module path:** `state_build/harness/intervention/force_clear_and_reinject.py`
+**Owning phase:** 406 (new)
+**Source spec:** THIS spec §4 (Plan 03) — HRN-04 tier 3 + CTX-09 reactive overflow
+**Semantics:** Force context clear + reinject (tier-3 intervention). Source triggers: APG advisory 3 (paralysis chain reinject); PRF strike 3 (gate chain reinject); CTX-04 emergency threshold (≤25%); CTX-09 reactive overflow recovery one-shot. Invokes `request_compaction_snapshot` internally then re-injects via the `session.compacting` hook; daemon emits paired `state.harness.intervention` event (`tier="clear_reinject"`).
+**Plugin-hook integration site:** drives `session.compacting` hook (daemon-initiated path).
+
+**Input model:**
+
+```python
+class ForceClearAndReinjectInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+    slice_id: str
+    trigger_reason: Literal[
+        "paralysis_chain_3_reinject",
+        "gate_strike_3_reinject",
+        "context_threshold_emergency",
+        "context_overflow_reactive",
+    ]
+    correlation_event_id: str
+```
+
+**Output model:**
+
+```python
+class ForceClearAndReinjectOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    compaction_event_id: str
+    reinject_event_id: str
+    intervention_event_id: str
+```
+
+#### 10. surface_human_gate *(NEW in Phase 406 — HRN-04 tier 4 + HRN-06)*
+
+**MCP registration:** `state-build:surface_human_gate`
+**Module path:** `state_build/harness/intervention/surface_human_gate.py`
+**Owning phase:** 406 (new)
+**Source spec:** THIS spec §4 (Plan 03) — HRN-04 tier 4 + HRN-06
+**Semantics:** Surface a human gate via opencode's `question` tool (tier-4 intervention). Source triggers: APG advisory 6; PRF strike 6; DEV Rule 4 architectural (always-stop, even under `--full-yolo`); DEV `cap_exceeded` → Rule 3 `checkpoint:decision` OR Rule 4 promotion; SUB `subagent_restart_exhausted`; SUB persistent orphan reconciliation step 6; SCOPE `scope_deviation_rejected`. **HRN-06 structural invariant: human gates use opencode's `question` tool exclusively — no custom harness UI lives in `state_build/harness/intervention/`.** Daemon emits paired `state.harness.intervention` event (`tier="human_gate"`).
+**Plugin-hook integration site:** no hook — synchronous call to opencode's `question` tool via the daemon-coordinated hand-off.
+
+**Input model (re-inlines `QuestionAlternative`):**
+
+```python
+class QuestionAlternative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    label: str
+    detail: str | None = None
+
+class SurfaceHumanGateInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str | None
+    slice_id: str
+    question_text: str
+    alternatives: list[QuestionAlternative]
+    trigger_reason: Literal[
+        "paralysis_chain_6_human_gate",
+        "gate_strike_6_human_gate",
+        "deviation_rule_4_architectural",
+        "deviation_cap_exceeded",
+        "subagent_restart_exhausted",
+        "subagent_orphan_persistent",
+        "scope_deviation_rejected",
+    ]
+    correlation_event_id: str
+```
+
+**Output model:**
+
+```python
+class SurfaceHumanGateOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    question_event_id: str
+    intervention_event_id: str
+    awaiting_human: bool
+```
+
+#### 11. query_context_meter
+
+**MCP registration:** `state-build:query_context_meter`
+**Module path:** `state_build/context/query_context_meter.py`
+**Owning phase:** 402
+**Source spec:** CONTEXT-PROTOCOL.md CTX-08
+**Semantics:** Read opencode's current session context meter. Used by `tool.execute.after` to mirror meter state to the SSE bus for TUI consumption; also consumed by `chat.params` to compute threshold-action decisions per CONTEXT-PROTOCOL.md "Threshold action table".
+**Plugin-hook integration site:** invoked from `tool.execute.after` (post-tool meter read) and from `chat.params` (pre-turn meter read).
+
+**Input model:**
+
+```python
+class QueryContextMeterInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+```
+
+**Output model:**
+
+```python
+class QueryContextMeterOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    tokens_used: int
+    tokens_remaining: int
+    percent_remaining: float
+    model_window: int
+```
+
+#### 12. request_compaction_snapshot
+
+**MCP registration:** `state-build:request_compaction_snapshot`
+**Module path:** `state_build/context/request_compaction_snapshot.py`
+**Owning phase:** 402
+**Source spec:** CONTEXT-PROTOCOL.md CTX-03 (daemon-initiated compaction path)
+**Semantics:** Daemon-initiated compaction. Builds the `CompactionSnapshot` Pydantic model from current task state, serializes via orjson, writes an event-store row, and returns the rehydrate payload consumed by the `session.compacting` hook. Snapshot row is the CTX-05 structured snapshot (NOT a markdown file).
+**Plugin-hook integration site:** triggers `session.compacting` on opencode side (the returned payload flows back through opencode's plugin protocol to the hook handler).
+
+**Input model:**
+
+```python
+class RequestCompactionSnapshotInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    session_id: str
+    slice_id: str
+    current_task_id: str
+    daemon_initiated: bool
+```
+
+**Output model:**
+
+```python
+class RequestCompactionSnapshotOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    snapshot_event_id: str
+    reinject_payload_bytes: bytes
+```
+
+#### 13. query_event_store *(NEW in Phase 406 — HRN-07 reconstruction)*
+
+**MCP registration:** `state-build:query_event_store`
+**Module path:** `state_build/event_store/query.py`
+**Owning phase:** 406 (new)
+**Source spec:** THIS spec §5 (Plan 04) — HRN-07 reconstruction protocol
+**Semantics:** Read-only API to the `.state/events.sqlite` event store. Used by the reconstruction protocol (Plan 04 §5) and by TUI projection. **Append-only invariant preserved — this tool MUST NOT mutate.** Mirrors the design-heritage `single-writer-sqlite-facade` pattern: writes are gated through the daemon's single-writer facade; reads (this tool) bypass the writer lock via SQLite's WAL-mode read connection.
+**Plugin-hook integration site:** no hook — internal daemon API + replay tooling.
+
+**Input model (re-inlines `EventEnvelope` from `state_core/schema.py:239-265`):**
+
+```python
+class EventEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str
+    seq: int
+    aggregate_type: str
+    aggregate_id: str
+    type: str
+    data: dict[str, Any]
+
+class QueryEventStoreInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    event_types: list[str]            # e.g., ["state.harness.intervention", "state.session.compaction_snapshot_taken"]
+    aggregate_id: str | None
+    from_seq: int | None
+    to_seq: int | None
+    limit: int
+```
+
+**Output model:**
+
+```python
+class QueryEventStoreOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    events: list[EventEnvelope]
+    total_matched: int
+    next_cursor: int | None
+```
+
+#### 14. record_plan_edit
+
+**MCP registration:** `state-build:record_plan_edit`
+**Module path:** `state_build/plan/record_plan_edit.py`
+**Owning phase:** 403
+**Source spec:** PLAN-AS-PROMPT.md PAP-04 / §6
+**Semantics:** Records every plan edit (mutable sections only; immutable sections rejected by `tool.execute.before` layer 1 per PAP-05). Emits `state.step.plan_edit` event with the unified diff plus the editor identity (executor / harness / human). The immutability matrix from PAP-05 lives in PLAN-AS-PROMPT.md §"Mutability matrix" and is enforced server-side.
+**Plugin-hook integration site:** `tool.execute.before` layer 1 — PAP-05 immutability check rejects edits to `must_haves.*` and `<verify>` blocks; layer 1 verdict precedes the `record_plan_edit` invocation.
+
+**Input model:**
+
+```python
+class RecordPlanEditInput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    step_id: str
+    diff: str
+    editor: Literal["executor", "harness", "human"]
+```
+
+**Output model:**
+
+```python
+class RecordPlanEditOutput(McpToolBase):
+    model_config = ConfigDict(extra="forbid")
+    plan_edit_event_id: str
+    accepted: bool
+    immutability_violation: str | None
+```
+
+### Hook integration matrix
+
+Cross-reference between §2 plugin hooks and §3 MCP tools. The matrix shows which MCP tools are invoked from which plugin hook layer. Tools without a plugin-hook integration site are agent-only (driven entirely by the agent's tool call, with daemon-side decision logic but no hook-mediated enforcement).
+
+| #  | Tool                          | Plugin-hook integration site                                                       |
+|----|-------------------------------|------------------------------------------------------------------------------------|
+| 1  | complete_task                 | `tool.execute.before` layer 4 (gate-failing next-task block)                       |
+| 2  | complete_slice                | (agent-only)                                                                       |
+| 3  | request_step_split            | (agent-only)                                                                       |
+| 4  | scope_deviation_request       | `tool.execute.before` layer 2 (`files_modified` allowlist consults) + layer 7 (arch-pattern correlation) |
+| 5  | log_deviation                 | `tool.execute.before` layer 5 (5-step cross-validation)                            |
+| 6  | dispatch_subagent             | `tool.execute.before` layer 6 (whitelist + parallel-cap)                           |
+| 7  | check_proof_gate              | invoked by `complete_task` / `complete_slice` handlers internally; agent may pre-check |
+| 8  | emit_advisory                 | pushes advisory string into next `chat.params` reinject payload                    |
+| 9  | force_clear_and_reinject      | drives `session.compacting` (daemon-initiated compaction path)                     |
+| 10 | surface_human_gate            | (agent-only; calls opencode `question` tool synchronously via daemon hand-off)     |
+| 11 | query_context_meter           | invoked from `tool.execute.after` (and `chat.params` for pre-turn read)            |
+| 12 | request_compaction_snapshot   | triggers `session.compacting` on opencode side                                     |
+| 13 | query_event_store             | (agent-only; read-only daemon API used by replay tooling and TUI projection)       |
+| 14 | record_plan_edit              | `tool.execute.before` layer 1 (PAP-05 immutability check)                          |
+
+The matrix is exhaustive: every one of the 14 tools is accounted for. v14's import-graph lint additionally verifies that `state_build/mcp/handlers/*.py` only imports from `state_build/harness/hooks/*.py` through the daemon's projector + scheduler — never directly.
+
+### Coverage cross-reference (HRN-03 closure)
+
+HRN-03 requires that **every harness operation specified in Phases 402–405 is mapped to at least one MCP tool**. The following matrix discharges that obligation.
+
+| REQ category | Tools covering category                                                                              |
+|--------------|------------------------------------------------------------------------------------------------------|
+| CTX (402)    | `query_context_meter`, `request_compaction_snapshot`, `force_clear_and_reinject` (CTX-09 reactive overflow) |
+| STP (403)    | `complete_task`, `record_plan_edit`                                                                  |
+| PAP (403)    | `record_plan_edit` (PAP-04 emit-site; PAP-01/02/05 enforced via `tool.execute.before` layer 1)        |
+| PRF (404)    | `check_proof_gate`, `complete_task` (drives strike counter on `verify_passed=False`)                  |
+| APG (404)    | `emit_advisory` (advisory injection), `force_clear_and_reinject` (chain-3 reinject), `surface_human_gate` (chain-6 human gate) |
+| SRP (404)    | `request_step_split`, `scope_deviation_request`                                                       |
+| DEV (405)    | `log_deviation`, `surface_human_gate` (Rule 4 always-stop)                                            |
+| SUB (405)    | `dispatch_subagent`, `complete_task` (subagent return spot-check consumes), `surface_human_gate` (restart exhausted, persistent orphan) |
+| HRN (406)    | `emit_advisory`, `force_clear_and_reinject`, `surface_human_gate`, `query_event_store` (new in this phase) |
+
+100% Phase-402–405 operation coverage. Every REQ category (CTX, STP, PAP, PRF, APG, SRP, DEV, SUB, HRN) has at least one mapped tool. Where a tool covers multiple categories, the matrix lists each. Cross-reference: 406-CONTEXT.md `<decisions>` 'Tool roster — exhaustive map of every Phase 402–405 harness operation.'
+
+§3 closes. §4 (Plan 03 of this phase) consumes `emit_advisory`, `force_clear_and_reinject`, and `surface_human_gate` to populate the HRN-04 4-tier intervention ladder + the `state.harness.intervention` umbrella event (HRN-05) + the HRN-06 human-gate-only-via-`question`-tool invariant. §5 (Plan 04 of this phase) consumes `query_event_store` for the HRN-07 reconstruction protocol; §6 (Plan 04) walks `complete_task` and `complete_slice` through the full-Slice lifecycle sequence diagram (HRN-08).
+
