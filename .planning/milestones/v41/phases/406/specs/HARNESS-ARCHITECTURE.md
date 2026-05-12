@@ -1183,3 +1183,208 @@ class HarnessIntervention(BaseModel):
 
 HRN-05 requires that "each intervention emits a `harness_intervention` event with tier, trigger reason, target step/task." The HarnessIntervention class above satisfies HRN-05 exactly: `tier` field (4-value Literal), `trigger_reason` field (18-value Literal), `target_step_or_task` field. The class also adds `correlation_event_id`, `slice_id`, `session_id`, `triggered_at` for replay completeness (HRN-07).
 
+### Emission Model — Alongside Source Events
+
+The originating chain emits its own event (e.g., `state.step.paralysis_event` with `tier="reinject"`); the daemon middleware additionally emits `state.harness.intervention` with `tier="clear_reinject"` and `correlation_event_id` pointing at the paralysis_event row. **Two events per intervention**; replay can reconstruct the umbrella view from `state.harness.intervention` rows OR from the per-chain rows independently. Mirrors the gsd-2 cross-layer comm-map pattern where one runtime action surfaces in multiple bus views.
+
+#### Four-counter independence (cross-reference)
+
+The four per-chain counters (APG paralysis, PRF gate strike, DEV deviation attempt, SUB restart) remain independent — they never share state. The `state.harness.intervention` event is the SOLE rollup point that unifies these four chains into one umbrella view. Cross-reference: PROOF-GATE.md §6 + DEVIATION-RULES.md §6 + SUBAGENT-MONITORING.md §4. Carry-forward of the 4-counter independence discipline established in 404/405.
+
+#### Worked example — tier-3 paralysis reinject
+
+```
+Scenario: agent has hit APG advisory 3 (third paralysis advisory on the same task).
+
+1. APG counter projector observes consecutive_read_only_count = 5 for task=task-3
+   (3rd consecutive threshold cross on the SAME task without intervening write).
+
+2. APG projector emits:
+     state.step.paralysis_event{
+         tier="reinject",
+         task_id="task-3",
+         count=3,                              # 3rd advisory on this task
+         threshold=5,                          # execute-slice default
+         agent_response_summary="…last turn…",
+         triggered_at=...
+     }
+
+3. The daemon's intervention dispatcher (state_build/harness/intervention/dispatcher.py)
+   maps source-event paralysis_event(tier="reinject") → umbrella tier "clear_reinject".
+
+4. Dispatcher emits:
+     state.harness.intervention{
+         tier="clear_reinject",
+         trigger_reason="paralysis_chain_3_reinject",
+         target_step_or_task="task-3",
+         correlation_event_id="<paralysis_event row id from step 2>",
+         slice_id="slice-N",
+         session_id="sess-X",
+         triggered_at=...
+     }
+
+5. Replay rebuilds the umbrella view from EITHER source (step 2 row) OR umbrella row
+   (step 4) — drift between the two views is detectable by replay comparison and
+   indicates a dispatcher bug.
+
+6. force_clear_and_reinject MCP tool fires:
+     - request_compaction_snapshot → CompactionSnapshot row emitted
+     - session.compacting hook returns reinject payload to opencode
+     - Same session_id continues with stripped context + reinject payload
+
+7. APG counter for task-3 resets on the next intervening write-mutating tool call.
+```
+
+#### Tier dispatcher (assert_never exhaustiveness)
+
+```python
+# state_build/harness/intervention/dispatcher.py
+from typing import assert_never
+
+SourceEventType = Literal[
+    "state.step.paralysis_event",
+    "state.step.gate_strike",
+    "state.step.deviation_logged",
+    "state.step.deviation_cap_exceeded",
+    "state.step.subagent_spot_check_failed",
+    "state.step.subagent_crash_detected",
+    "state.step.subagent_restart_exhausted",
+    "state.step.subagent_orphan_persistent",
+    "state.step.scope_check",
+    "state.step.scope_deviation_rejected",
+    "state.session.context_threshold_warning_block",
+    "state.session.context_threshold_emergency",
+    "state.session.overflow_recovery_attempted",
+    # tool.execute.before tier-2 events
+    "state.step.plan_edit_blocked",
+    "state.step.gate_failing_next_task_blocked",
+    "state.step.subagent_whitelist_violation",
+    "state.slice.subagent_cap_expansion_rejected",
+]
+
+def dispatch_to_umbrella(
+    source_type: SourceEventType,
+    source_payload: dict,
+) -> HarnessIntervention | None:
+    match source_type:
+        # APG chain
+        case "state.step.paralysis_event":
+            tier_value = source_payload["tier"]  # "advisory" | "reinject" | "human_gate"
+            match tier_value:
+                case "advisory":   return _build(tier="advisory", reason="paralysis_threshold_crossed", source_payload=source_payload)
+                case "reinject":   return _build(tier="clear_reinject", reason="paralysis_chain_3_reinject", source_payload=source_payload)
+                case "human_gate": return _build(tier="human_gate", reason="paralysis_chain_6_human_gate", source_payload=source_payload)
+                case _:            raise ValueError(...)
+
+        # PRF chain
+        case "state.step.gate_strike":
+            strike = source_payload["strike_number"]
+            if strike in (1, 2, 4, 5): return _build(tier="advisory", reason="gate_strike_advisory", source_payload=source_payload)
+            elif strike == 3:          return _build(tier="clear_reinject", reason="gate_strike_3_reinject", source_payload=source_payload)
+            elif strike == 6:          return _build(tier="human_gate", reason="gate_strike_6_human_gate", source_payload=source_payload)
+            else: raise ValueError(...)
+
+        # DEV chain
+        case "state.step.deviation_logged":
+            if source_payload["rule_id"] == 4:
+                return _build(tier="human_gate", reason="deviation_rule_4_architectural", source_payload=source_payload)
+            else:
+                return _build(tier="advisory", reason="deviation_logged_pending", source_payload=source_payload)
+        case "state.step.deviation_cap_exceeded":
+            return _build(tier="human_gate", reason="deviation_cap_exceeded", source_payload=source_payload)
+
+        # SUB chain
+        case "state.step.subagent_spot_check_failed":
+            return _build(tier="advisory", reason="subagent_spot_check_failed", source_payload=source_payload)
+        case "state.step.subagent_crash_detected":
+            return _build(tier="advisory", reason="subagent_crash_detected", source_payload=source_payload)
+        case "state.step.subagent_restart_exhausted":
+            return _build(tier="human_gate", reason="subagent_restart_exhausted", source_payload=source_payload)
+        case "state.step.subagent_orphan_persistent":
+            return _build(tier="human_gate", reason="subagent_orphan_persistent", source_payload=source_payload)
+
+        # SCOPE chain
+        case "state.step.scope_check":
+            if source_payload.get("resolved") is False and not source_payload.get("has_exception"):
+                return _build(tier="advisory", reason="scope_check_unresolved", source_payload=source_payload)
+            return None  # resolved or exception present — no umbrella emission
+        case "state.step.scope_deviation_rejected":
+            return _build(tier="human_gate", reason="scope_deviation_rejected", source_payload=source_payload)
+
+        # CTX chain
+        case "state.session.context_threshold_warning_block":
+            return _build(tier="tool_block", reason="context_threshold_warning", source_payload=source_payload)
+        case "state.session.context_threshold_emergency":
+            return _build(tier="clear_reinject", reason="context_threshold_emergency", source_payload=source_payload)
+        case "state.session.overflow_recovery_attempted":
+            return _build(tier="clear_reinject", reason="context_overflow_reactive", source_payload=source_payload)
+
+        # tool.execute.before tier-2 events
+        case "state.step.plan_edit_blocked":
+            return _build(tier="tool_block", reason="scope_check_unresolved", source_payload=source_payload)  # closest umbrella; v14 may add tier-2-specific reasons in v17
+        case "state.step.gate_failing_next_task_blocked":
+            return _build(tier="tool_block", reason="scope_check_unresolved", source_payload=source_payload)
+        case "state.step.subagent_whitelist_violation":
+            return _build(tier="tool_block", reason="scope_check_unresolved", source_payload=source_payload)
+        case "state.slice.subagent_cap_expansion_rejected":
+            return _build(tier="tool_block", reason="scope_check_unresolved", source_payload=source_payload)
+
+        case _:
+            assert_never(source_type)
+```
+
+Note: Future tier-2 trigger_reason values (e.g., `plan_edit_blocked`, `files_modified_violation`, `subagent_whitelist_violation`) may be added in v17 to disambiguate tier-2 umbrella views; v1 uses `scope_check_unresolved` as the closest umbrella reason for all tier-2 tool-blocks. The 18-value Literal in §4.3 covers the cross-chain spectrum; tier-2 fan-out is the documented v17 follow-up. Tracking-issue logged at `# TODO(HRN-04.tier2)` in `state_build/harness/intervention/types.py`.
+
+#### Pure-machine discipline
+
+The umbrella `tier` value is **server-derived**, never agent-emitted. The dispatcher above is a deterministic match on source-chain event type + payload field → umbrella tier; no LLM-as-judge anywhere. Mirrors PRF-04 spirit (gsd-2 `server-recomputation-of-llm-emitted-fields.md`) and the carry-forward rule from §1.
+
+### HRN-06 Human-Gate-Only-via-opencode-question (structural invariant)
+
+**The harness NEVER invents its own UI for human gates.** Every tier-4 path renders via opencode's `question` tool with the named alternatives payload. The absence of any other UI surface in `state_build/harness/intervention/` is the structural enforcement; CI grep targets the directory and rejects PRs introducing alternate UI primitives. Mirrors the absence-of-bypass pattern from Phase 405 DEV-04 (no `full_yolo bypass` branch in `state_build/deviation/log_deviation.py`).
+
+#### CI grep enforcement
+
+```bash
+# CI grep target: state_build/harness/intervention/ MUST NOT contain ANY of these:
+grep -rnE '(\bprompt\(|\binput\(|\bConfirm\(|Inquirer|click\.prompt|TUI human_gate|Textual.*question|prompt_toolkit)' \
+  src/state_build/harness/intervention/
+
+# Expected: zero matches.
+# The ONLY acceptable human-gate surface in this directory is a call into surface_human_gate
+# MCP tool, which in turn invokes opencode's `question` tool (a primitive provided by opencode
+# core, not state code).
+```
+
+#### Acceptable surface (the only one)
+
+```python
+# state_build/harness/intervention/surface_human_gate.py
+# The ONLY function in state_build/harness/intervention/ that produces a human-facing prompt.
+# It calls into the opencode plugin's question-tool wrapper.
+
+def surface_human_gate(payload: SurfaceHumanGateInput) -> SurfaceHumanGateOutput:
+    # 1. Validate payload (Pydantic extra="forbid").
+    # 2. Emit state.harness.intervention(tier="human_gate", ...).
+    # 3. Call opencode plugin to surface its `question` tool.
+    # 4. Wait for the question response from opencode (SSE-driven).
+    # 5. Emit state.step.deviation_resolution_recorded or analogous resolution event.
+    ...
+```
+
+#### Carry-forward: absence-of-bypass discipline
+
+Phase 405 DEV-04 establishes the absence-of-bypass pattern: `state_build/deviation/log_deviation.py` MUST NOT contain any `if mode == 'full-yolo': bypass()` branch; the absence is the structural enforcement. Phase 406 §4.5 extends this to the whole `state_build/harness/intervention/` directory: no custom UI primitives, no autonomy short-circuit branches, no LLM-as-judge calls. CI greps both directories.
+
+### Mode-isolation note
+
+All modules under `state_build/harness/intervention/` MUST NOT import from `state_teach/`. CI import-graph lint enforces. The `state.harness.intervention` event lives in `BUILD_ONLY_EVENT_PREFIXES = frozenset({'state.slice.', 'state.step.', 'state.harness.'})`. Teach-mode equivalent intervention surface is owned by v47; mode silos remain physical. Carry-forward from 405.
+
+### Pure-machine discipline carry-forward
+
+The umbrella `tier` value is server-derived, never agent-emitted. The dispatcher (§4.4) is a deterministic match on source-chain event type → umbrella tier; no LLM-as-judge anywhere. Mirrors PRF-04 spirit and the carry-forward rule from §1.
+
+### Forward reference: §5 + §6 (Plan 04)
+
+§5 (Plan 04 of this phase) will enumerate the `state.harness.intervention` event among the ~30 event types the HRN-07 replay protocol must consume — Category 5 (umbrella + context) of the 5-table breakdown. §6 (Plan 04) will surface specific intervention emission points in the full-Slice lifecycle Mermaid sequence diagram (HRN-08); the exemplar Slice is the `compaction-snapshot-schema` Slice from 403 EXEMPLAR-stepNPLAN.md, with at least one tier-1 advisory site (paralysis-counter cross), one tier-2 site (PAP-05 immutability block), one tier-3 site (force_clear_and_reinject demo), and one tier-4 site (the `checkpoint:decision` task on orjson flag selection, surfaced via surface_human_gate).
+
