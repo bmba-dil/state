@@ -279,3 +279,336 @@ The renderer module `state_build/commit/trailers.py` exports a single helper `re
 The trailer module lives under `state_build/commit/`; MUST NOT import from `state_teach/`. CI import-graph lint enforces. Teach-mode has its own (smaller) trailer family registered under `state_teach/commit/trailers.py` covering `STATE-Lesson:` and `STATE-Checkpoint:` (Plan 02 of a future teach-mode phase will pin the exact list). The two trailer modules share no code; the helper signatures are similar but not unified, by design.
 
 ---
+
+## Tiered Autonomy (DEV-05, DEV-06)
+
+The harness's per-checkpoint-type behaviour is governed by an autonomy mode set at the milestone default, optionally overridden per Slice via frontmatter. The mode determines whether `checkpoint:human-verify` / `checkpoint:decision` / `checkpoint:human-action` auto-resolve or stop. Rule-4 deviations are the 4th column and always stop regardless of mode (structural, not policy — see Section 2 Rule 4 closing paragraph). The autonomy mode is a project-wide policy knob; the per-Slice override is the only escape hatch.
+
+### Autonomy modes
+
+| Mode | `checkpoint:human-verify` | `checkpoint:decision` | `checkpoint:human-action` | **Rule 4 deviation** |
+|---|---|---|---|---|
+| `--tiered` (default) | auto-approve | stop | stop | **stop** |
+| `--full-yolo` | auto-approve | auto-pick option 1 | stop | **stop** |
+| `--conservative` | stop | stop | stop | **stop** |
+
+The autonomy table's first three columns are inherited verbatim from Phase 403 task-type behaviours; the fourth column (Rule 4 deviation) is novel to Phase 405. Implementation guarantee: the `log_deviation(rule_id=4, ...)` MCP handler synchronously renders opencode `question` tool with the `alternatives` payload — **there is no autonomy short-circuit code path**. The structural enforcement is the absence of an `if mode == 'full-yolo' bypass` branch in `state_build/deviation/log_deviation.py`. CI lint MAY add a regex check for the absence (e.g., `! grep -qE 'full[_-]yolo.*bypass' state_build/deviation/log_deviation.py`); v14 owns the lint addition.
+
+### Per-Slice override (DEV-06)
+
+- **Slice frontmatter field:** `autonomy: Literal["tiered","full-yolo","conservative"] | None = None`. Lives at the **Slice** level only — there is no Step-level override (locked by Phase 403's "`autonomy` is NOT a Step frontmatter field" decision; see `.planning/milestones/v41/phases/403/specs/STEP-PLAN-FORMAT.md`).
+- **Precedence rule:** `milestone default -> Slice override -> done`. The effective autonomy for any deviation/checkpoint decision is `Slice.frontmatter.autonomy ?? milestone.autonomy_default`. The daemon resolves the effective value at Slice-load time and caches it for the lifetime of the Slice session.
+- **Direction:** the Slice override CAN move stricter (e.g., milestone `--tiered`, Slice `--conservative`) AND CAN move looser (e.g., milestone `--tiered`, Slice `--full-yolo`). **Narrowing-only does NOT apply to autonomy** — autonomy is policy, not capability. The narrowing-only rule (which applies to `allowed_subagents` per SUB-03, Plan 02 territory) is capability-only.
+- **Rationale:** mirrors gsd-2's permissive-vs-strict trust-model divergence (`precedence-divergence-by-trust-model.md`); state's permissive-pole choice here reflects the user-controlled-runtime framing — the runtime operator chooses how much autonomy to grant per Slice, and the planner-time validation does not interfere.
+- **Forward-pointer:** subagent autonomy inheritance (SUB-09) consumes the Slice's effective autonomy as the default for `dispatch_subagent` child sessions; see SUBAGENT-MANAGEMENT.md.
+
+### Resolution priority worked example
+
+Given milestone default `--tiered`, Slice `slice-3-eventstore` with frontmatter `autonomy: "full-yolo"`, and a `checkpoint:decision` raised inside that Slice's `execute` stage:
+
+1. Daemon loads Slice frontmatter at session start; caches `effective_autonomy="full-yolo"`.
+2. Checkpoint raised; daemon's checkpoint dispatcher reads cached value.
+3. Lookup in autonomy table: `--full-yolo` row, `checkpoint:decision` column -> `auto-pick option 1`.
+4. Daemon auto-resolves with the recommended option; emits `checkpoint_auto_resolved` event.
+5. If the same Slice raises a Rule 4 deviation, the 4th column wins regardless: daemon stops, renders question.
+
+---
+
+## issue_signature Derivation
+
+The per-tuple counter requires a deterministic, host-independent identifier for "the same logical failure." `issue_signature` is a SHA-256 16-char hex of canonicalized inputs. Determinism across hosts is critical because the event store is portable — replaying a project's history on a different machine MUST produce identical `issue_signature` values, else the per-tuple counters drift and the audit chain breaks.
+
+### Function
+
+Verbatim from `.planning/milestones/v41/phases/405/405-CONTEXT.md` `<decisions>` "Attempt-counter semantics (DEV-07 expanded)" subsection:
+
+```python
+import hashlib
+from enum import Enum
+
+def compute_issue_signature(
+    error_kind: "ErrorKind",
+    file_path: str,                                      # repo-root-relative POSIX
+    line_no: int,                                        # 1-indexed
+    matched_token: str,                                  # failing token / error head / scanner match
+) -> str:
+    canonical = f"{error_kind.value}|{file_path}|{line_no}|{matched_token}"
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+```
+
+### ErrorKind enum
+
+```python
+class ErrorKind(str, Enum):
+    pytest_failure = "pytest_failure"
+    type_error = "type_error"                            # mypy / pyright
+    import_error = "import_error"
+    null_dereference = "null_dereference"
+    schema_validation_failure = "schema_validation_failure"  # Pydantic validation
+    scope_violation = "scope_violation"                  # 404 SRP-04 deviation request territory
+    paralysis_threshold_cross = "paralysis_threshold_cross"  # 404 APG event-correlation
+    proof_gate_failure = "proof_gate_failure"            # 404 PRF gate_strike correlation
+    subagent_spot_check_failure = "subagent_spot_check_failure"
+    other = "other"                                      # fallback; planner extends as new categories emerge
+```
+
+Open-ended; planner extends in v14 as new failure modes surface (recommended additions deferred to v14 EXEMPLAR: `oauth_refresh_failure`, `worktree_checkout_failure`, `pygit2_lock_contention`, `mcp_tool_validation_failure`). The enum is `str`-based so `error_kind.value` is the canonical string form for hashing; Pydantic v2 serializes string-Enum members as their values by default.
+
+### Why whole-stack hashing is rejected
+
+Whole-stack hashing — i.e., including the Python stack trace in the signature inputs — is **rejected**. Research confirmed OS/env differences make stack traces nondeterministic across hosts: file-system paths differ (`/Users/alice/...` vs `/home/bob/...`), Python build flavours produce different frame-formatting (CPython vs PyPy), and venv vs system-Python path resolution diverges. The 4-tuple `(error_kind, file_path, line_no, matched_token)` is the minimum-spec set that preserves cross-host determinism while still distinguishing logically-distinct failures. The 4-tuple is the contract; future enrichment to the canonical form requires a Rule 4 architectural change.
+
+### matched_token extraction
+
+When the error has a clear failing token (e.g., a Python identifier in a `TypeError`, a missing import name in an `ImportError`, a failing pytest assertion's left-hand operand), use that token. When the error has no clear token, fall back to the first line of the error message truncated to 64 characters. v14 finalizes the exact extraction rule; the matcher lives at `state_build/deviation/error_extraction.py`. The truncation length 64 mirrors gsd-2's `formatFailureContext` token-extraction discipline.
+
+### file_path canonicalisation
+
+Repo-root-relative POSIX form (forward slashes always). Computed via `pathlib.PurePosixPath` against the worktree root. Symlinks resolved; `.`/`..` segments normalized. v14 pins the exact `os.path.relpath` vs `pathlib.PurePosixPath.relative_to` strategy; both produce the same canonical output for normal repo paths but differ on edge cases involving symlinks across mountpoints — v14 picks `pathlib` for portability.
+
+---
+
+## Three-Counter Independence
+
+State has three independent counter chains, each capable of independently reaching force-stop / human-gate. Each chain has its own per-tuple key and trigger. Conflating any pair violates gsd-2 `loop-control.md` §0 Correction 1 — the prior-art project tracked four distinct counters at four scopes and learned the hard way that merging them produces incorrect terminal verdicts. State's discipline matches: three chains, three scopes, one umbrella event.
+
+### Three independent chains
+
+| Chain | Per-tuple key | Trigger | Owner |
+|---|---|---|---|
+| APG `paralysis_event` | `(task_id,)` | N consecutive read-only operations | Phase 404 |
+| PRF `gate_strike` | `(task_id, check_id)` | Failed `must_haves.*` or `<verify>` at completion-claim | Phase 404 |
+| DEV `deviation_logged` | `(task_id, rule_id, issue_signature)` | `log_deviation` MCP call | Phase 405 |
+
+**Umbrella event:** the `state.harness.intervention` event (HRN-05, owned by Phase 406) is the SOLE rollup point. All three chains cite it as `trigger_reason`. Mirrors gsd-2 `loop-control.md` §0 Correction 1's refusal to conflate four distinct counters at four scopes — state's discipline matches.
+
+### Counter scope and reset-on-success
+
+- **Scope:** per-`(task_id, rule_id, issue_signature)` tuple. Wider scopes (Step-level, Slice-level) risk cross-task chain poisoning — a deviation in one task should not affect another task's chain even when the rule_id and signature happen to match. Narrower scopes (per-`invocation_id`) let the agent game by re-invoking with different prompts; the per-tuple key denies that escape hatch.
+- **Reset rule:** on success of the same `(task_id, rule_id, issue_signature)` tuple, the counter drops to 0. "Success" = the next pure-machine eval of that exact tuple returns success (failing test now passes; type error gone; scanner clean). Different tuples never share state.
+- **Rationale:** preserves audit clarity AND chain interpretability. The same tuple succeeding signals "this issue is resolved"; the counter dropping to 0 lets a future regression of the SAME issue start a fresh chain — distinguishable from "this issue has been retried 3 times and failed."
+- **Mirrors:** gsd-2's `consecutiveAllToolErrorTurns = 0`-on-success pattern (`agent-loop.ts:191`) AND Phase 404 PRF strike-chain-resets-on-success principle (see `.planning/milestones/v41/phases/404/specs/PROOF-GATE.md` Section 6).
+
+### log_deviation mid-task semantics (different-from-PRF)
+
+`log_deviation` can be called any time during task execution; the harness records and counters increment. Mid-task incidental calls (e.g., agent realizes a fix attempt failed before commit) accrue toward the 3-attempt cap. Mirrors Phase 404's "strike accrues at completion-claim boundary" discipline NOT applied here — deviations are agent-declared explicitly, not inferred. v14 implements without a completion-claim guard at the MCP boundary. The mid-task semantics are intentional: the agent owns the timing of deviation declaration, and the daemon owns the cap enforcement.
+
+### Independence enforcement (CI lint)
+
+The three counters live in three different modules:
+
+- `state_build/paralysis/counter.py` — APG counter (Phase 404 owns).
+- `state_build/proof/counter.py` — PRF counter (Phase 404 owns).
+- `state_build/deviation/counter.py` — DEV counter (Phase 405 owns).
+
+Cross-module imports are forbidden by CI lint. Each counter has its own event-store query, its own per-tuple key, and its own escalation verdict. The umbrella event (HRN-05) is the ONLY shared touch-point and lives in `state_build/harness/intervention.py` (Phase 406 territory). The independence discipline survives because no module imports another module's counter state directly — events are the only communication channel.
+
+---
+
+## Deviation Event Payload
+
+### Pydantic event schema
+
+Verbatim from `.planning/milestones/v41/phases/405/405-CONTEXT.md` `<decisions>` "Attempt-counter semantics (DEV-07 expanded)" subsection (the `## deviation event payload` block):
+
+```python
+from datetime import datetime
+
+class Deviation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    deviation_event_id: str                              # ulid; primary key
+    task_id: str
+    step_id: str
+    slice_id: str
+    session_id: str
+    rule_id: Literal[1, 2, 3, 4]
+    issue_signature: str                                 # 16-char hex
+    attempt_number: int                                  # 1..3 for Rules 1-3; always 1 for Rule 4
+    classification_source: Literal[
+        "agent_declared",
+        "harness_promoted",
+        "arch_pattern_match",
+    ]
+    commit_sha: str | None                               # the fix commit if any (set on resolution)
+    resolution: Literal[
+        "auto_fix_succeeded",
+        "auto_fix_failed",
+        "escalated_to_decision",
+        "escalated_to_human_gate",
+        "aborted_chain",
+        "pending",                                       # initial state at log_deviation; mutates on resolution
+    ]
+    alternatives: list[Rule4Option] | None               # only populated for rule_id=4
+    error_excerpt: str                                   # ≤2KB; gsd-2 truncation discipline
+    agent_response_summary: str                          # ≤2KB
+    triggered_at: datetime                               # UTC, ISO-8601
+    intervention_event_id: str | None                    # cross-link to HRN-05 umbrella (Phase 406)
+```
+
+### Event ring (4 new event types)
+
+The deviation chain introduces four new event types under the `state.step.deviation_*` namespace, registered by Plan 04 in `.planning/milestones/v40/phases/400/specs/EVENT-TAXONOMY.md`:
+
+- `state.step.deviation_logged` — primary event; emitted by the `log_deviation` MCP handler after cross-validation succeeds (or on cap-exceeded for audit completeness). Rides the `Deviation` Pydantic payload above. This is the row that the SUMMARY projector keys aggregation on.
+- `state.step.deviation_classification_rejected` — emitted when any of cross-validation steps 1-4 rejects the agent's classification. Rides a `DeviationClassificationRejected` Pydantic payload:
+
+```python
+class DeviationClassificationRejected(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    task_id: str
+    attempted_rule_id: Literal[1, 2, 3, 4]
+    reason: Literal[
+        "issue_signature_mismatch",
+        "rule_4_alternatives_missing",
+        "rule_4_recommended_invalid",
+        "arch_pattern_promotion_required",
+        "scope_deviation_correlation_promoted",
+    ]
+    agent_response_summary: str                          # ≤2KB
+    triggered_at: datetime
+    session_id: str
+```
+
+- `state.step.deviation_resolution_recorded` — append-only mutation event; updates the `Deviation` row's `resolution` from `pending` to one of the 5 terminal values (`auto_fix_succeeded`, `auto_fix_failed`, `escalated_to_decision`, `escalated_to_human_gate`, `aborted_chain`). Rides `{deviation_event_id, resolution, commit_sha, triggered_at}`.
+- `state.step.deviation_cap_exceeded` — emitted when cross-validation step 5 detects the 4th attempt on the same tuple. Rides `{task_id, rule_id, issue_signature, prior_attempt_count: int, escalation_path: Literal['rule_4_promotion','checkpoint_decision'], triggered_at, session_id}`.
+
+### Append-only mutation pattern
+
+**Single-mutable-row pattern.** The `Deviation` row's `resolution` field starts as `pending` at `deviation_logged` time; mutates to a terminal value via an append-only `deviation_resolution_recorded` event. The projector applies these events in event-store seq order; the latest `deviation_resolution_recorded.resolution` for a given `deviation_event_id` wins. **Replay determinism preserved** — never edited in-place; the event store is authoritative.
+
+**Two-event request/resolved split (404-style) rejected.** Diverges from Phase 404's `scope_deviation_request` / `scope_deviation_resolved` two-event split because the deviation lifecycle is short-lived (≤3 attempts) and lives within one task boundary; a single row simplifies the `## Deviations` SUMMARY projector. The mutation event is sufficient for replay determinism; v14 wires the resolution-mutation step inside `log_deviation` (success path) and inside the cross-validation rejection / cap-exceeded path.
+
+### Mode-isolation
+
+The `Deviation` payload lives under `state_build/deviation/payloads.py`; MUST NOT import from `state_teach/`. CI import-graph lint enforces. The four event types are registered in `BUILD_ONLY_EVENT_PREFIXES` (Plan 04 owns the registration). Replay determinism is build-mode-scoped; teach-mode has no deviation chain (teach-mode's failure handling is materially different — see Phase 406 teach-mode amendments).
+
+---
+
+## ## Deviations SUMMARY Section Projector
+
+The projector renders the `## Deviations` section into `stepNSUMMARY.md` at task end by aggregating `deviation_logged` + `deviation_resolution_recorded` events for the current `(step_id, slice_id)`. The section is omitted entirely when zero deviations exist for the Step. Mirrors Phase 404's `N-VERIFICATION.md` projector pattern + gsd-2's `db-writer.ts` projection discipline.
+
+### Algorithm (numbered)
+
+1. Subscribe to `state.step.deviation_logged` + `state.step.deviation_resolution_recorded` events, filtered by `(step_id, slice_id)`.
+2. Aggregate by `(rule_id, issue_signature)` — one row per unique issue. Multiple attempts on the same tuple collapse to one row with `Attempts = max(attempt_number) / 3` (or `1 / 1` for Rule 4).
+3. Determine each row's `Resolution` by applying mutation events in event-store seq order; the latest `deviation_resolution_recorded.resolution` for the row's `deviation_event_id` wins. Rows with no resolution mutation render as `pending`.
+4. Render the markdown table (column order below) into the `## Deviations` section. Atomic write via temp+rename (acknowledged as not-yet-atomic per Phase 402 §7.3 note for `last-snapshot.md`; v44 follow-up applies).
+5. Invalidate the read cache (mirrors gsd-2 `invalidateStateCache()` + `clearParseCache()` trio in `db-writer.ts`).
+6. If zero rows aggregate, the `## Deviations` section is **omitted entirely** from `stepNSUMMARY.md` (do not render an empty section).
+
+### Column schema (8 columns)
+
+| Column | Source | Notes |
+|---|---|---|
+| `#` | row ordinal | Stable across runs (sorted by first `triggered_at`) |
+| `Rule` | `Deviation.rule_id` formatted as "Rule 1", "Rule 2", "Rule 3", "Rule 4" | |
+| `Issue` | `Deviation.error_excerpt[:120]` | gsd-2 truncation, ≤120 char excerpt |
+| `Source` | `Deviation.classification_source` | |
+| `Attempts` | `max(attempt_number) / 3` | "2 / 3" form; for Rule 4 always "1 / 1" |
+| `Resolution` | terminal `Deviation.resolution` | |
+| `Commit` | `Deviation.commit_sha[:7]` | short SHA; "—" if pending |
+| `When` | `Deviation.triggered_at` | ISO-8601 UTC |
+
+### Module ownership
+
+Single-source-of-truth module: `state_build/projectors/deviation_summary.py`. Subscribes to the daemon's event-store SSE stream filtered by step_id; renders to `slices/N-name/stepNSUMMARY.md` `## Deviations` section. v14 implements; v15 wires from the verify-slice stage. The projector module exports a single `render_deviations_section(step_id: str, slice_id: str) -> str | None` helper that returns the rendered markdown block or `None` when zero deviations exist for the step.
+
+### Mode-isolation
+
+The projector module lives under `state_build/projectors/`; MUST NOT import from `state_teach/`. CI import-graph lint enforces. The `## Deviations` section is a Build-mode-only artefact; teach-mode's `stepNSUMMARY.md` has no equivalent section (teach-mode's per-step summary uses a different schema documented in a future teach-mode phase).
+
+### Authoritative ordering
+
+Pydantic class definitions in this spec are authoritative. The column-schema table is the canonical column-order definition; v14 unit tests assert the projector's output matches the column order byte-for-byte. Any drift between the projector's emitted column order and this spec is a CI failure.
+
+### Worked example: rendered output
+
+A rendered `## Deviations` section for a step that hit Rule 1 twice and Rule 4 once:
+
+```
+## Deviations
+
+| # | Rule | Issue | Source | Attempts | Resolution | Commit | When |
+|---|---|---|---|---|---|---|---|
+| 1 | Rule 1 | AssertionError: expected 14 events, got 13 in test_eventstore... | agent_declared | 2 / 3 | auto_fix_succeeded | a1b2c3d | 2026-05-11T14:32:11Z |
+| 2 | Rule 4 | Adding redis>=5.0 to pyproject.toml for read-cache implementation | arch_pattern_match | 1 / 1 | escalated_to_human_gate | — | 2026-05-11T14:51:03Z |
+```
+
+The example illustrates: ordinal `#` stable across runs (sorted by first `triggered_at`); `Issue` truncated to ≤120 chars; `Attempts` rendered as "2 / 3" for Rule 1, "1 / 1" for Rule 4; `Commit` is `—` for the pending Rule 4 row (resolution arrived but no commit landed yet because the human gate is awaiting decision); `When` in ISO-8601 UTC.
+
+### Forward-pointers
+
+- Plan 02 of Phase 405 — SUBAGENT-MANAGEMENT.md — consumes the deviation-chain pattern for subagent crash-recovery counter accounting (SUB-07's 3-restart counter mirrors DEV-07's 3-attempt counter).
+- Plan 04 of Phase 405 — Event-taxonomy amendments — registers the four new `state.step.deviation_*` events in `.planning/milestones/v40/phases/400/specs/EVENT-TAXONOMY.md`.
+- Phase 406 — Harness rollup — registers the `state.harness.intervention` umbrella event (HRN-05) that this spec's three-counter-independence subsection forward-references.
+- v14 (Build Kernel) — implements `state_build/deviation/log_deviation.py`, `state_build/deviation/arch_patterns.py`, `state_build/deviation/counter.py`, `state_build/deviation/escalation.py`, `state_build/deviation/payloads.py`, `state_build/commit/trailers.py`, and `state_build/projectors/deviation_summary.py`.
+- v15 (Build Core Commands) — wires the daemon middleware to invoke the cross-validation flow at `log_deviation` MCP tool-call time, and wires the projector to fire at task-end during the verify-slice stage.
+
+---
+
+## Appendix A — Module Index (single-source-of-truth references)
+
+The Phase 405 deviation chain is implemented across the following modules. Each module is named once as the canonical SOT; duplicate or shadow copies are CI-forbidden.
+
+| Module | Owner | Purpose |
+|---|---|---|
+| `state_build/deviation/log_deviation.py` | v14 | MCP tool handler; cross-validation flow runner |
+| `state_build/deviation/arch_patterns.py` | v14 | `ARCH_PATTERN_ALLOWLIST` + `match_arch_pattern` + `classify_diff_kind` |
+| `state_build/deviation/counter.py` | v14 | Per-tuple attempt counter projection from event store |
+| `state_build/deviation/escalation.py` | v14 | `escalate_chain` verdict helper for Rules 1-3 cap-exceeded paths |
+| `state_build/deviation/payloads.py` | v14 | `Deviation`, `Rule4Option`, `DeviationLogResult`, `DeviationClassificationRejected` Pydantic classes |
+| `state_build/deviation/error_extraction.py` | v14 | `matched_token` extraction helper for `compute_issue_signature` inputs |
+| `state_build/commit/trailers.py` | v14 | `STATE-*` trailer constants + `infer_commit_type` + `render_trailers` helper |
+| `state_build/projectors/deviation_summary.py` | v14 | `## Deviations` SUMMARY section projector |
+
+Each module ships with unit tests under `tests/state_build/deviation/`; the test corpus exercises all four rule classification flows + arch-pattern allowlist regex behaviour + counter reset-on-success + projector column-order assertions.
+
+## Appendix B — Verbatim citations (heritage references)
+
+The spec borrows extensively from gsd-2 design heritage. The canonical citations:
+
+- `gsd-2/kb/walkthroughs/git-service.ts.md:616` — `COMMIT_TYPE_RULES` 7-rule keyword table; state's `infer_commit_type` is a Python port with the keyword table unchanged.
+- `gsd-2/kb/walkthroughs/loop-control.md` §0 Correction 1 — three-counter independence rationale; state's discipline matches.
+- `gsd-2/kb/walkthroughs/server-recomputation-of-llm-emitted-fields.md` — defensive recomputation pattern; state applies to `attempt_number`, `cap_exceeded`, `classification_source`, `issue_signature`.
+- `gsd-2/kb/walkthroughs/tool-system.md` §5 — MCP-tool-call-as-canonical-agent-intent-signal; `log_deviation` follows the pattern.
+- `gsd-2/kb/walkthroughs/db-writer.ts.md` §1, §2, §6, §10, §12 — projection cache-invalidation discipline; `## Deviations` projector mirrors.
+- `gsd-2/kb/walkthroughs/precedence-divergence-by-trust-model.md` — permissive-vs-strict trust-model framing; per-Slice autonomy override follows the permissive pole.
+- `gsd-2/kb/walkthroughs/dispatch-rules-table.md` — first-match-wins pattern; `ARCH_PATTERN_ALLOWLIST` adopts.
+- `gsd-2/agent-loop.ts:191` — `consecutiveAllToolErrorTurns = 0`-on-success pattern; DEV counter reset-on-success mirrors.
+
+## Appendix C — Cross-spec links (sibling and prior-phase references)
+
+- `.planning/milestones/v41/phases/404/specs/PROOF-GATE.md` — PRF gate_strike chain; DEV chain mirrors the per-tuple counter discipline at a different tuple shape (`(task_id, rule_id, issue_signature)` vs PRF's `(task_id, check_id)`).
+- `.planning/milestones/v41/phases/404/specs/SCOPE-PROHIBITION.md` — `scope_deviation_request` (SRP-04); cross-validation step 4 correlates against open requests.
+- `.planning/milestones/v41/phases/404/specs/ANALYSIS-PARALYSIS-GUARD.md` — APG `paralysis_event` chain; the first of the three independent counters.
+- `.planning/milestones/v41/phases/403/specs/STEP-PLAN-FORMAT.md` — Slice frontmatter schema; `autonomy: Literal["tiered","full-yolo","conservative"] | None` field lands here (DEV-06).
+- `.planning/milestones/v41/phases/403/specs/PLAN-AS-PROMPT.md` — `checkpoint:decision` / `checkpoint:human-verify` / `checkpoint:human-action` task types; the autonomy table's first three columns reference these.
+- `.planning/milestones/v41/phases/402/specs/CONTEXT-PROTOCOL.md` — `stepNSUMMARY.md` generation precedent; `## Deviations` projector follows the SUMMARY-as-event-projection pattern.
+- `.planning/milestones/v40/phases/400/specs/EVENT-TAXONOMY.md` — event-naming convention `state.{tier}.{action}`; Plan 04 registers the four new `state.step.deviation_*` events.
+- `.planning/milestones/v40/phases/400/specs/FRONTMATTER-SCHEMAS.md` — Pydantic `extra="forbid"` convention; all classes in this spec follow.
+
+## Appendix D — Deferred items
+
+The following items are explicitly deferred to later phases / milestones:
+
+- **`error_kind` enum expansion** — v14 EXEMPLAR recommends adding `oauth_refresh_failure`, `worktree_checkout_failure`, `pygit2_lock_contention`, `mcp_tool_validation_failure`. Phase 405 ships with the 10 starter values; expansion is a routine Rule 2 addition in v14.
+- **TOML-aware ADD/BUMP discriminator** — the current discriminator uses line-level regex; a TOML-aware parser is deferred to v15 if false-positives become a problem.
+- **`matched_token` extraction edge cases** — v14 pins the exact extraction rule; the 64-char truncation fallback is the safe default.
+- **Atomic SUMMARY temp+rename** — acknowledged not-yet-atomic per Phase 402 §7.3 note for `last-snapshot.md`; v44 follow-up applies the same fix to the `## Deviations` projector.
+- **CI lint for autonomy-bypass absence** — v14 owns adding the `! grep -qE 'full[_-]yolo.*bypass'` lint to the pre-commit hook.
+- **Grandchild fanout counter** — Plan 02 territory (SUB-04); rejected for v1, revisit if concurrency-storm patterns surface.
+
+## Appendix E — Glossary of terms used in this spec
+
+- **Deviation** — a logged deviation event; one of four rule classes.
+- **`issue_signature`** — SHA-256 16-char hex deterministic identifier for "the same logical failure."
+- **Per-tuple key** — the composite identifier that scopes a counter chain; `(task_id, rule_id, issue_signature)` for DEV.
+- **Reset-on-success** — counter drops to 0 when the next pure-machine eval of the same tuple returns success.
+- **Cross-validation flow** — the daemon's 5-step pure-machine validation of an agent-declared deviation.
+- **Arch-pattern allowlist** — the 6 regex patterns that force Rule 4 promotion.
+- **ADD vs BUMP** — pure-machine diff parse discriminator for `pyproject.toml` / `uv.lock`.
+- **Append-only mutation** — single-row pattern via append-only `deviation_resolution_recorded` events.
+- **Three-counter independence** — APG, PRF, DEV chains are independent; HRN-05 is the sole rollup.
+- **Tiered autonomy** — the three-mode autonomy policy (`--tiered`, `--full-yolo`, `--conservative`) + Rule 4 always-stop fourth column.
+- **Per-Slice override** — Slice frontmatter `autonomy` field; precedence `milestone default -> Slice override`.
