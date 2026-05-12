@@ -279,3 +279,375 @@ Layer 3 (artifact existence) hashes the file at verification time. SHA-256 is th
 
 
 
+
+## 5-Source Crash Taxonomy + 3-Restart Counter (SUB-07)
+
+A "crash" for SUB-07's 3-restart counter is any of five distinct sources. Each emits the same `SubagentCrashDetected` event payload with a `crash_source` Literal discriminator. The per-`(parent_task_id, subagent_type)` counter is the fourth independent chain (alongside APG / PRF / DEV).
+
+The "five-source" framing is deliberate: state's monitoring surface unifies what gsd-2 split across three separate handlers (process-exit, stop-reason, and spot-check-style validation) into one event family with a discriminator, then adds two state-specific sources (`sse_silence` for liveness, `parent_task_error` for parent-side dispatch failures). One Pydantic payload + one event-type + one projector covers all five sources; the discriminator drives per-source remediation and per-source counter behavior.
+
+### Five crash sources (markdown table)
+
+| Source | Trigger |
+|---|---|
+| `process_exit` | child opencode `task` process `exit_code != 0` (gsd-2 isError) |
+| `stop_reason` | last `message_end` event has `stop_reason ∈ {error, aborted}` (gsd-2) |
+| `spot_check` | any spot-check layer (1-4 from Section 4) fails |
+| `sse_silence` | no `subagent_progress` SSE event received for > `progress_timeout_s` (default 180s, configurable via Slice frontmatter `subagent: {progress_timeout_s: int}`) |
+| `parent_task_error` | parent-side `task` MCP tool call returns error (provider HTTP failure, auth-refresh mid-call, mode-gate violation) |
+
+The five sources are exhaustive for v1 — any subagent failure mode the harness can detect maps to one of them. v14 may add a `manual_abort` source post-v17 if user-initiated abort surfaces as a distinct concern, but the v1 contract assumes manual aborts route through DEV-04 Rule 4 (which terminates the Slice rather than incrementing the SUB counter).
+
+### Pydantic event payload
+
+```python
+class SubagentCrashDetected(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invocation_id: str
+    parent_task_id: str
+    subagent_type: SubagentType
+    crash_source: Literal["process_exit","stop_reason","spot_check","sse_silence","parent_task_error"]
+    restart_number: int                                  # 1..3; 4 triggers escalation
+    evidence_excerpt: str                                # ≤2KB
+    detected_at: datetime
+    session_id: str
+```
+
+Event type: `state.step.subagent_crash_detected`. Registered by Plan 04.
+
+The `restart_number` field's invariant is: `1..3` on `subagent_crash_detected` events; a value of `4` is impossible because the 4th detected crash event SHALL trigger emission of `subagent_restart_exhausted` instead. v14's projector enforces this at event-store write time — any attempt to emit a `subagent_crash_detected` with `restart_number=4` is rejected and surfaces as a Rule 4 escalation. The discipline keeps the counter chain auditable: a closed chain has exactly 3 `subagent_crash_detected` events (one per restart) followed by one `subagent_restart_exhausted` event, or fewer crash events followed by a `subagent_complete` event.
+
+### Restart counter scope
+
+**Per-`(parent_task_id, subagent_type)` tuple.** Diverges from per-`invocation_id` because the agent should not get a fresh 3-restart budget by re-invoking the same subagent type with a slightly different prompt for the same logical work unit. Mirrors Phase 404's per-`(task_id, check_id)` strike discipline.
+
+The gaming surface this closes: without the per-tuple scope, an agent that observes the harness counting restarts by `invocation_id` could simply dispatch a new subagent of the same type with a slightly rephrased prompt after a crash, getting a fresh 3-strike budget for the same logical work. With the tuple scope, the counter accumulates regardless of prompt variations — the agent must succeed within 3 attempts at the work unit, not 3 attempts per prompt variant. The projector keys its counter dict on `f"{parent_task_id}|{subagent_type}"` (the pipe is a separator unambiguous against valid ulid characters).
+
+### After-3-restart escalation
+
+After 3 restarts on the same tuple, the parent agent MUST call `log_deviation` with `rule_id=3` (blocking issue) or `rule_id=4` (architectural — if the failure indicates a structural problem). The escalation event is `state.step.subagent_restart_exhausted` with payload:
+
+```python
+class SubagentRestartExhausted(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invocation_id: str                                   # most recent invocation
+    parent_task_id: str
+    subagent_type: SubagentType
+    terminal_crash_source: Literal["process_exit","stop_reason","spot_check","sse_silence","parent_task_error"]
+    triggered_at: datetime
+    session_id: str
+```
+
+The harness emits this event AND surfaces the escalation prompt to the parent agent through opencode's TUI; the parent agent's next `log_deviation(rule_id=3|4)` call closes the chain. Cross-reference: DEVIATION-RULES.md Section 4 (cross-validation) accepts the elevated rule_id without re-promotion.
+
+### Successful restart event
+
+```python
+class SubagentRestart(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invocation_id: str                                   # NEW invocation id for the retry
+    previous_invocation_id: str                          # the failed invocation
+    parent_task_id: str
+    subagent_type: SubagentType
+    restart_number: int                                  # 1..3
+    crash_source: Literal["process_exit","stop_reason","spot_check","sse_silence","parent_task_error"]
+    triggered_at: datetime
+    session_id: str                                      # new session for the retry
+```
+
+Event type: `state.step.subagent_restart`.
+
+The two-ulid linkage (`invocation_id` for the retry + `previous_invocation_id` for the failed attempt) is what lets the projector reconstruct restart chains from event-store replay. A restart chain is a maximal sequence of invocations linked by `previous_invocation_id`; the chain head is the original `subagent_started` (no predecessor), the chain tail is either a `subagent_complete` (success) or a `subagent_restart_exhausted` (terminal failure).
+
+## <prior_crash> Continuation Context
+
+Restart prompts use an augmented original prompt with a `<prior_crash>` XML block. Mirrors Phase 402 reinject body XML discipline. **Diverges from gsd-2** — gsd-2's parallel-mode retry uses the original prompt verbatim; state's augmented form prevents looping on the same failure mode.
+
+The decision rationale: gsd-2's verbatim-retry approach assumes the failure mode is transient (network blip, provider rate-limit, mid-call auth refresh). State's augmented-retry approach handles those transient failures equally well AND prevents systematic loops on persistent failure modes (e.g., a subagent that consistently writes to the wrong file path because it misread the prompt). The cost is a slightly larger restart prompt; the benefit is the agent has explicit evidence of the prior failure to course-correct from.
+
+### XML structure (verbatim)
+
+```xml
+<prior_crash>
+  <restart_number>2 of 3</restart_number>
+  <crash_source>spot_check</crash_source>
+  <prior_evidence>
+    <!-- ≤2KB excerpt of failed stdout / spot-check failure detail -->
+    Layer 3 (artifact_existence) failed: declared path
+    `src/state_build/snapshot/compaction.py` does not exist; agent claimed
+    to write but file is absent at SHA-256 verification.
+  </prior_evidence>
+  <remediation_hint>
+    Verify file path against the worktree before declaring artifacts; ensure
+    git add + commit landed before returning.
+  </remediation_hint>
+</prior_crash>
+
+<original_task>
+  <!-- verbatim original prompt -->
+</original_task>
+```
+
+### remediation_hint sourcing
+
+**`remediation_hint` is harness-default per `crash_source`** (single-source-of-truth lookup table `state_build/subagents/remediation_hints.py`). Planner MAY override per Slice frontmatter `subagent: {remediation_hints: dict[CrashSource, str]}` — narrowing-only NOT applicable here (hints are informational, not security gates). The default hint table covers all five `crash_source` values; v14 finalizes the exact default strings during EXEMPLAR work.
+
+The hints are informational because the harness has no way to verify whether a subagent followed the hint; they shape the LLM's next-attempt behavior but are not gated. This is why narrowing-only doesn't apply: narrowing-only is the discipline for security-relevant Slice frontmatter overrides (e.g., a Slice cannot expand the parallel cap above the milestone default), but remediation hints can be tuned freely per Slice without exposing a bypass surface.
+
+### Worktree-rollback over partial-artifact-preservation (v1)
+
+**Partial-artifact preservation rejected for v1.** Worktree rollback on subagent restart is the simpler invariant: `declared_artifacts` that DID pass spot-check on the previous attempt are NOT preserved separately; the restarted subagent re-evaluates from scratch with the augmented prompt. Mirrors gsd-2's "fresh prompt on parallel-mode retry" + Phase 403's "replan recomputes from inputs" idempotency principle. Revisit post-v17 if observed restart cycles show systematic partial-success patterns.
+
+The simpler invariant matters because v1's worktree discipline is per-Slice — every subagent in a Slice writes into the same worktree branch. A partial-artifact preservation scheme would require either (a) a per-invocation sub-worktree (defeats the per-Slice grouping), (b) selective git revert (introduces a class of edge cases where partial commits leave the branch in a non-replayable state), or (c) cherry-pick from the failed invocation's commits (re-introduces the prompt-emitted-claim surface that the spot-check is designed to close). Worktree rollback to the pre-invocation HEAD avoids all three traps.
+
+### Module ownership
+
+Single-source-of-truth: `state_build/subagents/restart.py` exports `build_restart_prompt(original_task: str, crash: SubagentCrashDetected) -> str`. v14 implements; the daemon-side restart handler invokes when emitting `state.step.subagent_restart` events. The XML block is constructed in-memory and injected into the new opencode session via the `task` tool's prompt argument.
+
+## task_id Survival + Daemon-Down Orphan Reconciliation (SUB-08)
+
+SUB-08 cross-references CTX-07 (Phase 402 identifier-survival contract). The subagent restart counter + in-flight subagent list survive compaction and Slice-boundary respawn via event-store rehydration. Daemon-down + orphan reconciliation extends the same pattern to daemon restart territory.
+
+The combined identifier-survival + orphan-reconciliation discipline is what makes the subagent lifecycle robust across the three failure modes that matter most: (1) parent-session compaction (which truncates the parent's prompt window), (2) Slice-boundary respawn (which starts a fresh parent session for the next Slice), (3) daemon restart (which clears in-memory projector state). For each mode, the recovery path is "replay event-store"; the in-memory projectors are caches, never authoritative.
+
+### CompactionSnapshot extension
+
+```python
+class CompactionSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # ... existing fields from Phase 402 ...
+    # Phase 405 additions:
+    subagent_restart_counters: dict[str, int]            # key = "{parent_task_id}|{subagent_type}", value = restart count
+    in_flight_subagents: list[InFlightSubagent]          # for Slice-boundary spawn
+```
+
+These two fields extend the Phase 402 `CompactionSnapshot` Pydantic model. Reinject payload carries them; daemon projector consumes on snapshot load.
+
+### Slice-boundary spawn
+
+The new session's `chat.params` metadata includes the prior counters; plugin's `chat.message` hook (or first `tool.execute.before` fire) writes them to plugin-local hot state via the daemon HTTP middleware. Cross-references CTX-07. The same projector pattern handles intra-Slice compaction reinject AND Slice-boundary respawn — both paths rehydrate from event-store.
+
+### Subagent continuation on daemon restart
+
+**Subagents continue independently** when daemon restarts mid-execution. Mirrors Phase 402's "in-flight subagents finish independently" decision for parent-compaction inheritance. Subagent processes are managed by opencode's `task` tool, not state-daemon; daemon restart doesn't kill them.
+
+The architectural separation matters: opencode owns the subagent processes' lifecycles via its `task` tool; state-daemon is a sibling user-service that observes via SSE and records events. A daemon restart loses the daemon's in-memory projector state but does NOT terminate any running subagent. On daemon resume, the orphan reconciliation flow walks the event-store and reaches out to opencode's session API to reconcile what's still running with what the event log shows.
+
+### Orphan reconciliation flow (numbered)
+
+1. **Replay event-store** to rebuild `in_flight_subagents: dict[invocation_id, InFlightSubagent]` from any `state.step.subagent_started` event WITHOUT a paired `state.step.subagent_complete` / `state.step.subagent_crash_detected` event.
+2. **Probe opencode** for each orphan: HTTP call to opencode's session API with the orphan's session_id / task_id; ask opencode whether the task is still running.
+3. **If opencode reports still running** → re-subscribe to opencode SSE for that session; wait for natural completion event.
+4. **If opencode reports done but no event was received** → reconstruct from opencode's session log (replay the session's recorded events); emit the missing `subagent_complete` event from the reconstruction.
+5. **If opencode reports the task gone (lost)** → emit `state.step.subagent_orphan_detected` event (payload below) with `last_known_state="gone"`.
+6. **Persistent orphan** (still unresolved after Slice-boundary spawn) → surface as DEV-04 Rule 4 human-gate via opencode `question` tool with the orphan details and a recovery alternatives payload pre-authored as `[abort_slice, retry_subagent, manual_resolve]`.
+
+The six-step protocol is deterministic given the event-store + opencode's session API. Each step has a single, named outcome; there are no time-based escalations within the flow other than the SSE wait in step 3 (which is bounded by `progress_timeout_s`). The pre-authored alternatives in step 6 — `abort_slice`, `retry_subagent`, `manual_resolve` — exist so that the Rule 4 question surface in opencode's TUI presents a concrete decision rather than an open-ended prompt; this matches DEVIATION-RULES.md's Rule 4 always-stop contract.
+
+### Pydantic event + in-flight payloads
+
+```python
+class SubagentOrphanDetected(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invocation_id: str
+    parent_task_id: str
+    subagent_type: SubagentType
+    last_known_state: Literal["running","unknown","gone"]
+    detected_at: datetime
+
+class InFlightSubagent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    invocation_id: str
+    parent_task_id: str
+    subagent_type: SubagentType
+    started_at: datetime
+    last_progress_at: datetime | None
+```
+
+Event type: `state.step.subagent_orphan_detected`.
+
+### HRN-07 guarantee preservation
+
+Phase 406's HRN-07 "harness state fully reconstructable from event store" guarantee is preserved: every transition emits an event; replay rebuilds state. Daemon restart-safe via the rebuild path. The orphan reconciliation flow is part of the daemon resume handler; v14 implements at `state_build/subagents/orphan_reconcile.py`.
+
+The HRN-07 invariant has a strict version in this spec's context: the projector state for `(in_flight_subagents, subagent_restart_counters, restart_chain_links)` is computable from the event-store alone, with `O(N)` time complexity where N is the number of `state.step.subagent_*` events in the relevant Slice window. v14's projector implementation MUST achieve this complexity; a quadratic implementation is rejected at code-review.
+
+## Autonomy Inheritance from Parent Slice (SUB-09)
+
+SUB-09 consumes DEVIATION-RULES.md's DEV-05 (tiered autonomy) + DEV-06 (per-Slice override). The parent Slice's effective autonomy propagates to every spawned subagent via the `dispatch_subagent` payload. The daemon middleware builds the opencode `task` tool invocation with the inherited autonomy injected into the child session's context.
+
+The reason this matters: without inheritance, every subagent would default to the milestone-level autonomy regardless of Slice-level tuning. A Slice marked `--conservative` because it touches security-sensitive code would still spawn `--tiered` subagents that auto-approve human-verify checkpoints inside that Slice. With inheritance, the Slice's effective autonomy is the floor for every subagent it dispatches — and the per-dispatch override can move stricter OR looser per the explicit decision below.
+
+### 3-step inheritance flow
+
+1. **Parent's effective autonomy** = `Slice.frontmatter.autonomy ?? milestone.autonomy_default` (DEV-06 precedence rule from DEVIATION-RULES.md Section 6).
+2. **Per-dispatch override** allowed: `DispatchSubagent.{single,parallel,chain}[i].autonomy: Literal["tiered","full-yolo","conservative"] | None`. If set, the child uses the override; if `None`, inherits the parent's effective autonomy. The override CAN move stricter (parent `--tiered`, child `--conservative`) OR looser (parent `--tiered`, child `--full-yolo`) — same direction-rule as DEV-06 Slice override (narrowing-only does NOT apply to autonomy; autonomy is policy not capability).
+3. **Grandchild recursion**: a child subagent's `dispatch_subagent` calls (for grandchildren) recompute effective autonomy at their session boundary; grandchildren inherit from the child's effective autonomy, **not from the original parent**. Each session boundary applies the same `frontmatter ?? parent_effective` rule.
+
+The grandchild rule means autonomy is a per-session computed property, not a transitive inherited one. A grandchild whose parent (the child) is `--conservative` and grandparent is `--full-yolo` runs as `--conservative` regardless of the grandparent's setting. This is necessary for predictable behavior: if a Slice's planner sets a child to `--conservative` to gate a sensitive sub-task, the planner's intent must not be defeated by a grandchild silently re-inheriting from the looser grandparent.
+
+### Rule-4 always-stop preservation
+
+**Rule 4 always-stop is preserved across inheritance.** Even if a grandchild's effective autonomy is `--full-yolo`, a `log_deviation(rule_id=4)` from the grandchild still synchronously renders opencode `question` (DEVIATION-RULES.md Section 2 structural-not-policy guarantee). Inheritance affects the autonomy mode's first three columns (human-verify / decision / human-action behaviors); the 4th column (Rule 4) is structural and cannot be inherited away.
+
+### Implementation surface
+
+When the daemon middleware builds the opencode `task` tool invocation, it injects the child's effective autonomy into the child session's environment via the `chat.params` hook (plugin-side context-block builder). The autonomy block is a structured `<autonomy>` XML annotation in the child's chat.params metadata; the plugin reads it on first `chat.message` fire and registers it with the daemon's autonomy projector. Mirrors gsd-2's `before-agent-start-context-assembly.md` block-builder shape — gsd-2 has no equivalent autonomy-inheritance block, so state's discipline is stricter.
+
+### Module ownership
+
+Single-source-of-truth: `state_build/subagents/autonomy.py` exports `compute_effective_autonomy(parent_effective, override) -> AutonomyMode`. v14 implements; daemon middleware invokes at `dispatch_subagent` time; plugin-side `chat.params` hook injects the result.
+
+### Cross-reference to DEVIATION-RULES.md
+
+Plan 01 of Phase 405 (DEVIATION-RULES.md) is the authoritative source for the tiered autonomy table (Section 6) and the per-Slice override mechanism (Section 6). This spec consumes that table verbatim; do not re-render it here. Forward-pointer to `.planning/milestones/v41/phases/405/specs/DEVIATION-RULES.md` is the canonical citation.
+
+### Mode-isolation note (re-affirmed)
+
+`state_build/subagents/` MUST NOT import from `state_teach/`; the autonomy module, like all other modules in this spec, lives strictly in the Build subtree. Events emitted by this spec all live in BUILD_ONLY_EVENT_PREFIXES per EVENT-TAXONOMY.md. CI import-graph lint enforces.
+
+## Appendix A — Event Stream Worked Example (illustrative)
+
+A concrete worked example of an executor subagent dispatched, crashing once on `spot_check`, and succeeding on the first restart. All event payloads abbreviated for readability; the actual events carry the full Pydantic field sets defined above.
+
+**Step 1: Dispatch**
+```
+state.step.subagent_started {
+  invocation_id: "01HXXX...A",
+  parent_task_id: "task-step-7",
+  subagent_type: "executor",
+  slice_id: "slice-42",
+  ...
+}
+```
+
+**Step 2: Progress (multiple events)**
+```
+state.step.subagent_progress { invocation_id: "01HXXX...A", kind: "tool_use_start", ... }
+state.step.subagent_progress { invocation_id: "01HXXX...A", kind: "tool_use_end", ... }
+state.step.subagent_progress { invocation_id: "01HXXX...A", kind: "message_end", ... }
+```
+
+**Step 3: Complete (with structured return)**
+```
+state.step.subagent_complete {
+  invocation_id: "01HXXX...A",
+  stop_reason: "end_turn",
+  declared_artifacts: [{path: "src/x.py", sha256: "abc...", line_count: 42}],
+  declared_commits: ["c0ffee1"],
+  ...
+}
+```
+
+**Step 4: Spot-check fails (artifact missing)**
+```
+state.step.subagent_spot_check_failed {
+  invocation_id: "01HXXX...A",
+  layer: "artifact",
+  evidence_excerpt: "declared path src/x.py does not exist",
+  ...
+}
+```
+
+**Step 5: Crash detected (spot-check feeds crash counter)**
+```
+state.step.subagent_crash_detected {
+  invocation_id: "01HXXX...A",
+  crash_source: "spot_check",
+  restart_number: 1,
+  ...
+}
+```
+
+**Step 6: Restart triggered**
+```
+state.step.subagent_restart {
+  invocation_id: "01HXXX...B",          # new ulid
+  previous_invocation_id: "01HXXX...A",
+  restart_number: 1,
+  crash_source: "spot_check",
+  ...
+}
+```
+
+**Step 7: Restarted subagent starts (with `<prior_crash>` block in prompt)**
+```
+state.step.subagent_started {
+  invocation_id: "01HXXX...B",
+  parent_task_id: "task-step-7",      # same parent
+  subagent_type: "executor",
+  ...
+}
+```
+
+**Step 8: Restarted subagent completes successfully**
+```
+state.step.subagent_complete {
+  invocation_id: "01HXXX...B",
+  stop_reason: "end_turn",
+  declared_artifacts: [{path: "src/x.py", sha256: "def...", line_count: 50}],
+  declared_commits: ["c0ffee2"],
+  ...
+}
+```
+
+**Step 9: Spot-check passes** (no `subagent_spot_check_failed` event); the projector records the successful spot-check inline on the complete event's projection. The restart counter for `("task-step-7", "executor")` remains at 1 (not reset; success terminates the chain without resetting). A future `executor` dispatch for the same parent task that fails would start at `restart_number=2`.
+
+## Appendix B — Cross-Reference Index
+
+| Spec | Section | Cross-reference from this file |
+|---|---|---|
+| SUBAGENT-MANAGEMENT.md | §3 STAGE_ROSTER | Consumed by SUBAGENT_RETURN_REGISTRY (this file §3) |
+| SUBAGENT-MANAGEMENT.md | §4 assert_never | Mirrored by compile-time exhaustiveness (this file §3) |
+| DEVIATION-RULES.md | §2 Rule 4 structural | Preserved across autonomy inheritance (this file §8) |
+| DEVIATION-RULES.md | §4 cross-validation | Accepts subagent_restart_exhausted rule_id (this file §5) |
+| DEVIATION-RULES.md | §6 tiered autonomy | Consumed by SUB-09 inheritance flow (this file §8) |
+| DEVIATION-RULES.md | §8 three-counter independence | Extended to four-counter (this file §4) |
+| CONTEXT-PROTOCOL.md | §CTX-07 task_id survival | Cross-referenced by SUB-08 (this file §7) |
+| CONTEXT-PROTOCOL.md | CompactionSnapshot | Extended with 2 new fields (this file §7) |
+| PROOF-GATE.md | §7 StepVerifyResult overall_passed | Server-recomputation mirrored (this file §4) |
+| STEP-PLAN-FORMAT.md | files_modified frontmatter | Cross-checked by ExecutorReturn (this file §3) |
+| EVENT-TAXONOMY.md | BUILD_ONLY_EVENT_PREFIXES | Registers 8 new state.step.subagent_* events (Plan 04) |
+| FRONTMATTER-SCHEMAS.md | extra="forbid" convention | Applied to all Pydantic models (this file, all sections) |
+
+## Appendix C — Open Questions Deferred to v14 / v17
+
+The following items are explicitly out of scope for v41 (this spec) and will be resolved during v14 (Build Kernel implementation) or post-v17 (production observation):
+
+1. **Exact default `progress_timeout_s` value.** Spec stipulates 180s as a starter; v14 EXEMPLAR work may tune to 240s / 300s if false-positive `sse_silence` crashes emerge during exemplar Step execution. Tuning is per-Slice via frontmatter override, so the default can be revised without spec amendment.
+2. **The 13 remaining per-type return subclasses.** This spec renders `ExecutorReturn` verbatim as an example; v14 authors the other 13 (`ResearcherReturn`, etc.) during EXEMPLAR work, one per stage roster entry. The shape is fixed by the inheritance pattern; the field set per subclass is the v14 design surface.
+3. **Default `remediation_hint` strings per `crash_source`.** Spec stipulates `state_build/subagents/remediation_hints.py` as the lookup module; v14 authors the five default strings. Format is plain English, ≤200 chars per hint, addressed to the subagent's LLM.
+4. **Layer-5 commit-tree hash spot-check.** Post-v17 consideration if observed commit-rewrite scenarios warrant adding a fifth layer that hashes the commit tree (not just verifies reachability). Out of scope for v1.
+5. **Per-stage refinement of `SubagentProgress.kind`.** v14 may split `other` into named sub-kinds; v1 ships with the 5-value Literal as a conservative starter.
+6. **Pre-authored alternatives for non-orphan Rule 4 escalations.** This spec pre-authors `[abort_slice, retry_subagent, manual_resolve]` for orphan reconciliation only; other Rule 4 escalations from SUB-* events (e.g., `subagent_restart_exhausted`) use the generic Rule-4 alternative set defined in DEVIATION-RULES.md.
+
+## Appendix D — Versioning & Forward-Compatibility
+
+The Pydantic models defined in this spec ship as v1 of the subagent-monitoring contract. Forward-compatibility rules:
+
+- **Adding a new field** to any payload requires either (a) a default value (existing emitters remain valid) OR (b) bumping the contract version (v2) with a parallel registry. The `extra="forbid"` discipline means consumers reject unknown fields, so adding fields without defaults is a breaking change for legacy emitters.
+- **Adding a new `SubagentType` Literal value** requires registering a corresponding `<Type>Return` subclass in the same commit (mypy strict check enforces).
+- **Adding a new `crash_source` Literal value** requires updating the `SubagentCrashDetected` / `SubagentRestart` / `SubagentRestartExhausted` payloads AND the remediation_hints lookup table in the same commit.
+- **Renaming a Literal value** is always a breaking change; bump contract version.
+- **Removing a Literal value** is a breaking change; bump contract version.
+
+The contract version is implicit in v1 (the spec's milestone tag is `v41`); v14 may introduce an explicit `contract_version: int` field on each payload if observed evolution warrants explicit versioning at the event level.
+
+### Event-store migration discipline
+
+Event-store rows are immutable; any contract change must support reading legacy rows during replay. The event-store schema carries an `event_version: str` column adjacent to the `event_type` column (per Phase 400 EVENT-TAXONOMY.md). Future contract bumps insert a new event-version-row pairing while leaving legacy rows readable via a per-version parser registered in `state_build/subagents/parsers.py` (v14 introduces this module if/when a v2 contract ships). The discipline ensures HRN-07 reconstructability holds across contract evolution — legacy events remain replayable into the current projector state shape.
+
+### Subagent type addition checklist
+
+When a new `SubagentType` Literal value is added (i.e., a new subagent class joins the roster), the contributor MUST land all five of the following in a single commit: (1) extend `SubagentType` Literal in SUBAGENT-MANAGEMENT.md `STAGE_ROSTER`; (2) author the `<Type>Return` Pydantic subclass in the appropriate `returns_{stage}.py` module; (3) register the subclass in `SUBAGENT_RETURN_REGISTRY`; (4) extend the discriminated-union `SubagentReturn` alias; (5) update the EXEMPLAR-stepNPLAN.md gate roster if the new type changes any stage's dispatch surface. CI's mypy strict check + the registry exhaustiveness assertion catch incomplete additions.
+
+## Appendix E — Discovered Threats (executor append-only)
+
+<!--
+The runtime executor MAY append discovered threats here per PAP-05 carve-out.
+This appendix is empty at authoring time.
+Future entries follow the format:
+- [severity] Threat description — Mitigation
+-->
+
+(empty at authoring time)
