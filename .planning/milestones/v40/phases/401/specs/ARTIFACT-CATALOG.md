@@ -847,3 +847,47 @@ Pydantic class definitions in the owning specs (PROOF-GATE.md / SCOPE-PROHIBITIO
 Canonical Slice folder layout (ART-01 entries for `slices/N-name/`) gains three new files: `stepN-VERIFY.json` (one per Step), `slice-verification.sh` (one per Slice), and `deferred-items.md` (one per Slice; may be empty). Plus a column-schema pin for the existing `N-VERIFICATION.md`. Readers consulting this catalog for v41+ scheduling should cross-reference PROOF-GATE.md §8 (column schema) + §9 (artifact list) and SCOPE-PROHIBITION.md §9 (deferred-items.md). v14 Build Kernel implements the StepVerifyResult parser, the slice-verification.sh runner with timeout, the N-VERIFICATION.md projector, and the deferred-items.md auto-append projector.
 
 *Original v40 spec text + Phase 402 amendment above this block are untouched. This amendment is purely additive, appended per Phase 402 convention (no in-line strikethroughs).*
+
+---
+
+## v41 Amendment — Phase 405 Deviation + Subagent Artifacts
+
+**Phase:** 405 (Deviation Rules & Subagent Management)
+**Status:** Canonical (v41)
+**Append-only:** All entries below are NEW; nothing above this header has been edited.
+**Build-mode only:** All entries live under `state_build/` lineage. CI import-graph lint enforces no `state_teach/` imports.
+**Naming discipline:** All module paths are `state_build/*`; no `state_gsd/*` or `gsd_*` paths exist in Phase 405.
+
+Phase 405's three sibling spec docs (DEVIATION-RULES.md, SUBAGENT-MANAGEMENT.md, SUBAGENT-MONITORING.md) introduce nine new Python modules + one extension to Phase 402's `CompactionSnapshot` Pydantic + one new `stepNSUMMARY.md` section. Full Pydantic schemas + behaviors live in the owning Phase 405 spec docs; this amendment is a registry index.
+
+### New Artifacts
+
+| Filename / Module Path | Producer Stage | Schema Owner (spec doc) | Immutability | Description |
+|---|---|---|---|---|
+| `state_build/deviation/arch_patterns.py` | v14 Build Kernel | DEVIATION-RULES.md §5 | append-extensible | `ARCH_PATTERN_ALLOWLIST: list[re.Pattern]` (6 starter entries) + `match_arch_pattern()` + `classify_diff_kind()` — Rule-4 detection single-source-of-truth. |
+| `state_build/deviation/log_deviation.py` | v14 Build Kernel | DEVIATION-RULES.md §3-§4 | append-extensible | `log_deviation` MCP tool handler + 5-step cross-validation chain. |
+| `state_build/commit/trailers.py` | v14 Build Kernel | DEVIATION-RULES.md §5 | append-extensible | STATE-* trailer constants (`STATE-Task`, `STATE-DeviationRule`, `STATE-DeviationAttempt`, `STATE-Subagent-Invocation`) + `infer_commit_type()` (gsd-2 COMMIT_TYPE_RULES adapter). |
+| `state_build/projectors/deviation_summary.py` | v14 Build Kernel | DEVIATION-RULES.md §10 | append-extensible | `## Deviations` SUMMARY section projector — subscribes to `deviation_logged` + `deviation_resolution_recorded`; aggregates by `(rule_id, issue_signature)`; writes 8-column markdown table to `stepNSUMMARY.md`. |
+| `state_build/subagents/types.py` | v14 Build Kernel | SUBAGENT-MANAGEMENT.md §3 | append-extensible | `SubagentType` Literal (14 named types) + `STAGE_ROSTER: dict[SliceStage, frozenset[SubagentType]]` (4 stage rosters). |
+| `state_build/subagents/dispatch.py` | v14 Build Kernel | SUBAGENT-MANAGEMENT.md §2 + §5-§6 | append-extensible | `dispatch_subagent` MCP tool handler + DispatchSubagent / SingleDispatch / ParallelDispatch / ChainDispatch Pydantic shapes + whitelist enforcement + parallel-cap accounting. |
+| `state_build/subagents/parallel_cap.py` | v14 Build Kernel | SUBAGENT-MANAGEMENT.md §6 | append-extensible | `MAX_PARALLEL_CAP_DEFAULT = 20` + `resolve_effective_cap()` + `acquire_slot()` / `release_slot()` — daemon-side FIFO semaphore. |
+| `state_build/subagents/returns.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §3 | append-extensible | `SUBAGENT_RETURN_REGISTRY: dict[SubagentType, type[SubagentReturnBase]]` + `ArtifactDeclaration` + `SubagentReturnBase` Pydantic shapes; per-stage subclasses in `returns_{stage}.py` modules. |
+| `state_build/subagents/spot_check.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §4 | append-extensible | `run_spot_check_stack()` — 4-layer pure-machine validation (process / pydantic / artifact / commit). |
+| `state_build/subagents/restart.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §6 | append-extensible | `build_restart_prompt()` — augmented `<prior_crash>` XML continuation context. |
+| `state_build/subagents/remediation_hints.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §6 | append-extensible | Default `remediation_hint` strings keyed by `crash_source`. |
+| `state_build/subagents/orphan_reconcile.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §7 | append-extensible | 6-step daemon-resume orphan reconciliation flow + `SubagentOrphanDetected` + `InFlightSubagent` Pydantic. |
+| `state_build/subagents/autonomy.py` | v14 Build Kernel | SUBAGENT-MONITORING.md §8 | append-extensible | `compute_effective_autonomy(parent_effective, override) -> AutonomyMode` — SUB-09 inheritance flow. |
+| `stepNSUMMARY.md` `## Deviations` section | v15 Build Core Commands (verify-slice) | DEVIATION-RULES.md §10 | projector-generated | 8-column markdown table; section omitted when zero deviations. |
+
+### CompactionSnapshot Extension (Phase 402 Pydantic model)
+
+Phase 405 EXTENDS Phase 402's `CompactionSnapshot` Pydantic model with two new fields. The schema owner remains Phase 402's CONTEXT-PROTOCOL.md; the Phase 405 extension is documented in SUBAGENT-MONITORING.md §7:
+
+| Field | Type | Owning REQ → Spec |
+|---|---|---|
+| `subagent_restart_counters` | `dict[str, int]` (key = `"{parent_task_id}|{subagent_type}"`) | SUB-08 → SUBAGENT-MONITORING.md §7 |
+| `in_flight_subagents` | `list[InFlightSubagent]` | SUB-08 → SUBAGENT-MONITORING.md §7 |
+
+### Authoritative-ordering note
+
+Pydantic class definitions in the owning Phase 405 spec docs are authoritative; this amendment is a registry index for module paths. When module-export details diverge between this catalog and the owning spec, the owning spec wins.

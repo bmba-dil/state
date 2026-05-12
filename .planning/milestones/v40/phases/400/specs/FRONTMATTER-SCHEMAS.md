@@ -301,3 +301,43 @@ The schema design enforces trust boundaries from the plan's threat model:
 ---
 
 *Design contract for v41+ runtime pydantic validation. All models validated against FSM-TABLES.md state lists, TIER-07 field ownership rules, and D-01/D-03 naming conventions. Consumed by Phase 401 artifact catalog (ART-02 templates, ART-05 validation rules).*
+
+---
+
+## v41 Amendment — Phase 405 SliceFrontmatter Extensions
+
+**Phase:** 405 (Deviation Rules & Subagent Management)
+**Status:** Canonical (v41)
+**Append-only:** All entries below are NEW; nothing above this header has been edited.
+**Build-mode only:** All three new fields are Build-mode-only; teach-mode SliceFrontmatter (v47 territory) owns its own analogs.
+**Pydantic `extra="forbid"`** continues per v40+Phase 403 convention.
+
+Phase 405's three sibling spec docs introduce three new fields on the `SliceFrontmatter` Pydantic model. Full validation rules + behavioral semantics live in the owning Phase 405 spec docs; this amendment is a registry index.
+
+### New SliceFrontmatter Fields
+
+| Field | Type | Default | Owning REQ → Spec |
+|---|---|---|---|
+| `autonomy` | `Literal["tiered","full-yolo","conservative"] \| None` | `None` (inherit from milestone default) | DEV-06 → DEVIATION-RULES.md §6 |
+| `allowed_subagents` | `list[SubagentType] \| None` | `None` (use `STAGE_ROSTER[current_stage]`) | SUB-03 → SUBAGENT-MANAGEMENT.md §5 |
+| `subagent` | `SubagentSliceConfig \| None` | `None` | SUB-04 + SUB-07 → SUBAGENT-MANAGEMENT.md §6 + SUBAGENT-MONITORING.md §5 |
+
+### Nested `SubagentSliceConfig` shape
+
+```python
+class SubagentSliceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parallel_cap: int | None = None                       # SUB-04 narrowing-only override (≤20)
+    progress_timeout_s: int | None = None                 # SUB-07 default 180s
+    remediation_hints: dict[str, str] | None = None       # SUB-07 keyed by crash_source
+```
+
+### Validation rules (cross-references)
+
+- **`autonomy`**: Slice override CAN move stricter OR looser (narrowing-only does NOT apply; autonomy is policy not capability). Precedence: `milestone default → Slice override → done`. See DEVIATION-RULES.md §6.
+- **`allowed_subagents`**: Narrowing-only (subset of `STAGE_ROSTER[current_stage]`). Two-gate validation: plan-validation stage (Phase 403 N-VALIDATION.md) + runtime `tool.execute.before`. See SUBAGENT-MANAGEMENT.md §5.
+- **`subagent.parallel_cap`**: Narrowing-only (≤20). Expansion attempts → `state.slice.subagent_cap_expansion_rejected` at plan-validation. See SUBAGENT-MANAGEMENT.md §6.
+
+### Authoritative-ordering note
+
+Pydantic class definitions in the owning Phase 405 spec docs are authoritative; this amendment is a registry index for the SliceFrontmatter additions.
