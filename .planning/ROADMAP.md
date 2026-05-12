@@ -77,7 +77,7 @@ These milestones architect the "business logic" layer — the hierarchy, harness
 
 - [x] **v40 — Build Hierarchy & Artifact System Architecture** — Arc/Phase/Slice/Step definitions, file layout, artifact catalog, naming conventions, cross-references, tracking file consistency ✓ Shipped 2026-05-07
 - [x] **v41 — Agent Harness & Context Control Design** — Phases 402-406 — Context window management, opencode-specific task decomposition, plan-as-prompt, analysis paralysis guard, scope reduction prohibition, deviation rules, subagent management ✓ Shipped 2026-05-12 (14 canonical specs / 8,149 markdown lines; 73/73 v1 reqs satisfied)
-- [ ] **v42 — Build Quality Pipeline Architecture** — 4-level verifier, goal-backward planning, adversarial verification, stub detection, anti-pattern scanner, threat model, plan checker, evidence chain
+- [ ] 🔨 **v42 — Build Quality Pipeline Architecture** — Phases 407–411 — Verifier chain (Step/Slice/Phase/Arc/Cross-Tier), 4-level verification model (Existence → Substantive → Wired → Data-Flowing), stub detection, goal-backward planning protocol, adversarial verification stance, anti-pattern scanner, STRIDE threat modeling, 9-check plan checker, evidence & artifact chain — In progress (roadmap drafted 2026-05-12; 51/51 v1 reqs mapped)
 - [ ] **v43 — Build Workflow Orchestration & GSD Port Map** — Full discuss→plan→execute→verify→ship cycle, DAG scheduler integration, session management, error recovery, all 30 GSD commands mapped
 - [ ] **v44 — Rust DB & RTK Agent Interception System** — Agent tool-call interception, fast Rust database, whitespace stripping, context compression, RTK integration
 - [ ] **v45 — Consolidated Design & v14–v27 Rewrite Specs** — Gap analysis, updated REQ-IDs, updated phase decompositions for v14–v17, updated tracking files
@@ -199,7 +199,7 @@ Tier 4 ends at v27 shipped — this is v1 release.
 | v27. Release & Packaging | 0/10 | Not started | - | - |
 | v40. Build Hierarchy & Artifact Architecture | 6/6 | **Complete** — Shipped 2026-05-07 | 2026-05-06 | 2026-05-07 |
 | v41. Agent Harness & Context Control | 5/5 | **Complete** — Shipped 2026-05-12 (Phases 402-406; 20/20 plans; 73/73 reqs) | 2026-05-08 | 2026-05-12 |
-| v42. Build Quality Pipeline | — | Not started (design spike) | - | - |
+| v42. Build Quality Pipeline | 0/5 | In progress (Phases 407–411; roadmap drafted) | 2026-05-12 | - |
 | v43. Build Workflow & GSD Port Map | — | Not started (design spike) | - | - |
 | v44. Rust DB & RTK Interception | — | Not started (design spike) | - | - |
 | v45. Consolidated Build Design & Rewrite | — | Not started (design spike) | - | - |

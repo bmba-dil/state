@@ -125,69 +125,69 @@ How verifier output is stored, linked, and walkable.
 
 ## Traceability
 
-Filled by gsd-roadmapper. Every v1 REQ must map to exactly one phase. Initial state below; roadmapper rewrites.
+Every v1 REQ maps to exactly one phase. Filled by gsd-roadmapper 2026-05-12.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| VCH-01 | TBD | Pending |
-| VCH-02 | TBD | Pending |
-| VCH-03 | TBD | Pending |
-| VCH-04 | TBD | Pending |
-| VCH-05 | TBD | Pending |
-| VCH-06 | TBD | Pending |
-| VCH-07 | TBD | Pending |
-| LVL-01 | TBD | Pending |
-| LVL-02 | TBD | Pending |
-| LVL-03 | TBD | Pending |
-| LVL-04 | TBD | Pending |
-| LVL-05 | TBD | Pending |
-| LVL-06 | TBD | Pending |
-| LVL-07 | TBD | Pending |
-| GBP-01 | TBD | Pending |
-| GBP-02 | TBD | Pending |
-| GBP-03 | TBD | Pending |
-| GBP-04 | TBD | Pending |
-| GBP-05 | TBD | Pending |
-| ADV-01 | TBD | Pending |
-| ADV-02 | TBD | Pending |
-| ADV-03 | TBD | Pending |
-| ADV-04 | TBD | Pending |
-| STB-01 | TBD | Pending |
-| STB-02 | TBD | Pending |
-| STB-03 | TBD | Pending |
-| STB-04 | TBD | Pending |
-| APS-01 | TBD | Pending |
-| APS-02 | TBD | Pending |
-| APS-03 | TBD | Pending |
-| APS-04 | TBD | Pending |
-| APS-05 | TBD | Pending |
-| THM-01 | TBD | Pending |
-| THM-02 | TBD | Pending |
-| THM-03 | TBD | Pending |
-| THM-04 | TBD | Pending |
-| THM-05 | TBD | Pending |
-| PCK-01 | TBD | Pending |
-| PCK-02 | TBD | Pending |
-| PCK-03 | TBD | Pending |
-| PCK-04 | TBD | Pending |
-| PCK-05 | TBD | Pending |
-| PCK-06 | TBD | Pending |
-| PCK-07 | TBD | Pending |
-| PCK-08 | TBD | Pending |
-| PCK-09 | TBD | Pending |
-| PCK-10 | TBD | Pending |
-| EVD-01 | TBD | Pending |
-| EVD-02 | TBD | Pending |
-| EVD-03 | TBD | Pending |
-| EVD-04 | TBD | Pending |
-| EVD-05 | TBD | Pending |
+| VCH-01 | 407 | Pending |
+| VCH-02 | 407 | Pending |
+| VCH-03 | 407 | Pending |
+| VCH-04 | 407 | Pending |
+| VCH-05 | 407 | Pending |
+| VCH-06 | 407 | Pending |
+| VCH-07 | 407 | Pending |
+| LVL-01 | 408 | Pending |
+| LVL-02 | 408 | Pending |
+| LVL-03 | 408 | Pending |
+| LVL-04 | 408 | Pending |
+| LVL-05 | 408 | Pending |
+| LVL-06 | 408 | Pending |
+| LVL-07 | 408 | Pending |
+| GBP-01 | 409 | Pending |
+| GBP-02 | 409 | Pending |
+| GBP-03 | 409 | Pending |
+| GBP-04 | 409 | Pending |
+| GBP-05 | 409 | Pending |
+| ADV-01 | 409 | Pending |
+| ADV-02 | 409 | Pending |
+| ADV-03 | 409 | Pending |
+| ADV-04 | 409 | Pending |
+| STB-01 | 408 | Pending |
+| STB-02 | 408 | Pending |
+| STB-03 | 408 | Pending |
+| STB-04 | 408 | Pending |
+| APS-01 | 410 | Pending |
+| APS-02 | 410 | Pending |
+| APS-03 | 410 | Pending |
+| APS-04 | 410 | Pending |
+| APS-05 | 410 | Pending |
+| THM-01 | 410 | Pending |
+| THM-02 | 410 | Pending |
+| THM-03 | 410 | Pending |
+| THM-04 | 410 | Pending |
+| THM-05 | 410 | Pending |
+| PCK-01 | 411 | Pending |
+| PCK-02 | 411 | Pending |
+| PCK-03 | 411 | Pending |
+| PCK-04 | 411 | Pending |
+| PCK-05 | 411 | Pending |
+| PCK-06 | 411 | Pending |
+| PCK-07 | 411 | Pending |
+| PCK-08 | 411 | Pending |
+| PCK-09 | 411 | Pending |
+| PCK-10 | 411 | Pending |
+| EVD-01 | 411 | Pending |
+| EVD-02 | 411 | Pending |
+| EVD-03 | 411 | Pending |
+| EVD-04 | 411 | Pending |
+| EVD-05 | 411 | Pending |
 
 **Coverage:**
 - v1 requirements: 51 total (VCH:7 + LVL:7 + GBP:5 + ADV:4 + STB:4 + APS:5 + THM:5 + PCK:10 + EVD:5)
-- Mapped to phases: 0 (roadmapper to fill)
-- Unmapped: 51 ⚠️ (pre-roadmap)
+- Mapped to phases: 51 / 51 (100%) ✓
+- Unmapped: 0
 
 ---
 
 *Requirements defined: 2026-05-12*
-*Last updated: 2026-05-12 after initial definition (v42 new-milestone workflow).*
+*Last updated: 2026-05-12 — traceability mapped to phases 407–411 (gsd-roadmapper).*
