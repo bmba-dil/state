@@ -1880,3 +1880,66 @@ sequenceDiagram
     Note over User,ES: Slice complete; downstream deps unblock on slice_verify_completed
 ```
 
+### §6.2 Diagram annotations
+
+#### Event tally (per stage)
+
+| Stage | Events emitted (diagram lines) |
+| --- | --- |
+| design-slice | `state.slice.created`, `state.slice.worktree_ready`, `state.slice.design_completed` — **3 events** |
+| research-slice | `state.step.subagent_started`, `state.step.subagent_progress` (×4 — modeled as one line), `state.step.subagent_complete`, `state.step.plan_authored`, `state.slice.research_completed` — **5 distinct event types, 8 event rows** |
+| run-slice task-1 (RED) | `state.step.gate_resolved`, `state.step.step_verify_completed` — **2 events** |
+| run-slice task-2 (GREEN, tier-2 block) | `state.step.plan_edit_blocked`, `state.harness.intervention(tier=tool_block)`, `state.step.gate_resolved`, `state.step.step_verify_completed` — **4 events** |
+| run-slice task-3 (research + 3 paralysis sites + checkpoint:decision) | `state.step.subagent_started`, 3× `state.step.paralysis_event`, 3× `state.harness.intervention` (advisory ×2 + clear_reinject ×1), `compaction.snapshot_taken`, `compaction.reinject_completed`, `state.step.checkpoint_human_action_pending`, `state.harness.intervention(tier=human_gate)`, `state.step.checkpoint_human_action_resolved`, `state.step.step_verify_completed`, `state.step.subagent_complete`, `state.slice.run_completed` — **15 distinct event rows** |
+| verify-slice | `state.slice.slice_verify_completed`, `state.slice.verify_completed` — **2 events** |
+| close | `state.slice.shipped` — **1 event** |
+
+**Total emitted in diagram: 35+ event rows, 14 distinct event types, exceeding HRN-08's ≥25-event load-bearing minimum.** The full enumeration is a subset of §5.1's 38-event surface; HRN-08 surfaces the lifecycle-active subset, not the full replay-input set (e.g., `state.step.deviation_logged` is not emitted in this exemplar because the Slice executes without rule-classified deviations; `state.step.subagent_orphan_detected` is not emitted because no subagent goes orphan; etc.).
+
+#### Tier-intervention call-out summary
+
+The diagram surfaces all four intervention tiers, with named trigger sources from §4.2's 4-tier ladder enumeration:
+
+| Tier | Site in diagram | Source chain | Source event | Umbrella `trigger_reason` |
+| --- | --- | --- | --- | --- |
+| 1 (advisory) | run-slice task-3 — APG paralysis cross threshold 1st time | APG | `state.step.paralysis_event(tier=advisory, advisory_number=1)` | `paralysis_threshold_crossed` |
+| 2 (tool_block) | run-slice task-2 — agent attempts edit to PLAN.md `<plan>` immutable block | PAP-05 (404 SCOPE-PROHIBITION.md Layer 2) | `state.step.plan_edit_blocked` | `scope_check_unresolved` (per §4.4 v1 closest-umbrella mapping; v17 may introduce tier-2-specific reasons per the TODO(HRN-04.tier2) tracking issue) |
+| 3 (clear_reinject) | run-slice task-3 — APG paralysis advisory 3 fires force_clear_and_reinject | APG | `state.step.paralysis_event(tier=reinject, advisory_number=3)` + `compaction.snapshot_taken` | `paralysis_chain_3_reinject` |
+| 4 (human_gate) | run-slice task-3 — `checkpoint:decision` task surfaces orjson flag selection | STP-05 (checkpoint:decision) + HRN-06 invariant | `state.step.checkpoint_human_action_pending` | `deviation_rule_4_architectural` (per §4.4 v1 closest-umbrella mapping; v17 may introduce a `checkpoint_decision_human_action` reason for finer disambiguation) |
+
+The exemplar Slice was chosen specifically because `task-3` is a `checkpoint:decision`; this lets HRN-08 demonstrate tier-4 against a real (not contrived) trigger source. The tier-1 + tier-3 sites both ride the APG paralysis chain on `task-3` — the same chain crossing thresholds at advisory 1 (tier-1 site) and advisory 3 (tier-3 site) shows the per-tier escalation behavior live in a single Slice. The tier-2 site rides PAP-05 on `task-2` because PLAN immutability is the canonical tier-2 trigger across all v41 specs.
+
+#### HRN-06 structural-invariant verification
+
+The tier-4 site in the diagram surfaces via opencode's `question` tool — the `Q` participant in the Mermaid `participant` block is opencode's `question` tool, NOT a state-introduced UI primitive. The diagram's `Q->>Daemon: response selected=OPT_NAIVE_UTC` edge confirms the response path: the human picks an option from the labeled list, opencode returns the selection to the daemon, the daemon emits `checkpoint_human_action_resolved`. No state-side prompt primitive (`prompt(`, `input(`, `Confirm(`, etc.) appears in the diagram. The structural invariant from §4.5 holds.
+
+#### Cross-references to prior phases
+
+The diagram is a literal walk of the canonical exemplar Slice from 403; the events surface come from 402–405; the umbrella intervention rows come from §4. Specifically:
+
+- **402 SLICE-CYCLE.md** owns the 4 `state.slice.*_completed` events at the stage boundaries and the `state.slice.{created, worktree_ready, shipped}` outer-FSM events.
+- **402 CONTEXT-PROTOCOL.md** owns `compaction.snapshot_taken` + `compaction.reinject_completed` at the tier-3 site.
+- **403 STEP-EVENTS.md** owns `state.step.plan_authored`, `state.step.plan_edit_blocked`, `state.step.checkpoint_human_action_{pending,resolved}`, and `state.step.step_verify_completed`.
+- **403 EXEMPLAR-stepNPLAN.md** owns the literal task names `task-1` (RED test) / `task-2` (GREEN implement) / `task-3` (`checkpoint:decision` for orjson flag) — the diagram's task pointers cite these by name.
+- **404 PROOF-GATE.md** owns `state.step.gate_resolved` and `state.slice.slice_verify_completed`; the tier-2 site at task-2 rides the PAP-05 Layer-2 block which is the gate-stack layer-stack carry-forward.
+- **404 ANALYSIS-PARALYSIS-GUARD.md** owns `state.step.paralysis_event` and the per-advisory tier transitions surfaced at the tier-1 and tier-3 sites.
+- **404 SCOPE-PROHIBITION.md** owns the PAP-05 immutability enforcement at the tier-2 site.
+- **405 SUBAGENT-MANAGEMENT.md** owns `dispatch_subagent` MCP tool call surfaces (research-slice + task-3 research subagent spawns).
+- **405 SUBAGENT-MONITORING.md** owns `state.step.subagent_started`, `state.step.subagent_progress`, `state.step.subagent_complete` for both subagents.
+- **406 §4 (this rollup, Plan 03)** owns `state.harness.intervention` and its 4-tier classification across the four named sites.
+
+The diagram is the operative HRN-08 deliverable: any v14 implementation that emits a different event sequence for the same input Slice is non-conformant against this rollup unless an upstream spec (402–405) has changed to specify the deviation. Drift between this diagram and the prior phases is a documented defect (carry-forward of the "rollup is index, not source of truth" discipline from §1).
+
+#### Diagram extensibility
+
+The exemplar Slice covers tier-1 / tier-2 / tier-3 / tier-4 across APG / PAP-05 / STP-05 trigger sources. Sites NOT exercised by this exemplar (deferred to v14 EXEMPLAR + v17 follow-ups per 406-CONTEXT.md `<deferred>`):
+
+- **PRF gate strike chain** (a 1-6 strike ladder on a single check_id) — the exemplar's gates all pass cleanly; a strike ladder needs a multi-attempt failing-check scenario.
+- **DEV deviation classification + cap_exceeded** — the exemplar's `task-2` GREEN implementation succeeds first try; the deviation chain only fires on auto-fix scenarios.
+- **SUB subagent crash + restart counter** — the exemplar's subagents both complete cleanly via `end_turn`; the restart counter only fires on opencode-reported crashes.
+- **SUB orphan reconciliation** — exercised by §5.3's daemon-restart worked example, not this lifecycle diagram.
+- **SCOPE files_modified Layer 1 block** — the exemplar's writes stay within the PLAN's `files_modified` allowlist; Layer 1 only fires on out-of-allowlist writes.
+- **CTX warning + emergency thresholds** — the exemplar fires `compaction.snapshot_taken` via the APG strike-3 reinject path, not via the CTX percent-threshold path.
+
+v14 will exercise the full event matrix in its EXEMPLAR test fixtures (deferred per 406-CONTEXT.md `<deferred>` "Cross-host event-store replay determinism test fixture"). This diagram is the operative HRN-08 minimum; the full matrix is v14's responsibility.
+
