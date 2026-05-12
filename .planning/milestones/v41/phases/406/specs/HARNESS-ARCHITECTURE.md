@@ -1577,3 +1577,160 @@ Resume completes when the next `chat.params` invocation lands and the daemon con
 
 The protocol IS the HRN-07 proof: given the event store and the opencode session API, every harness state — every counter, every in-flight subagent, every pending intervention, every plan-edit chain, every Slice-stage progression — is reconstructable. The next subsection (§5.3) demonstrates the protocol against the hardest realistic failure mode: a daemon restart mid-`run-slice` with two in-flight subagents and a paralysis counter mid-chain.
 
+### §5.3 Worked example — daemon restart mid-`run-slice` (hard case)
+
+The replay proof's worked example must show a hard case. The easy case (clean Slice close) does not exercise orphan reconciliation, counter rehydration, or `<prior_crash>` continuation context. The worked example below is the proof that the 5-step protocol works under the realistic failure mode (carry-forward from 406-CONTEXT.md `<specifics>` "The replay proof's worked example must show a hard case").
+
+#### Pre-crash state
+
+The daemon is running. Slice `compaction-snapshot-schema` (the exemplar from 403 EXEMPLAR-stepNPLAN.md) is in `run-slice` stage. The Slice's Step 1 (`compaction-snapshot-schema-step-1`) has three tasks — RED test (`task-1`), GREEN implement (`task-2`), `checkpoint:decision` for orjson flag (`task-3`). Execution state at T=0 (the moment 30 seconds before the daemon crashes):
+
+- `task-1` complete (RED test committed, GateResolved `pass`).
+- `task-2` complete (GREEN implementation committed, GateResolved `pass`).
+- `task-3` in progress — the executor has spawned two subagents to research orjson flag semantics under load:
+  - `invocation_id="inv-A"`, `subagent_type="researcher"`, parent `task_id="task-3"`, `subagent_restart_counters[("task-3", "researcher")] = 1` (one prior crash, then a clean restart).
+  - `invocation_id="inv-B"`, `subagent_type="pattern-mapper"`, parent `task_id="task-3"`, `subagent_restart_counters[("task-3", "pattern-mapper")] = 0` (running clean).
+- The executor's main session has accumulated **4 of 6** paralysis advisories on `task-3` (the agent has read 12 files looking for the orjson flag semantics without writing anything; the bash classifier (404 ANALYSIS-PARALYSIS-GUARD.md) has fired advisories at strikes 1, 2, 3, and 4. Strike 3 already fired a force_clear_and_reinject; strike 4 fired a tier-1 advisory).
+- The last `compaction.snapshot_taken` event row is **30 seconds old** (a CTX-04 warning-threshold compaction at strike 3). The snapshot's `first_kept_entry_id` points at the event row just after the strike-3 reinject completed.
+
+At T=0+30s the daemon process crashes — the host's launchd / `systemd --user` schedules a restart 5 seconds later. The two subagents (managed by opencode's `task` tool, NOT state-daemon) continue running through the crash window per the 405 SUB-08 architectural separation rule ("Subagents continue independently when daemon restarts mid-execution"). Six additional `state.step.subagent_progress` events were emitted by opencode during the crash window — three from `inv-A`, three from `inv-B` — and landed in the event store via the SSE bus's persistent writer (which is process-isolated from the daemon's projector).
+
+#### Step 1 — Open event store
+
+The fresh daemon process opens `.state/events.sqlite` via the single-writer facade. The facade detects no concurrent writer (the crashed process released its lock via SQLite WAL recovery on the previous transaction's rollback boundary). The reader cursor is ready.
+
+#### Step 2 — Load latest CompactionSnapshot
+
+The daemon queries for `compaction.snapshot_taken` events filtered by `aggregate_id == "slice-compaction-snapshot-schema"`, sorted by `seq DESC LIMIT 1`. The 30-second-old snapshot is returned. The snapshot's fields rehydrate the projector:
+
+- `slice_id="slice-compaction-snapshot-schema"`, `step_id="compaction-snapshot-schema-step-1"`, `task_id="task-3"`.
+- `session_id="sess-007"`, `prior_session_id="sess-006"` (the strike-3 reinject minted `sess-007` from `sess-006`).
+- `active_plan_path=".planning/milestones/v14/phases/v14-1/slices/compaction-snapshot-schema/compaction-snapshot-schema-step-1-PLAN.md"`.
+- `current_task_pointer = TaskPointer(task_id="task-3", task_index=2)`.
+- `last_verify_result = VerifyResult(task_id="task-2", verdict="pass", check_count=5)`.
+- `provides_blocks = []` (Step 1 is the Slice's first Step; no upstream provides).
+- `worktree_path=".state/build/worktrees/slice-compaction-snapshot-schema/"`.
+- **SUB-08 extension fields** (the load-bearing fields for this worked example):
+  - `in_flight_subagents = [InFlightSubagent(invocation_id="inv-A", parent_task_id="task-3", subagent_type="researcher", started_at=T0-90s, last_progress_at=T0-15s), InFlightSubagent(invocation_id="inv-B", parent_task_id="task-3", subagent_type="pattern-mapper", started_at=T0-60s, last_progress_at=T0-20s)]`.
+  - `subagent_restart_counters = {("task-3", "researcher"): 1, ("task-3", "pattern-mapper"): 0}`.
+
+The projector's per-Slice state is seeded from these fields. The APG counter is **not** in the snapshot's explicit field set (the snapshot's CTX-05 schema doesn't carry per-chain counters directly) — Step 3 rebuilds the APG counter from the event-store replay starting at `first_kept_entry_id`.
+
+#### Step 3 — Replay forward
+
+The daemon's facade opens an `AsyncIterator[EventEnvelope]` cursor starting at `snapshot.first_kept_entry_id`. The cursor yields events in monotonic `(seq, id)` order. The five reducers (#1 APG, #2 PRF, #3 DEV, #4 SUB, #5 intervention) consume their respective event subsets.
+
+**Counter values after replay completes (T=0+30s of events replayed):**
+
+- **APG counter** — replay catches:
+  - `state.step.paralysis_event(advisory_number=4, tier="advisory", task_id="task-3", triggered_at=T0-10s)` — strike 4 advisory fired 10 seconds before crash.
+  - Paired `state.harness.intervention(tier="advisory", trigger_reason="paralysis_chain_3_reinject", correlation_event_id=<paralysis_event_4>)` — the umbrella row.
+  - APG counter rebuilds to: `per_task_consecutive_read_only_count["task-3"] = 4`. The chain is mid-flight (not closed, not yet at strike 6).
+- **PRF counter** — no `gate_strike` events since the snapshot (the strike chain on Step 1 has been clean — `task-1` and `task-2` both passed gates, `task-3` hasn't run its task-end gate yet because the agent is still in research). Counter remains `{}` for active strike chains; closed chains for `task-1` and `task-2` are not rebuilt (the projector only tracks open chains).
+- **DEV counter** — no deviation events. Counter remains `{}`.
+- **SUB counter** — replay catches 6 additional `subagent_progress` events post-snapshot (3 each for `inv-A` and `inv-B`):
+  - `state.step.subagent_progress(invocation_id="inv-A", ...)` × 3 — `last_progress_at` updates to T0+27s.
+  - `state.step.subagent_progress(invocation_id="inv-B", ...)` × 3 — `last_progress_at` updates to T0+28s.
+  - No `subagent_complete` / `subagent_crash_detected` rows for either invocation. Both invocations remain in the in-flight map. `subagent_restart_counters` unchanged: `{("task-3", "researcher"): 1, ("task-3", "pattern-mapper"): 0}`.
+- **Intervention chain** — replay catches the umbrella row paired with the APG advisory above plus the strike-3 umbrella row (paired with the snapshot-triggering paralysis_event(advisory_number=3)). The intervention log rebuilds:
+  - `per_tier_intervention_log["advisory"] = [intervention_row_for_advisory_4]`.
+  - `per_tier_intervention_log["clear_reinject"] = [intervention_row_for_advisory_3]`.
+  - `correlation_index` is populated for both rows.
+
+#### Step 4 — Reconcile orphans
+
+The in-flight set has 2 entries: `inv-A` and `inv-B`. The daemon iterates the 6-step orphan reconciliation flow per invocation.
+
+**inv-A (researcher):**
+
+1. Already in the in-flight map from Step 3 reducer #4.
+2. HTTP probe to opencode's session API: `GET /sessions/<inv-A.session_id>/status`.
+3. opencode responds `"running"` — `last_progress_at` matches the SSE event the daemon observed at T0+27s. Daemon re-subscribes to opencode SSE for that session_id; the in-flight map keeps `inv-A`.
+
+**inv-B (pattern-mapper):**
+
+1. Already in the in-flight map.
+2. HTTP probe: opencode responds `"running"`.
+3. Daemon re-subscribes to opencode SSE. The in-flight map keeps `inv-B`.
+
+Neither invocation surfaces as a persistent orphan — opencode confirms both are still running. No `subagent_orphan_detected` event emitted. No `state.harness.intervention(tier="human_gate", trigger_reason="subagent_orphan_persistent")` emitted. The Step 4 result is silent — silence is success per the §5.2 protocol invariant.
+
+If, hypothetically, opencode had reported `inv-B` as `"gone"` (the orphan path), the daemon would emit `state.step.subagent_orphan_detected(invocation_id="inv-B", parent_task_id="task-3", subagent_type="pattern-mapper", last_known_state="gone", detected_at=T_replay, synthesized_at_replay=True)` and proceed to Step 5 with the in-flight map missing `inv-B`. A subsequent Slice-boundary spawn (if the orphan persisted across the next compaction) would escalate to Step 6 of the orphan flow — surface a Rule 4 human gate via opencode's `question` tool with the pre-authored alternatives `[abort_slice, retry_subagent, manual_resolve]`. This worked example does not exercise that path because opencode reports both subagents alive; the easier-case orphan handling proves out the silent-success path; the harder-case orphan escalation is documented in 405 SUBAGENT-MONITORING.md §"Orphan reconciliation flow (numbered)" Step 6.
+
+#### Step 5 — Resume plugin hooks
+
+The daemon emits the rehydrated reinject payload for `chat.params` to consume on its next invocation (the executor's next agent turn, scheduled by opencode whenever the user or one of the subagents posts a message).
+
+**Reinject payload assembly:**
+
+- `<plan>` block — verbatim content of `compaction-snapshot-schema-step-1-PLAN.md` from disk (per PAP-01).
+- `<current_task>` block — pointer to `task-3` (`checkpoint:decision`).
+- `<last_verify_result>` block — `task-2` verdict=`pass`, 5 checks all green.
+- `<upstream_provides>` block — empty (no upstream Step in this Slice).
+- `<worktree_path>` block — `.state/build/worktrees/slice-compaction-snapshot-schema/`.
+- **`<prior_crash>` block — present because `subagent_restart_counters[("task-3", "researcher")] = 1` is non-zero.** The block names the prior crash on `inv-A`'s preceding incarnation, the timeout reason (from the SubagentCrashDetected row that triggered the restart counter increment), and the recovery hint. Per 405 SUBAGENT-MONITORING.md §"`<prior_crash>` continuation XML block" carry-forward.
+- **No `<paralysis_advisory>` block in the reinject** even though the APG counter is at 4. The advisory injection is performed in the next `chat.params` cycle, not during rehydration — rehydration is silent. The next agent turn that triggers `chat.params` reads the rehydrated APG counter; if the agent's response on that turn surfaces another read-only-only window (advisory 5), THAT turn emits the advisory. The APG counter rehydration's job is to make sure the next advisory is correctly numbered (advisory_number=5, not advisory_number=1).
+
+**6-layer write-block stack re-attachment.** The `tool.execute.before` hook re-attaches all 6 layers — SRP-04 + PAP-05 + SRP-02 + PRF-07 + SUB-03 + SUB-04. Each layer queries the rehydrated reducer state for its block decisions. Layer 4 (PRF-07 gate-failing next-task block) is INACTIVE because the last gate verdict on `task-2` was `pass`; Layer 5 (SUB-03 whitelist) and Layer 6 (SUB-04 cap expansion) are ACTIVE because two subagents are in-flight under the Slice's parallel cap of 20.
+
+**No intervention event emitted on resume.** All chains are mid-flight but not at escalation boundaries:
+- APG at 4 of 6 — no umbrella event needed until the next advisory fires (advisory 5 will be a tier-1 advisory; advisory 6 will be tier-4 human_gate).
+- PRF clean.
+- DEV clean.
+- SUB clean (both subagents progressing).
+
+**Rehydration time budget.** Per 405 SUBAGENT-MONITORING.md §"HRN-07 guarantee preservation" the projector is O(N+K) with N events and K orphans. For this worked example: N ≈ 10 events between snapshot and crash (6 subagent_progress + 1 paralysis_event + 1 harness.intervention + 2 other), K = 2 orphans. Wall-clock target: rehydration completes well under 1 second. opencode's session API probe latency dominates (≈ 100ms × 2 probes ≈ 200ms); the SQLite replay is ≪ 50ms for 10 events. v14's projector implementation should publish a `state.harness.intervention(tier="advisory", trigger_reason="paralysis_chain_3_reinject", ...)` benchmark in its test suite for projector throughput per §5.2 protocol invariant "O(N) in event count".
+
+#### Sequence diagram — the restart flow
+
+The Mermaid sequence diagram below summarizes the 5-step protocol against the worked example state. (HRN-08's full-Slice diagram in §6 covers the lifecycle end-to-end; this diagram is the restart-specific subset.)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Host as Host launchd/systemd
+    participant Daemon as state-daemon (fresh PID)
+    participant ES as events.sqlite (single-writer facade)
+    participant Proj as Projector + 5 reducers
+    participant OC as opencode session API
+    participant SubA as inv-A (researcher)
+    participant SubB as inv-B (pattern-mapper)
+    participant Plugin as @state/opencode-plugin
+
+    Note over Daemon: T0+30s — prior PID crashed
+    Host->>Daemon: spawn fresh daemon process (T0+35s)
+    Daemon->>ES: Step 1 — open via single-writer facade
+    ES-->>Daemon: facade ready
+
+    Daemon->>ES: Step 2 — query latest compaction.snapshot_taken<br/>(aggregate_id=slice-compaction-snapshot-schema)
+    ES-->>Daemon: CompactionSnapshot (30s old)
+    Daemon->>Proj: seed slice_id, step_id, task_id=task-3,<br/>in_flight_subagents=[inv-A, inv-B],<br/>subagent_restart_counters={(task-3,researcher):1, (task-3,pattern-mapper):0}
+
+    Daemon->>ES: Step 3 — cursor.replay_forward(first_kept_entry_id)
+    ES-->>Proj: 6× subagent_progress, 1× paralysis_event(adv=4),<br/>1× harness.intervention(advisory), …
+    Proj->>Proj: APG counter rebuilds to 4 of 6 on task-3<br/>SUB in-flight map keeps inv-A + inv-B<br/>intervention log records advisory + clear_reinject
+
+    Daemon->>OC: Step 4 — probe inv-A session status
+    OC-->>Daemon: "running" (last_progress_at matches SSE)
+    Daemon->>SubA: re-subscribe to SSE
+    Daemon->>OC: Step 4 — probe inv-B session status
+    OC-->>Daemon: "running"
+    Daemon->>SubB: re-subscribe to SSE
+    Note over Daemon,Proj: no orphan detected — silent success
+
+    Daemon->>Plugin: Step 5 — assemble reinject payload<br/>(includes <prior_crash> for inv-A;<br/>NO new <paralysis_advisory>)
+    Daemon->>Plugin: Step 5 — re-attach tool.execute.before 6-layer stack
+    Plugin-->>Daemon: hooks re-attached (SSE confirm)
+    Note over Daemon: rehydration complete; no intervention event<br/>emitted on resume (silence = success).
+```
+
+#### Worked-example takeaways
+
+1. **Snapshot rehydration is the load-bearing input.** Without `subagent_restart_counters` and `in_flight_subagents` in the snapshot's SUB-08 extension fields, Step 3 would have had to replay from the Slice's `state.slice.created` event to rebuild those projections — adding minutes to boot. The snapshot fast-forward keeps boot under 1 second.
+2. **The orphan probe is the only network dependency.** Steps 1-3 are SQLite-only; Step 4 is the only step that reaches outside the daemon process. opencode's session API SLA is the implicit dependency for the HRN-07 contract under restart.
+3. **Counters rehydrate from events alone — even without snapshot SUB-08 extension fields for non-SUB chains.** The APG counter rebuilt to `4 of 6` purely from replaying the `paralysis_event` chain post-snapshot. The snapshot's SUB-08 extension carries SUB state because the SUB chain has cross-process state (the orphan map references opencode-owned processes); the APG / PRF / DEV chains are pure event-derived and need no snapshot extension.
+4. **Silence is success.** When all chains rehydrate to mid-flight-but-stable, the protocol emits no intervention event on resume. The next agent turn will surface the rehydrated state naturally — through advisory injection if a new chain advance happens, through write-block enforcement if the agent tries a layer-violating write, through gate evaluation if the agent completes a task. The protocol is silent until the agent generates new signal.
+5. **The 38-event surface is necessary and sufficient.** Every event consulted in the worked example — `compaction.snapshot_taken`, `state.step.subagent_progress`, `state.step.paralysis_event`, `state.harness.intervention` — is in the §5.1 enumeration. No event outside the 38 was consulted; no event inside the 38 was missing. The enumeration is closed against the realistic failure mode.
+
+The worked example completes the HRN-07 proof: the 5-step protocol, applied against the 38-event enumeration, with snapshot + event-store + opencode session API as inputs, recovers full harness state across the hardest realistic failure mode. v14's projector implementation MUST pass this proof's invariants — verified by the v14 EXEMPLAR work's cross-host event-store replay determinism test fixture (deferred per 406-CONTEXT.md `<deferred>` block).
+
