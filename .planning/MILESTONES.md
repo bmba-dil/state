@@ -1,5 +1,25 @@
 # MILESTONES: state
 
+## v41 Agent Harness & Context Control Design (Shipped: 2026-05-12)
+
+**Phases completed:** 5 phases, 20 plans, ~60 tasks
+**Type:** Design-only spike (zero code — 14 canonical spec documents totalling 8,149 markdown lines)
+**Timeline:** 2026-05-07 → 2026-05-12 (5 days, 106 commits, +25,847 / -116 LOC)
+**Requirements:** 73/73 v1 reqs SATISFIED (SLC×7, CTX×9, STP×8, PAP×6, PRF×7, APG×6, SRP×6, DEV×7, SUB×9, HRN×8)
+
+**Key accomplishments:**
+
+- **Slice-cycle correction (Phase 402):** SLICE-CYCLE.md establishes Slice as 4-stage cycle owner (design→research→run→verify); 7 v40 Phase 400/401 spec docs received append-only v41 amendments forward-pointing to the canonical model.
+- **200k absolute context budget + compaction protocol (Phase 402):** CONTEXT-PROTOCOL.md specifies absolute Slice budget independent of model window, fresh-session-per-Slice rule, structured Pydantic `CompactionSnapshot` (extras-forbid), threshold-action table (≤25% emergency / ≤35% warning / slice-boundary), and CTX-09 reactive overflow recovery (six-step gsd-2-mirrored `_overflowRecoveryAttempted` one-shot pattern).
+- **Plan-as-prompt step format (Phase 403):** EXEMPLAR-stepNPLAN.md canonical fixture + STEP-PLAN-FORMAT.md (836 lines) Pydantic frontmatter schema + PLAN-AS-PROMPT.md (524 lines) injection/mutability/audit-log architecture + STEP-EVENTS.md (429 lines) 9-event plan-lifecycle family. `stepNN-PLAN.md` IS the executor's primary system prompt; `must_haves.*` + `<verify>` blocks are immutable, every edit emits a `plan_edit` event.
+- **Boolean proof gate + discipline guards (Phase 404):** PROOF-GATE.md (551 lines) + ANALYSIS-PARALYSIS-GUARD.md (503 lines) + SCOPE-PROHIBITION.md (566 lines). Pure-machine `must_haves` evaluator dispatch (no LLM-as-judge), 6-strike escalation ladder (3 advisory→reinject→3 more→human gate), 5/15 read-only-tool threshold guard, prohibited-language scan with tracking-issue exception, `files_modified` allowlist with `request_step_split` re-plan routing.
+- **Deviation framework + subagent control plane (Phase 405):** DEVIATION-RULES.md (614 lines) + SUBAGENT-MANAGEMENT.md (453 lines) + SUBAGENT-MONITORING.md (653 lines). 4-rule deviation framework with structural Rule-4 always-stop (no `--full-yolo` bypass), tiered autonomy (`--tiered` / `--full-yolo` / `--conservative`), 14-subagent typed whitelist with narrowing-only override, 20-default parallel cap with daemon-side FIFO semaphore, 5-source crash taxonomy + 3-restart counter, task_id survival across compaction + Slice-boundary respawn.
+- **Harness architecture rollup (Phase 406):** HARNESS-ARCHITECTURE.md (2027 lines) — single canonical rollup with 3-layer Mermaid diagram (6 hooks + 14 MCP tools + 5 daemon services), 14-tool MCP catalog with `extra="forbid"` Pydantic models + `assert_never` exhaustiveness, 4-tier intervention ladder (advisory → tool-block → clear+reinject → human-gate) with `HarnessIntervention` umbrella event (Literal[20] trigger_reasons), event-replay reconstruction proof (42-event surface, 5-step protocol, daemon-restart worked example), full-Slice sequence diagram covering all four stages + 4 intervention tiers.
+
+**v41 audit cleanup (2026-05-12):** Resolved 6 cross-phase integration findings (split_recommendation rollup gap, state.session.* event registration, harness.context_meter registration, 7-vs-6-layer terminology normalization, checkpoint_decision_human_action trigger_reason, GSD-Test-Result → STATE-Test-Result migration) + 4 Phase 403 review items (EventEnvelope schema-authority note, PlanEdit either-or invariant, KeyLink Pydantic alias, checkpoint_resolved typo) inline. Append-only invariant preserved on all v40 master registries.
+
+---
+
 ## v11 Mode Enforcement (6 Layers) (Shipped: 2026-05-05)
 
 **Phases completed:** 9 phases, 9 plans

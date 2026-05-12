@@ -121,6 +121,50 @@
 
 ---
 
+## Milestone: v41 — Agent Harness & Context Control Design
+
+**Shipped:** 2026-05-12
+**Phases:** 5 (402–406) | **Plans:** 20 | **Type:** Design-only spike (zero code)
+
+### What Was Built
+
+14 canonical specification documents (8,149 markdown lines) fully specifying the Build-mode agent harness — the control plane governing agent behavior during a Slice's execute-slice stage. Phase 402 corrects v40's Slice-cycle definition and pins the 200k absolute context budget with structured Pydantic snapshot rehydration + CTX-09 reactive overflow recovery. Phase 403 defines `stepNN-PLAN.md` (GSD-shape: YAML frontmatter + XML body) as the executor's primary system prompt, with a mutability matrix, audit-logged `plan_edit` events, and a 9-event step-tier event family. Phase 404 specifies the pure-machine boolean proof gate (no LLM-as-judge), the analysis-paralysis 6-advisory ladder, and the scope-reduction prohibition guards (prohibited-language scan + `files_modified` allowlist + `request_step_split` re-plan routing). Phase 405 adds the 4-rule deviation framework with structural Rule-4 always-stop, the 14-subagent typed whitelist, the 20-default parallel cap with daemon-side FIFO semaphore, and the 5-source crash taxonomy with task_id survival across compaction. Phase 406 rolls the whole control plane into a single 2027-line HARNESS-ARCHITECTURE.md: 3-layer Mermaid diagram, 14-tool MCP catalog with `extra="forbid"` Pydantic models + `assert_never` exhaustiveness, 4-tier intervention ladder with `HarnessIntervention` umbrella event, 42-event replay reconstruction proof, full-Slice sequence diagram.
+
+### What Worked
+
+- **Append-only amendment discipline on v40 master registries.** All 5 phases that touched v40 EVENT-TAXONOMY.md / ARTIFACT-CATALOG.md / FRONTMATTER-SCHEMAS.md added new H2 amendment blocks without modifying prior content. Final tally: 127+ insertions / 0 deletions across the v40 master registries. Prior amendment blocks (Phase 402, 403, 404, 405) remain byte-identical after each successor amendment.
+- **Per-phase CONTEXT.md as decision freezer.** Each phase opened with a discuss-phase that produced `40N-CONTEXT.md` containing the `<decisions>` block — Pydantic shapes, regex corpora, MCP tool signatures rendered verbatim. Plans then quoted these decisions byte-for-byte into the canonical specs, eliminating drift between planning and execution.
+- **Canonical exemplar as anchor.** Phase 403's EXEMPLAR-stepNPLAN.md (the CompactionSnapshot Pydantic step) became the cited worked subject for every subsequent phase — Phase 404 references its `must_haves`, Phase 406's §6 sequence diagram literally walks it. One concrete artifact disambiguated abstract format rules.
+- **Counter independence carry-forward.** PRF strike chain, APG paralysis chain, DEV deviation chain, SUB restart chain — four per-chain counters that never share state. The discipline was restated at the end of each phase spec + carried forward into HARNESS-ARCHITECTURE.md §1 as a load-bearing invariant. Made the §4.4 dispatcher's pure-machine match decision trivial.
+
+### What Was Inefficient
+
+- **Cross-phase wiring gaps surfaced only at audit-close.** 6 integration findings (split_recommendation rollup gap, state.session.* event registration, harness.context_meter registration, 7-vs-6-layer terminology drift, checkpoint_decision_human_action trigger_reason, GSD-Test-Result migration) were caught by the milestone audit, not by per-phase VERIFICATION.md. Each phase verified its own content correctly but the rollup-coherence gaps fell between phase boundaries. Mitigation: future design milestones should run an audit-style cross-phase wiring check at end-of-phase rather than end-of-milestone.
+- **Plan 04 min_lines authoring error (Phase 403).** EVENT-TAXONOMY.md must_haves.artifacts min_lines was set to 600 (aspirational) but the file's actual size after Phase 403 amendment was 281 lines. The threshold was unreachable from authoring inception. Caught at verification, amended to 270 — a PLAN correction, not re-execution. Lesson: must_haves.artifacts min_lines should be set after the amendment content is drafted, not as an aspirational guard.
+- **Naming drift (`GSD-Test-Result` legacy trailer).** Phase 403 specs adopted the gsd-2 heritage `GSD-Test-Result:` trailer convention from `file-tracking.md` Correction 3 without applying the project's naming rule (no `GSD-` literal trailer prefix in state artifacts). Caught at audit; migrated to `STATE-Test-Result` with a heritage-alias read rule documented in HARNESS-ARCHITECTURE.md §2.
+
+### Patterns Established
+
+- **`## v41 Amendment — <Phase NNN <Topic>>` header convention** for v40 master registry amendments. Each phase that touches v40 adds exactly one H2 block per affected file with that header form; prior blocks remain byte-preserved. Verified by `git diff --numstat` showing 0 deletions across the milestone.
+- **Pure-machine evaluator + LLM-as-judge ban.** All proof gates, all discipline-guard classifiers, all dispatcher routing decisions are deterministic match-on-event-type-and-payload-field. No LLM call appears in the harness's hot path. Stated explicitly in PRF-04, restated in §4.4 of HARNESS-ARCHITECTURE.md as the load-bearing carry-forward.
+- **Sibling-spec mutual cross-references.** DEVIATION-RULES.md ↔ SUBAGENT-MANAGEMENT.md ↔ SUBAGENT-MONITORING.md (and similar for Phase 404's three guard specs) all cite each other in matching sections — counter independence, event family, MCP tool interactions. The mutual citation made the umbrella rollup (Phase 406) a true index rather than a reconciliation effort.
+- **Audit-time inline fix discipline.** When the v41 audit surfaced cross-phase wiring gaps (1 high, 1 medium, 4 low), all 10 findings were fixed in a single ~520-line in-place patch across HARNESS-ARCHITECTURE.md, EVENT-TAXONOMY.md, REQUIREMENTS.md, and the four Phase 403 specs — preserving the append-only invariant on v40 specs. Saved a `/gsd:plan-milestone-gaps` cycle.
+
+### Key Lessons
+
+1. **Per-phase VERIFICATION.md verifies content; milestone audit verifies wiring.** The two checks are complementary, not redundant. Future design milestones should plan for cross-phase wiring audits at milestone close as a non-optional gate — not just a recommended step.
+2. **`extra="forbid"` Pydantic everywhere.** All 14 v41 specs that defined Pydantic classes used `model_config = ConfigDict(extra="forbid")` without exception. The 45+ occurrences in HARNESS-ARCHITECTURE.md §3 alone make the schema-evolution audit trivial — any new field requires an explicit spec change, never a silent extension.
+3. **Sequence diagrams are documentation gold for control planes.** HRN-08's full-Slice Mermaid `sequenceDiagram` (83 message-arrows, 4 stages, 4 intervention tiers) is the single highest-leverage artifact in the milestone — it makes the abstract harness control flow concrete in a way no prose section achieves.
+4. **The rollup IS the index, not the source of truth.** HARNESS-ARCHITECTURE.md §1 "Rollup is index, not source of truth" carry-forward discipline meant that the 2027-line rollup never *amended* prior specs — it only *cited* them. When findings surface (INT-01 split_recommendation absent), the fix is to update the rollup's table, not to invalidate the canonical SCOPE-PROHIBITION.md spec.
+
+### Cost Observations
+
+- **Model mix:** ~100% Opus 4.7 (1M context) for design work; Sonnet 4.6 for the cross-phase integration checker subagent at audit time.
+- **Sessions:** Approximately 12 distinct sessions across 5 days (one per plan + multiple for the audit + cleanup).
+- **Notable:** A single 1M-context Opus session handled the entire 2027-line HARNESS-ARCHITECTURE.md authoring + the 4 plan SUMMARYs in Phase 406 without summarization compaction. Long-context coherence across the 12-spec consolidation was the load-bearing capability — no prompt-engineering tricks required, just direct cross-spec quotation.
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
