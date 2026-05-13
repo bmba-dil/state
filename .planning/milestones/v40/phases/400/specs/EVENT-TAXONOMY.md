@@ -457,3 +457,111 @@ The 5 supplementary events all feed Phase 406's `state.harness.intervention` umb
 - `state.slice.split_recommendation` → tier-1 advisory with `trigger_reason="split_recommendation_pending"`.
 
 *Original v40 spec text and all four prior v41 amendment blocks (Phase 402, 403, 404, 405) above this block are untouched. This amendment is purely additive, appended per Phase 402 convention.*
+
+## v42 Amendment — Phase 407 Verifier Event Family
+
+*Owned by:* Phase 407 (Verifier Chain Architecture).
+*Canonical spec:* `.state/build/quality/VERIFIER-CHAIN.md`.
+*Forward-reference:* Phase 411 EVD-01 owns the full `Citation` Pydantic schema + extended verifier-output-schema; this amendment registers event names + required-field shape only.
+
+Registers the verifier event family — every event a verifier emits when it runs (passed/failed/warning) or when the daemon's projector re-aggregates a parent rollup. Namespace shape: `state.verifier.<scope>[.<sub_verifier>].<verdict>`. All events are deterministic, replay-stable, and validated by Pydantic with `extra="forbid"`.
+
+### Event-Name Registry
+
+| Event name | Category | Scope ID type | Notes |
+|---|---|---|---|
+| `state.verifier.step.goal_backward.passed` | Step sub-verifier | `step_id` | Goal-backward sub-verifier success. Forward-refs Phase 409. |
+| `state.verifier.step.goal_backward.failed` | Step sub-verifier | `step_id` | Goal-backward sub-verifier BLOCKER finding. |
+| `state.verifier.step.goal_backward.warning` | Step sub-verifier | `step_id` | Goal-backward WARNING-only finding (no BLOCKER). |
+| `state.verifier.step.security.passed` | Step sub-verifier | `step_id` | Security sub-verifier success. Forward-refs Phase 410 THM. |
+| `state.verifier.step.security.failed` | Step sub-verifier | `step_id` | Security sub-verifier BLOCKER (open mitigation, missing registry entry, etc.). |
+| `state.verifier.step.security.warning` | Step sub-verifier | `step_id` | Security WARNING (e.g., `transfer` disposition with thin verification). |
+| `state.verifier.step.stub_detector.passed` | Step sub-verifier | `step_id` | Stub-detector success (no unregistered stubs reaching user surface). Forward-refs Phase 408 STB. |
+| `state.verifier.step.stub_detector.failed` | Step sub-verifier | `step_id` | Stub-detector BLOCKER (stub reaches rendering/API surface). |
+| `state.verifier.step.stub_detector.warning` | Step sub-verifier | `step_id` | Stub-detector WARNING (stub present but consumer handles gracefully). |
+| `state.verifier.step.anti_pattern.passed` | Step sub-verifier | `step_id` | Anti-pattern scanner success. Forward-refs Phase 410 APS. |
+| `state.verifier.step.anti_pattern.failed` | Step sub-verifier | `step_id` | Anti-pattern BLOCKER (after auto-fix-attempt exhausted). |
+| `state.verifier.step.anti_pattern.warning` | Step sub-verifier | `step_id` | Anti-pattern WARNING-severity finding. |
+| `state.verifier.step.passed` | Step composite | `step_id` | All 4 sub-verifiers `passed` or `warning`. Server-recomputed. |
+| `state.verifier.step.failed` | Step composite | `step_id` | Any sub-verifier `failed`. |
+| `state.verifier.slice.passed` | Slice rollup | `slice_id` | All child Steps `passed`/`warning` AND Slice integration check passed. |
+| `state.verifier.slice.failed` | Slice rollup | `slice_id` | Any child Step `failed` OR Slice integration check failed. |
+| `state.verifier.stage.passed` | Stage rollup | `stage_id` | All child Slices `passed`/`warning` AND Stage acceptance check passed. |
+| `state.verifier.stage.failed` | Stage rollup | `stage_id` | Any child Slice `failed` OR Stage acceptance check failed. |
+| `state.verifier.arc.passed` | Arc rollup | `arc_id` | All child Stages `passed`/`warning` AND Arc acceptance check passed. |
+| `state.verifier.arc.failed` | Arc rollup | `arc_id` | Any child Stage `failed` OR Arc acceptance check failed. |
+| `state.verifier.crosstier.passed` | Cross-Tier | `arc_id` | No regression detected across `depends_on` closure of shipped Arcs. |
+| `state.verifier.crosstier.regression_detected` | Cross-Tier | `arc_id` | At least one closure-Arc shows verdict-flip OR must-have unsatisfaction; fires `human-gate`. |
+| `state.verifier.verdict_changed` | Re-aggregation | varies (composite key: `scope_id + scope_kind`) | Fires when daemon's projector re-aggregates a parent rollup after a child verdict-flip; payload includes `from_verdict` + `to_verdict`. |
+| `state.verifier.autofix_applied` | Anti-pattern auto-fix | `step_id` | Deterministic harness pass succeeded (pattern resolved by ruff/black/isort); payload includes `tool` + `pattern_id` + `before_hash` / `after_hash`. |
+| `state.verifier.autofix_failed` | Anti-pattern auto-fix | `step_id` | Deterministic harness pass ran but pattern remains; harness escalates to `retry-loop`. |
+
+### Pydantic Payload Models
+
+Every verifier event has a Pydantic payload model with `model_config = ConfigDict(extra='forbid')`. The base shape (inherited by all verifier events):
+
+```python
+from datetime import datetime
+from typing import Literal
+from pydantic import BaseModel, ConfigDict
+
+# Citation grammar is owned by Phase 409 ADV-03 / Phase 411 EVD-02.
+# Plan 03 references the type but does not define it here.
+Citation = str  # opaque placeholder — full union owned by EVD-02
+
+class VerifierEventPayloadBase(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    verifier_name: str                       # fully-qualified event name
+    scope_id: str                            # step_id / slice_id / stage_id / arc_id
+    verdict: Literal['passed', 'failed', 'warning']
+    evidence: list[Citation]                 # ADV-03 / EVD-02 grammar
+    triggered_at: datetime                   # UTC, replay-stable
+    session_id: str                          # opencode session correlation
+    snapshot_event_id: str | None            # snapshot the verifier evaluated; None for Cross-Tier
+```
+
+Per-event extensions (auxiliary fields beyond the base):
+
+```python
+class StepSubVerifierFailedPayload(VerifierEventPayloadBase):
+    """Used by every `state.verifier.step.<sub>.failed` event."""
+    strike_n: int                            # 1..3 per v41 PRF-06 per-(task_id, check_id) counter
+    sub_verifier: Literal['goal_backward', 'security', 'stub_detector', 'anti_pattern']
+
+class VerdictChangedPayload(VerifierEventPayloadBase):
+    """Used by `state.verifier.verdict_changed`. Server-emitted by projector during re-aggregation."""
+    from_verdict: Literal['passed', 'failed', 'warning']
+    to_verdict: Literal['passed', 'failed', 'warning']
+    scope_kind: Literal['step', 'slice', 'stage', 'arc']
+
+class AutofixAppliedPayload(VerifierEventPayloadBase):
+    """Used by `state.verifier.autofix_applied` and `state.verifier.autofix_failed`."""
+    tool: Literal['ruff', 'black', 'isort']
+    pattern_id: str                          # ruff rule ID or AST match name
+    file_path: str                           # relative to Slice worktree root
+    before_hash: str                         # SHA-256 of file pre-fix
+    after_hash: str                          # SHA-256 of file post-fix (== before_hash if autofix_failed)
+
+class CrossTierRegressionDetectedPayload(VerifierEventPayloadBase):
+    """Used by `state.verifier.crosstier.regression_detected`."""
+    offending_arc_id: str                    # the just-shipped Arc that triggered regression
+    regressed_arcs: list[str]                # closure-Arcs whose verdict flipped OR must_haves unsatisfied
+    regression_kind: Literal['verdict_flip', 'must_have_unsatisfied', 'both']
+```
+
+**Field-set ownership note**: Phase 411 EVD-01 owns the canonical verifier-output-schema, including the full `Citation` discriminated union (`FileCitation`, `CommitCitation`, `EventCitation`, `TestCitation`). When the field-set details diverge between this amendment (registry index) and Phase 411 EVD-01 (canonical schema), Phase 411 EVD-01 wins.
+
+### Naming-Convention Check
+
+- All event names match regex `^state\.verifier\.[a-z_.]+$`.
+- Sub-verifier names use snake_case verbatim (`goal_backward`, `stub_detector`, `anti_pattern`) — never CamelCase, never hyphens.
+- Cross-Tier event uses prefix `state.verifier.crosstier.*` (single word, no hyphen, no underscore — matches the rest of the namespace's atom-segmentation).
+- No naming-drift entries; all entries `[a-z_.]+` only.
+
+### Mode Isolation
+
+All `state.verifier.*` events are **build-mode only** (`BUILD_ONLY_EVENT_PREFIXES` — add `"state.verifier."` to that set in `src/state_core/schema.py` when v14 Build Kernel implements). Teach mode has its own verification family (owned by v48; out of scope here).
+
+### Append-Only Note
+
+*Original v40 spec text and all four prior v41 amendment blocks (Phase 402, 403, 404, 405) above this block are untouched. This amendment is purely additive, appended per Phase 402 convention. Phase 411 may append a `## v42 Amendment — Phase 411 ...` block extending this registry with additional evidence-chain events (EVD-01..05).*
