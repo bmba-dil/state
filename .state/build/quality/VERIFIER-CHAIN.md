@@ -397,3 +397,83 @@ The contrast highlights why Cross-Tier skips the retry-loop tier entirely: regre
 | INV-15 | Human-gate routing flows exclusively through the opencode `question` MCP tool (v41 HRN-06); inline prompts / free-text requests / CLI stdin reads are not permitted. | Human-Gate Routing subsection; `tool.execute.before` write-block on resolution events. |
 | INV-16 | Rollup tiers (Slice / Stage / Arc) have no failure-mode of their own; they propagate child verdicts without retry, escalation, or auto-fix. | VCH-06 mapping table rows 6–8; VCH-02/03/04 already-shipped `failure_mode` rows. |
 | INV-17 | Cross-Tier routes to human-gate immediately on `regression_detected`; the just-shipped Arc cannot transition to `shipped` until the gate clears (fail-closed). | VCH-06 mapping table Cross-Tier row; VCH-05 `failure_mode` row. |
+
+## VCH-05 — Cross-Tier Scope Rule Justification
+
+This section deepens the Cross-Tier scope rule declared in `## VCH-05 — Cross-Tier Verifier` above. The accepted rule (`depends_on` closure over shipped Arcs) is justified by enumerating the alternative scope rules considered and rejected, then anchoring the choice to three named precedents from v40, v5, and gsd-2.
+
+### Alternative (a) — All Arcs (rejected)
+
+**Definition**: Cross-Tier verifier walks every Arc in state `shipped` (and only `shipped`) regardless of declared dependency, comparing stored verifier evidence to current HEAD for each.
+
+**Why rejected — cost**: O(N_shipped_arcs) per Arc ship, growing linearly with project age. The 4 evidence types (code-exists, tests-pass, LSP-clean, behavioral-check) each have a fixed per-Arc evaluation cost; re-running them across N Arcs every ship makes Cross-Tier the dominant wall-clock cost of the chain. State's CRIT.md must_haves can have ≥ 10 must_haves per Arc; the 4-evidence-type check per must_have means O(40 × N) operations per ship. v5 DAG scheduler perf budget is set against per-Slice cost, not per-Arc; over-walking blows past the budget.
+
+**Why rejected — false-positive risk**: many Arcs share no semantic coupling whatsoever (e.g., the auth Arc and the TUI-styling Arc); a re-evaluation that produces a verdict flip in one due to drift in an unrelated upstream library will trigger `state.verifier.crosstier.regression_detected` against an Arc that had nothing to do with the just-shipped Arc. False-positive human-gates are the worst class of failure in the failure-mode triad — they erode trust in the harness and incentivize bypass.
+
+**Why rejected — undeclared-coupling validation**: rule (a) implicitly validates undeclared cross-Arc coupling (since any pairwise drift triggers regression). v40 D-10 explicitly discourages undeclared cross-Arc coupling; the Cross-Tier verifier should NOT have to backfill what D-10 prevents at the design layer.
+
+### Alternative (c) — File-Overlapping Arcs (rejected)
+
+**Definition**: Cross-Tier verifier walks every shipped Arc whose `files_modified` set intersects the just-shipped Arc's `files_modified` set.
+
+**Why rejected — undeclared-by-design**: file overlap is the *symptom* of coupling, not the declaration. Two Arcs that touch the same file may have orthogonal intents (one renamed a function, the other added a doc-string); the overlap signal is noisy. Conversely, two Arcs that *share state via a third file* (e.g., both write to `events.sqlite` through `events.py`) have zero `files_modified` overlap but real coupling. File overlap under-detects the real signal.
+
+**Why rejected — depends_on already addresses this case**: when two Arcs genuinely share files (e.g., `state-build` extending `state-core`), the correct expression is a `data` edge in `depends_on` (v40 D-12). The closure walk DOES follow `data` edges (see Edge-Type Precedence subsection below). File overlap without a `data` edge declaration is a design smell — the verifier should not patch over it.
+
+**Why rejected — cost (mid-tier but still wrong)**: O(|files_modified| × N_shipped_arcs) intersection cost per ship. Cheaper than (a) but still grows linearly with project age and adds zero coverage over (b)'s `data`-edge closure.
+
+### Chosen Rule — depends_on Closure Over Shipped Arcs (accepted)
+
+**Definition** (restated from Plan 01's VCH-05 section): walk the transitive closure of v40 Arc-level `depends_on` edges of the just-shipped Arc; filter to Arcs in state `shipped`.
+
+**Precedent 1 — gsd-2 (kb workflow-engine §9.2)**: gsd-2's `milestones.depends_on` JSON column is the only above-tier coupling declaration in the prior system. State's Cross-Tier verifier directly inherits this signal. gsd-2 has no aggregation tier above milestone, so no closure walk; state's Arc tier is novel ground, but the *signal-source* is precedented.
+
+**Precedent 2 — v40 D-12 edge types (`blocks`/`soft`/`data`)**: the closure walk's edge-type semantics are defined here. Combined with v40 D-10's discouragement of undeclared lower-tier coupling, `depends_on` IS the canonical inter-Arc coupling channel.
+
+**Precedent 3 — v5 DAG scheduler typed-edge precedence**: the v5 DAG scheduler already uses `blocks`/`soft` for frontier computation (`blocks` participate in topological sort; `soft` do not). The closure walk follows the same precedent (see Edge-Type Precedence subsection below) — verifier and scheduler agree on what an edge means.
+
+**Why this rule, not the alternatives**:
+
+- Bounded by *declared intent* — rule (a) over-walks; rule (c) under-detects.
+- Deterministic — the closure is a finite DAG walk; no fuzzy matching, no LLM-as-judge anywhere.
+- Cheap — O(closure_size × evidence_check_cost); typical closure is 1–4 Arcs.
+- Compatible with state's all-concurrent-Arc model (PROJECT.md): in-progress Arcs are excluded from the closure because their evidence is not yet stable — re-evaluating in-flight evidence would produce verdict flips that reflect work-in-progress, not regression.
+
+**Trade-off accepted**: the rule cannot catch undeclared cross-Arc coupling. This is *by design* — undeclared coupling is a v40 D-10 anti-pattern; surfacing it should happen at the design layer (DISCUSS.md must_haves, RESEARCH.md identified coupling) not at the verifier layer.
+
+### Edge-Type Precedence in the Closure Walk
+
+Per v40 D-12, `depends_on` edges have three types. The closure walk follows them as follows:
+
+| Edge type | Follow in closure? | Rationale |
+|---|---|---|
+| `blocks` | **Yes — mandatory** | Hard dependency. The just-shipped Arc could not have shipped without this child Arc shipping first; any verdict-flip in the blocker IS a regression for the just-shipped Arc (its assumptions broke). Strongest signal; closure MUST include. |
+| `data` | **Yes — mandatory** | Concrete coupling: the just-shipped Arc consumes outputs of the child Arc. A verdict-flip or unsatisfied must-have in the child means the data contract the just-shipped Arc was written against is no longer valid. Mid-strength signal; closure MUST include. |
+| `soft` | **No — excluded** | Advisory dependency for planning visibility only. v40 D-12 explicitly states `soft` does not enforce ship-order; therefore the just-shipped Arc's correctness does NOT depend on the soft-linked Arc's verifier state. Including soft edges in the closure would re-introduce alternative (a)'s false-positive surface. Soft edges are surfaced in `state dag show`, not in Cross-Tier closure. |
+
+**Walk discipline (verbatim algorithm)**:
+
+1. Start: just-shipped Arc's `depends_on` list.
+2. Filter: edges with `kind ∈ {blocks, data}`. Discard `soft`.
+3. Resolve: edge target Arc IDs.
+4. Filter: Arcs in state `shipped`. Discard `in_progress` / `descoped` / `abandoned`.
+5. Recurse: repeat steps 1–4 on each surviving Arc (transitive closure).
+6. Terminate: when no new Arc IDs are added (fixpoint).
+7. Re-evaluate: for each Arc in the closure, run the regression criteria (Plan 01 VCH-05 — verdict-flip + must_haves-unsatisfied).
+
+**Cycle safety**: the closure walk treats the dependency graph as a DAG (v5 invariant — cycle detection guaranteed by the v5 DAG scheduler). If a cycle is encountered (which would indicate a v5 invariant violation, not a verifier bug), the walker emits `state.verifier.crosstier.regression_detected` with `regression_kind='cycle_detected'` and human-gates immediately.
+
+**Closing note**: This section is the *justification deepening* for Plan 01's `## VCH-05 — Cross-Tier Verifier` section. The two sections together fully satisfy ROADMAP SC3 ("chosen rule is justified against the v40 Arc model and the v5 DAG scheduler edge semantics").
+
+### Worked Example: Closure Walk Discipline
+
+To make the algorithm concrete, consider just-shipped Arc A5 with `depends_on: [{target: A3, kind: blocks}, {target: A4, kind: soft}, {target: A2, kind: data}]`. Suppose A3 transitively depends on A1 via a `blocks` edge, and A4 transitively depends on A2 via a `data` edge.
+
+1. Step 1 (start): `frontier = [A3, A4, A2]`.
+2. Step 2 (filter by edge kind): drop A4 (`soft`). `frontier = [A3, A2]`.
+3. Step 3 (resolve & filter shipped): assume A3, A2, A1 are all `shipped`. `closure = {A3, A2}`.
+4. Step 4 (recurse on A3): A3's `depends_on` includes A1 via `blocks` → add A1. A2's `depends_on` is empty (root). `closure = {A3, A2, A1}`.
+5. Step 5 (fixpoint): no new arcs added on the next pass. Walk terminates.
+6. Step 6 (re-evaluate): run VCH-05 regression criteria (verdict-flip + must_haves-unsatisfied) against {A3, A2, A1}. A5 transitions to `shipped` iff all three closure-Arcs pass re-evaluation.
+
+A4 is correctly excluded — its `soft` edge to A5 means A5's correctness does not depend on A4's verifier state. If A4 had been linked via `data` instead, the walk would have included A4 (and transitively A2, but A2 is already in the closure — de-duplication is implicit in the fixpoint condition).
