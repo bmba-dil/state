@@ -31,7 +31,7 @@
 
 ## Phases
 
-- [ ] **Phase 407: Verifier Chain Architecture** — Step/Slice/Phase/Arc/Cross-Tier verifier topology + per-verifier I/O/algorithm/failure-mode + verifier event family appended to v40 EVENT-TAXONOMY.md
+- [x] **Phase 407: Verifier Chain Architecture** — Step/Slice/Phase/Arc/Cross-Tier verifier topology + per-verifier I/O/algorithm/failure-mode + verifier event family appended to v40 EVENT-TAXONOMY.md (completed 2026-05-13)
 - [ ] **Phase 408: 4-Level Verification Model & Stub Detection** — Existence → Substantive → Wired → Data-Flowing ladder with per-level tools/evidence/edge-cases + stub pattern catalog + severity + trace-through algorithm + Known-Stubs schema
 - [ ] **Phase 409: Goal-Backward Protocol & Adversarial Stance** — Must-have derivation + pre-exec plan-checker + post-exec goal-backward verifier + SUMMARY-not-evidence rule + override authority + universal adversarial protocol + evidence taxonomy + claim-citation contract
 - [ ] **Phase 410: Anti-Pattern Scanning & Threat Modeling** — Code/architecture/test anti-pattern catalog + Python-3.12 extensions + extension hook + STRIDE register + per-disposition schemas + security verifier verdict logic + accepted-risks registry + worked STRIDE example
@@ -120,7 +120,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 407. Verifier Chain Architecture | 0/0 | Not started | - |
+| 407. Verifier Chain Architecture | 4/4 | Complete    | 2026-05-13 |
 | 408. 4-Level Verification Model & Stub Detection | 0/0 | Not started | - |
 | 409. Goal-Backward Protocol & Adversarial Stance | 0/0 | Not started | - |
 | 410. Anti-Pattern Scanning & Threat Modeling | 0/0 | Not started | - |
