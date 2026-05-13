@@ -283,3 +283,117 @@ To illustrate the event-driven re-aggregation mechanism end-to-end:
 5. Cascading propagation continues upward: Stage 3 rollup re-runs → `passed`; Arc A2 rollup re-runs → `passed`; finally `/state-ship-arc` invocation triggers VCH-05 Cross-Tier verifier as the final gate before transition to `shipped`.
 
 This worked example assumes no Cross-Tier regression. If VCH-05 detected a regression in a closure Arc (e.g., A1 in state `shipped` with `depends_on: [A2]`-reverse edge), Arc A2 would remain stuck at `auditing` until the human-gate question (rollback / patch / accept-with-registry) clears.
+
+## VCH-06 — Failure-Mode Mapping
+
+Every verifier in the chain maps to one or more failure-mode classes from the triad `{retry-loop, human-gate, auto-fix-attempt}`. The mapping below is normative — downstream harness implementation (v14 Build Kernel) consumes it directly. Defaults are layered: cheaper-tier first, escalate to next tier on tier-exhaustion. Pure aggregators (Slice / Stage / Arc) have no failure-mode of their own — they propagate child verdicts upward without action.
+
+| Verifier | Default failure-mode ladder | Counter scope (3-strike) | Notes |
+|---|---|---|---|
+| **anti-pattern** (Step sub) | `auto-fix-attempt` → `retry-loop` → `human-gate` | per-`(task_id, anti_pattern_check_id, file_path)` | Harness first runs deterministic formatter pass (`ruff --fix`, `black`, `isort`) for fixable patterns (unused imports, formatting, ordering). Remaining violations re-dispatch agent with failureContext (kb §3.2). After 3 retries on same `(pattern, file)` pair, escalate to human gate. |
+| **stub-detector** (Step sub) | `retry-loop` → `human-gate` | per-`(task_id, stub_check_id)` | Stubs require code-writing; no deterministic auto-fix. Re-dispatch agent with stub-trace evidence (Phase 408 STB-03 call-chain to user surface). 3-strike → human gate. **Known-Stubs registration (STB-04) bypasses** by promoting to KNOWN tier before the retry counter triggers. |
+| **security** (Step sub) | `retry-loop` → `human-gate` | per-`(task_id, security_check_id)` | Re-dispatch agent with mitigation-missing evidence cited `file:line`. 3-strike → human gate. |
+| **goal-backward** (Step sub) | `retry-loop` → `human-gate` | per-`(task_id, goal_backward_check_id)` | Re-dispatch agent with missing-must-have evidence (kb §4.3 recoverable failure pattern). 3-strike → human gate. |
+| **Step composite** | inherits from sub-verifier strikes; composite `failed` triggers a *single* failureContext bundle (union of sub-verifier evidence) for the agent's retry | per-`(task_id, check_id)` per v41 PRF-06 (no scope conflation between sub-verifiers) | The composite never has its own counter; it aggregates sub-verifier counters server-side. |
+| **Slice rollup** | none — pure aggregator | N/A | Child Step's failure mode owns retry. Slice rollup re-runs only on child verdict-flip events (event-driven re-aggregation per VCH-05 subsection). |
+| **Stage rollup** | none — pure aggregator | N/A | Child Slice's failure mode owns retry (which itself delegates to Step). |
+| **Arc rollup** | none — pure aggregator | N/A | Child Stage's failure mode owns retry. |
+| **Cross-Tier** | `human-gate` immediately | N/A — no retry counter | Regression means a previously-shipped Arc is now broken. Cannot auto-fix (harness pass can't choose remedy) or retry-loop (no agent action against current Arc fixes it). Routes to opencode `question` (HRN-06): rollback / patch-via-new-Slice / accept-with-registry-entry (Phase 410 THM-04 accepted-risks registry). **Fail-closed**: just-shipped Arc cannot transition to `shipped` until human gate clears. |
+
+### Failure-Mode Ladder (3-Strike)
+
+Retry-loop tier follows the v41 PRF-06 3-strike counter discipline:
+
+1. **Counter scope**: per-`(task_id, check_id)` — NO scope conflation across sub-verifiers. Each sub-verifier maintains its own counter; the composite Step verdict aggregates but does not inflate counters.
+2. **Strike events**: each failed retry emits a `state.verifier.step.<sub>.failed` event with the strike count in the payload (`strike_n: int`, range `1..3`).
+3. **Escalation trigger**: on strike 3, the failure-mode ladder advances to `human-gate`. The harness MUST NOT issue a 4th retry — escalation is mandatory and enforced by the daemon's projector handler.
+4. **Counter reset**: counter resets to 0 when the sub-verifier returns `passed` OR when the parent Step's PLAN is amended (re-planning resets the slate; matches kb §9 stuck-detector cooldown semantics).
+5. **No serial-cycle penalty**: because all 4 sub-verifiers fan out in parallel (VCH-01 short-circuit policy), a single agent retry that fixes 3 sub-verifier failures does NOT count as 3 strikes — it counts as 1 strike per sub-verifier counter, evaluated independently.
+
+### Auto-Fix-Attempt — Definition and Scope
+
+**Definition (state-specific innovation over the prior project):** `auto-fix-attempt` is a **deterministic harness pass** — pure tooling run by the harness against the failing file(s) BEFORE escalating to `retry-loop`. It is **NOT an agent retry** (that is `retry-loop`). It is **NOT an LLM-mediated fix** (that violates the pure-machine stance pre-empted in VCH-01 overview).
+
+**In-scope tools (v42)**:
+- `ruff --fix` (autofixable lint rules: unused imports, unused variables, sorted imports, simple format issues)
+- `black` (formatting)
+- `isort` (import ordering)
+
+**Scope restriction**: auto-fix-attempt applies ONLY to the **anti-pattern sub-verifier** in v42. Other sub-verifiers (goal-backward, security, stub-detector) require semantic code changes that no deterministic tool can safely apply.
+
+**Audit event**: each auto-fix-attempt run emits `state.verifier.autofix_applied` (success — pattern resolved) or `state.verifier.autofix_failed` (attempt made; pattern remains) with payload `tool: Literal['ruff', 'black', 'isort']` + `pattern_id` + `file_path` + `before_hash` / `after_hash`.
+
+**Extension path**: future verifiers with mechanically-fixable findings (e.g., a doc-generator anti-pattern catching missing-docstring, or a migration-script generator) may register their own deterministic tool. Registration goes through Phase 411 EVD-01 verifier-output-schema extension hook (not a Phase 407 concern; declared here as an extension point).
+
+**Why this matters**: the prior project's `verification-gate` conflates 'retry with failureContext' and 'deterministic fix' as a single tier (kb §3.2). State splits them: deterministic fix is cheapest (no agent context burn, no LLM invocation, byte-deterministic) and runs first; agent retry is the second tier. The split is a state innovation.
+
+### Human-Gate Routing
+
+Human-gate is the terminal tier of every ladder. Per v41 HRN-06, human-gate dispatches **exclusively through the opencode `question` MCP tool** — never an inline prompt, never a free-text request, never a CLI stdin read.
+
+**`question` payload fields** (consumed verbatim by the human-gate dispatcher):
+- `prompt: str` — the question for the human (server-templated; agent has zero authorship)
+- `options: list[str]` — finite enumerated choices (e.g., for Cross-Tier regression: `['rollback', 'patch-via-new-slice', 'accept-with-registry-entry']`)
+- `default: str | None` — fail-closed when human declines to answer (typically `None`; ambiguous defaults are an anti-pattern)
+- `context: dict[str, Any]` — citations + evidence bundle (per Phase 409 ADV-03 grammar)
+
+**Fail-closed semantics**: while a human-gate is open, the parent FSM (Step / Stage / Arc) state CANNOT advance. The daemon's middleware blocks state-transition events whose `from_state` requires a verifier verdict in `{passed, warning}` if the verdict is `failed` and the human-gate has not emitted its resolution event.
+
+**Resolution events** per ladder class:
+- retry-loop human-gate exit → `state.verifier.<sub>.passed` (human accepts evidence) OR `state.verifier.<sub>.failed` (human rejects and re-dispatches) OR Step abandonment
+- Cross-Tier human-gate exit → one of `state.arc.rollback_requested` / `state.slice.patch_requested` / `state.verifier.crosstier.passed` (with accepted-risks registry entry created)
+
+**No bypass**: agents cannot self-resolve a human-gate. Attempting to write a resolution event from an agent context is rejected by the `tool.execute.before` write-block (extends v41 SRP-04 allowlist; sibling rule to the VERIFY.md write-block declared in Plan 01).
+
+### Cross-Reference Map
+
+The failure-mode mapping above cites several v41/v40 decisions and downstream phases. The following table makes each linkage explicit so the downstream harness implementation (v14 Build Kernel) and event-projector handler (v15 Build Core Commands) can locate the contract for each cell of the mapping table.
+
+| Concept | Defined in | Consumed by VCH-06 cell |
+|---|---|---|
+| 3-strike per-`(task_id, check_id)` counter scope | v41 PRF-06 (Phase 404 CONTEXT.md) | Step composite `Counter scope` column; Failure-Mode Ladder (3-Strike) subsection rule 1 |
+| Human-gate-only-via-opencode-`question` rule | v41 HRN-06 (Phase 406 CONTEXT.md) | Cross-Tier `Notes` column; Human-Gate Routing subsection (entire) |
+| Pure-machine stance (no LLM-as-judge) | v41 PRF-04 (Phase 404 CONTEXT.md) | Auto-Fix-Attempt subsection ("NOT an LLM-mediated fix"); VCH-01 Overview (already cited) |
+| Write-block on VERIFY.md authorship | v41 SRP-04 (Phase 405 CONTEXT.md) | Human-Gate Routing subsection ("No bypass" — resolution-event write-block) |
+| Stub-detector call-chain trace-through | Phase 408 STB-03 | stub-detector row `Notes` |
+| Known-Stubs registration bypass | Phase 408 STB-04 | stub-detector row `Notes` |
+| Accepted-risks registry | Phase 410 THM-04 | Cross-Tier row `Notes`; Cross-Tier human-gate exit resolution event |
+| failureContext re-injection pattern | kb §3.2 / §4.1 (verification-gate-pipeline) | anti-pattern row `Notes`; Auto-Fix-Attempt "Why this matters" comparison |
+| Stuck-detector cooldown / counter reset semantics | kb §9 (workflow-engine) | Failure-Mode Ladder (3-Strike) subsection rule 4 |
+| Citation grammar (`file:line` / `commit:hash` / `event:id` / `test:id`) | Phase 409 ADV-03 | `question` payload `context` field |
+
+### Worked Example: Anti-Pattern Ladder Walkthrough
+
+To illustrate the 3-tier ladder for the anti-pattern sub-verifier specifically (the only sub-verifier carrying all three tiers):
+
+1. Step S7 modifies `src/state_core/auth/oauth.py` with unused imports + 2 unsorted-import violations + 1 unbounded-loop anti-pattern (APS-01 BLOCKER pattern).
+2. **Tier 1 — auto-fix-attempt**: harness runs `ruff --fix` + `isort` against the file. Events emitted: `state.verifier.autofix_applied` (3 times — once per fixable pattern). The unused imports + unsorted-import violations are resolved deterministically. The unbounded-loop anti-pattern remains (not in any deterministic-tool catalog).
+3. **Tier 2 — retry-loop (strike 1)**: anti-pattern sub-verifier re-runs; finds the unbounded-loop BLOCKER. Event: `state.verifier.step.anti_pattern.failed` with `strike_n: 1`. Daemon re-dispatches the agent with failureContext bundle. Agent attempts a fix but introduces a new APS-02 architecture anti-pattern (cross-mode import). Re-runs → strike 2.
+4. **Tier 2 continues — retry-loop (strike 2 → strike 3)**: agent retries again. The cross-mode import is removed, but the unbounded-loop pattern reappears in a refactored form. Strike 3 fires.
+5. **Tier 3 — human-gate**: counter has reached 3. Daemon's projector handler MUST NOT issue a 4th retry — escalation is enforced. Dispatcher routes through opencode `question` MCP tool (HRN-06) with prompt `"Anti-pattern sub-verifier blocked Step S7 after 3 retries on (APS-01 unbounded-loop, src/state_core/auth/oauth.py). Options:"` and `options: ['accept-with-registry-entry', 'abandon-step', 'human-rewrites-file']`. FSM blocks at `verifying` state until resolution event arrives.
+
+Worked example illustrates the cheapest-tier-first discipline: the deterministic pass resolves 3 of 4 findings at zero agent-context cost; agent retries handle the semantic fix attempts; human-gate is reserved for the genuinely-stuck case (3 failed semantic retries on the same pattern).
+
+### Worked Example: Cross-Tier Human-Gate (Immediate)
+
+To contrast with the laddered anti-pattern case, the Cross-Tier verifier has no retry tier — human-gate fires immediately on `regression_detected`:
+
+1. Arc A2 passes VCH-04 Arc rollup (`state.verifier.arc.passed`). VCH-05 Cross-Tier verifier fires as the final gate of `/state-ship-arc`.
+2. Cross-Tier closure walk finds Arc A1 (state `shipped`, `depends_on: [A2]`-reverse-edge present) has a verdict-flip: its stored Step S3.2 goal-backward verdict was `passed` at ship; re-run against current HEAD returns `failed` (one of A1's must_haves is now unsatisfied because A2 renamed a public symbol A1 relied on).
+3. Event: `state.verifier.crosstier.regression_detected` with per-closure-Arc evidence (verdict-flip Citation + diff Citations to current HEAD).
+4. Dispatcher routes immediately through opencode `question` (HRN-06) with options `['rollback', 'patch-via-new-slice', 'accept-with-registry-entry']`. NO retry attempts are made — the harness has no way to choose between rollback and patch automatically.
+5. FSM is fail-closed: Arc A2 cannot transition to `shipped` until one of three resolution events fires (`state.arc.rollback_requested` / `state.slice.patch_requested` / `state.verifier.crosstier.passed` with registry-entry Citation in payload).
+
+The contrast highlights why Cross-Tier skips the retry-loop tier entirely: regressions in already-shipped Arcs are caused by the *current* Arc's commits, and no agent action against the current Arc fixes a regression in a prior Arc without explicit human direction (rollback vs. patch-via-new-Slice vs. accept).
+
+### Invariants (VCH-06)
+
+| ID | Invariant | Enforced where |
+|---|---|---|
+| INV-11 | The 3-strike counter is scoped per-`(task_id, check_id)` with no cross-sub-verifier conflation (v41 PRF-06). | Failure-Mode Ladder (3-Strike) subsection rule 1; daemon projector handler. |
+| INV-12 | The harness MUST NOT issue a 4th retry after strike 3; escalation to human-gate is mandatory. | Failure-Mode Ladder (3-Strike) subsection rule 3; daemon projector handler. |
+| INV-13 | Auto-fix-attempt is deterministic-tooling-only (`ruff --fix`, `black`, `isort` in v42); NOT an agent retry and NOT an LLM-mediated fix. | Auto-Fix-Attempt subsection; v42 catalog locked at this phase. |
+| INV-14 | Auto-fix-attempt applies ONLY to the anti-pattern sub-verifier in v42; extensions are declared through Phase 411 EVD-01. | Auto-Fix-Attempt subsection "Scope restriction". |
+| INV-15 | Human-gate routing flows exclusively through the opencode `question` MCP tool (v41 HRN-06); inline prompts / free-text requests / CLI stdin reads are not permitted. | Human-Gate Routing subsection; `tool.execute.before` write-block on resolution events. |
+| INV-16 | Rollup tiers (Slice / Stage / Arc) have no failure-mode of their own; they propagate child verdicts without retry, escalation, or auto-fix. | VCH-06 mapping table rows 6–8; VCH-02/03/04 already-shipped `failure_mode` rows. |
+| INV-17 | Cross-Tier routes to human-gate immediately on `regression_detected`; the just-shipped Arc cannot transition to `shipped` until the gate clears (fail-closed). | VCH-06 mapping table Cross-Tier row; VCH-05 `failure_mode` row. |
